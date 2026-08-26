@@ -1179,20 +1179,28 @@ function PasswordResetPage({ theme, onToggleTheme }) {
       </section>
       <section className="login-form-area">
         <div className="login-form-top"><span>Módulo exclusivo</span><button className="icon-button" type="button" aria-label={theme === "light" ? "Activar tema oscuro" : "Activar tema claro"} onClick={onToggleTheme}><Icon name={theme === "light" ? "moon" : "sun"} size={19} /></button></div>
-        <form className="login-card" onSubmit={submit}>
-          <p className="eyebrow">Restablecer</p>
-          <h2>Nueva contraseña</h2>
-          <p className="login-copy">Ingresa el correo y define tu nueva clave. El enlace es válido por 1 hora y de un solo uso.</p>
-          <label className="login-field"><span>Correo institucional</span><input autoComplete="email" required type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="nombre@empresa.com" /></label>
-          <input type="hidden" value={uid} />
-          <input type="hidden" value={token} />
-          <label className="login-field"><span>Nueva contraseña</span><input required minLength="8" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Mínimo 8 caracteres" /></label>
-          <label className="login-field"><span>Confirmar contraseña</span><input required minLength="8" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Repite la clave" /></label>
-          {error && <p className="login-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}
-          {success && <p className="form-success" role="status"><Icon name="checkCircle" size={16} /> {success}</p>}
-          <button className="primary-button login-submit" disabled={submitting} type="submit">{submitting ? "Guardando..." : "Restablecer clave"}</button>
-          <a className="text-button" href="/" style={{ display: "inline-flex", marginTop: "12px", justifyContent: "center", width: "100%", textDecoration: "none" }}>Volver al inicio de sesión</a>
-        </form>
+        {success ? (
+          <div className="login-card" style={{ textAlign: "center", padding: "32px 24px" }}>
+            <span style={{ display: "inline-grid", placeItems: "center", width: "56px", height: "56px", borderRadius: "50%", background: "var(--accent-soft)", color: "var(--accent)", marginBottom: "16px" }}><Icon name="checkCircle" size={28} /></span>
+            <h2>Clave restablecida con éxito</h2>
+            <p className="login-copy" style={{ marginTop: "8px" }}>Tu contraseña fue actualizada correctamente. Ya puedes ingresar con la nueva clave. Este enlace ya no es válido.</p>
+            <a href="/" className="primary-button login-submit" style={{ marginTop: "20px", textDecoration: "none" }}>Ir al inicio de sesión</a>
+          </div>
+        ) : (
+          <form className="login-card" onSubmit={submit}>
+            <p className="eyebrow">Restablecer</p>
+            <h2>Nueva contraseña</h2>
+            <p className="login-copy">Ingresa el correo y define tu nueva clave. El enlace es válido por 1 hora y de un solo uso.</p>
+            <label className="login-field"><span>Correo institucional</span><input autoComplete="email" required type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="nombre@empresa.com" /></label>
+            <input type="hidden" value={uid} />
+            <input type="hidden" value={token} />
+            <label className="login-field"><span>Nueva contraseña</span><input required minLength="8" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Mínimo 8 caracteres" /></label>
+            <label className="login-field"><span>Confirmar contraseña</span><input required minLength="8" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Repite la clave" /></label>
+            {error && <p className="login-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}
+            <button className="primary-button login-submit" disabled={submitting} type="submit">{submitting ? "Guardando..." : "Restablecer clave"}</button>
+            <a className="text-button" href="/" style={{ display: "inline-flex", marginTop: "12px", justifyContent: "center", width: "100%", textDecoration: "none" }}>Volver al inicio de sesión</a>
+          </form>
+        )}
       </section>
     </main>
   );
