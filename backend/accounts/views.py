@@ -89,10 +89,10 @@ class PasswordResetRequestView(APIView):
         uid = urlsafe_base64_encode(force_bytes(user.pk))
         token = password_reset_token_generator.make_token(user)
         reset_link = f"{settings.FRONTEND_URL.rstrip('/')}/reset-password?uid={uid}&token={token}"
-        subject = "Sestel - Restablece tu contraseña"
+        subject = "Soporte Despacho Tigo - Restablece tu contraseña"
         message = (
             f"Hola {user.display_name},\n\n"
-            f"Recibimos una solicitud para restablecer tu contraseña en Sestel Centro de Control.\n"
+            f"Recibimos una solicitud para restablecer tu contraseña en Soporte Despacho Tigo - Centro de Control.\n"
             f"Usa este enlace para definir una nueva clave (válido por 1 hora):\n\n"
             f"{reset_link}\n\n"
             f"Si no solicitaste este cambio, puedes ignorar este correo.\n"

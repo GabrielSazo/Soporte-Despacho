@@ -112,7 +112,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .app-shell[data-brand="tigo"] input:focus-visible,
 .app-shell[data-brand="tigo"] select:focus-visible,
 .app-shell[data-brand="tigo"] textarea:focus-visible {
-  outline-color: rgba(0, 30, 180, 0.35);
+  outline: 3px solid rgba(0, 30, 180, 0.35);
 }
 
 .app-shell[data-brand="tigo"] .brand-mark {
@@ -124,6 +124,14 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .app-shell[data-brand="tigo"] .context-dot {
   background: #667eea;
   box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.2);
+}
+.app-shell[data-brand="tigo"] .nav-item.active {
+  background: #1a2cab;
+  color: #ffffff;
+}
+.app-shell[data-brand="tigo"] .nav-item.active b {
+  background: #667eea;
+  color: #ffffff;
 }
 .app-shell[data-brand="tigo"] .login-intro {
   background: #0a1140;
