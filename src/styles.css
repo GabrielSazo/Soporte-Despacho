@@ -125,6 +125,47 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   background: #667eea;
   box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.2);
 }
+.app-shell[data-brand="tigo"] .login-intro {
+  background: #0a1140;
+  color: #e8eaff;
+}
+.app-shell[data-brand="tigo"] .login-intro::before {
+  border-color: rgba(102, 126, 234, 0.18);
+  box-shadow: 0 0 0 56px rgba(102, 126, 234, 0.06), 0 0 0 112px rgba(102, 126, 234, 0.03);
+}
+.app-shell[data-brand="tigo"] .login-intro::after {
+  background: radial-gradient(circle, rgba(102, 126, 234, 0.22), transparent 68%);
+}
+.app-shell[data-brand="tigo"] .login-brand small {
+  color: #a8b2d6;
+}
+.app-shell[data-brand="tigo"] .login-intro .eyebrow {
+  color: #a8b2ff;
+}
+.app-shell[data-brand="tigo"] .login-intro-content > p:not(.eyebrow) {
+  color: #b8c1e8;
+}
+.app-shell[data-brand="tigo"] .login-flow {
+  border-color: rgba(180, 190, 255, 0.18);
+  background: rgba(102, 126, 234, 0.12);
+  color: #d6dcff;
+}
+.app-shell[data-brand="tigo"] .login-flow svg {
+  color: #667eea;
+}
+.app-shell[data-brand="tigo"] .login-intro-footer {
+  color: #8d97b5;
+}
+.app-shell[data-brand="tigo"] .login-intro-footer b {
+  color: #ffffff;
+}
+.app-shell[data-brand="tigo"] button:focus-visible,
+.app-shell[data-brand="tigo"] a:focus-visible,
+.app-shell[data-brand="tigo"] input:focus-visible,
+.app-shell[data-brand="tigo"] select:focus-visible,
+.app-shell[data-brand="tigo"] textarea:focus-visible {
+  outline: 3px solid rgba(0, 30, 180, 0.35);
+}
 
 .sidebar {
   position: fixed;

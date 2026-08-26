@@ -430,7 +430,7 @@ function App() {
         <div className="sidebar-top">
           <a className="brand" href="#inicio" onClick={() => changeView("Resumen")}>
             <span className="brand-mark" aria-hidden="true"><span /><span /><span /></span>
-            <span><strong>Sestel</strong><small>Centro de control</small></span>
+            <span><strong>Soporte Despacho</strong><small>Tigo · Centro de control</small></span>
           </a>
           <button className="icon-button sidebar-close" type="button" aria-label="Cerrar menú" onClick={() => setSidebarOpen(false)}><Icon name="close" /></button>
         </div>
@@ -449,7 +449,7 @@ function App() {
       <main className="workspace">
         <header className="topbar">
           <button className="icon-button menu-toggle" type="button" aria-label="Abrir menú" onClick={() => setSidebarOpen(true)}><Icon name="menu" /></button>
-          <div className="mobile-brand">Sestel</div>
+          <div className="mobile-brand">Soporte Despacho</div>
           <label className="global-search"><Icon name="search" size={19} /><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} onFocus={() => setActiveView("Tickets")} placeholder="Buscar ticket, técnico o equipo..." aria-label="Buscar tickets" /><kbd>Ctrl K</kbd></label>
           <div className="topbar-actions">
             <div className="brand-switch" role="group" aria-label="Cambiar paleta de marca">
@@ -1118,7 +1118,7 @@ function LoginScreen({ brand, onLogin, onToggleBrand, onToggleTheme, theme }) {
       <section className="login-intro" aria-label="Información del sistema">
         <a className="brand login-brand" href="#inicio">
           <span className="brand-mark" aria-hidden="true"><span /><span /><span /></span>
-          <span><strong>Sestel</strong><small>Centro de control</small></span>
+          <span><strong>Soporte Despacho</strong><small>Tigo · Centro de control</small></span>
         </a>
         <div className="login-intro-content">
           <p className="eyebrow">Soporte técnico conectado</p>
@@ -1142,7 +1142,7 @@ function LoginScreen({ brand, onLogin, onToggleBrand, onToggleTheme, theme }) {
           <div className="login-forgot"><button type="button" className="text-button" onClick={openReset}>¿Olvidaste tu contraseña?</button></div>
           {error && <p className="login-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}
           <button className="primary-button login-submit" disabled={submitting} type="submit">{submitting ? "Verificando acceso..." : "Ingresar al centro de control"} <Icon name="arrowRight" size={18} /></button>
-          <p className="demo-mode"><Icon name="shield" size={16} /> Acceso validado por la API de Sestel.</p>
+          <p className="demo-mode"><Icon name="shield" size={16} /> Acceso validado por la API de Soporte Despacho Tigo.</p>
           <div className="login-help"><strong>Entorno local</strong><span>Ejecuta primero Django y carga los datos con <code>seed_demo</code>.</span></div>
         </form>
       </section>
@@ -1186,7 +1186,7 @@ function PasswordResetPage({ brand, theme, onToggleBrand, onToggleTheme }) {
   return (
     <main className="login-screen app-shell" data-brand={brand} data-theme={theme}>
       <section className="login-intro" aria-label="Información del sistema">
-        <a className="brand login-brand" href="/"><span className="brand-mark" aria-hidden="true"><span /><span /><span /></span><span><strong>Sestel</strong><small>Centro de control</small></span></a>
+        <a className="brand login-brand" href="/"><span className="brand-mark" aria-hidden="true"><span /><span /><span /></span><span><strong>Soporte Despacho</strong><small>Tigo · Centro de control</small></span></a>
         <div className="login-intro-content">
           <p className="eyebrow">Acceso seguro</p>
           <h1>Restablece tu clave.</h1>
