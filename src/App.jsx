@@ -403,6 +403,10 @@ function App() {
   const canCreateTickets = session && ["DESPACHADOR", "ADMIN"].includes(session.role);
   const visibleNavigation = session?.role === "ADMIN" ? [...navigation, { label: "Usuarios", icon: "users" }] : navigation;
 
+  if (typeof window !== "undefined" && window.location.pathname === "/reset-password") {
+    return <PasswordResetPage theme={theme} onToggleTheme={() => setTheme((currentTheme) => (currentTheme === "light" ? "dark" : "light"))} />;
+  }
+
   if (!session) {
     return <LoginScreen onLogin={startSession} onToggleTheme={() => setTheme((currentTheme) => (currentTheme === "light" ? "dark" : "light"))} theme={theme} />;
   }
@@ -1047,27 +1051,10 @@ function LoginScreen({ onLogin, onToggleTheme, theme }) {
   const [submitting, setSubmitting] = useState(false);
   const [showReset, setShowReset] = useState(false);
   const [resetEmail, setResetEmail] = useState("");
-  const [resetUid, setResetUid] = useState("");
-  const [resetToken, setResetToken] = useState("");
-  const [resetPasswordValue, setResetPasswordValue] = useState("");
-  const [resetConfirm, setResetConfirm] = useState("");
   const [resetError, setResetError] = useState("");
   const [resetSuccess, setResetSuccess] = useState("");
   const [resetting, setResetting] = useState(false);
-  const [resetStep, setResetStep] = useState("request");
   const [requestInfo, setRequestInfo] = useState("");
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const uid = params.get("uid");
-    const token = params.get("token");
-    if (uid && token) {
-      setResetUid(uid);
-      setResetToken(token);
-      setResetStep("confirm");
-      setShowReset(true);
-    }
-  }, []);
 
   async function submit(event) {
     event.preventDefault();
@@ -1090,16 +1077,10 @@ function LoginScreen({ onLogin, onToggleTheme, theme }) {
     setResetting(true);
     try {
       const res = await requestPasswordReset(resetEmail.trim().toLowerCase());
-      setResetSuccess(res.detail || "Se envió un correo con instrucciones. Revisa tu bandeja de entrada.");
-      // En modo DEBUG el backend devuelve token para facilitar pruebas sin salir del navegador.
-      if (res.debug_token && res.debug_uid) {
-        setResetUid(res.debug_uid);
-        setResetToken(res.debug_token);
-        setRequestInfo(`Modo desarrollo: token ${res.debug_token} · uid ${res.debug_uid}. En producción revisa tu correo.`);
-      } else {
-        setRequestInfo("Si el correo existe, recibirás un enlace válido por 1 hora.");
+      setResetSuccess(res.detail || "Se envió un correo con el enlace para restablecer tu contraseña. Revisa tu bandeja de entrada (válido 1 hora).");
+      if (res.debug_link) {
+        setRequestInfo(`Modo desarrollo: ${res.debug_link} (también en logs del contenedor api)`);
       }
-      setResetStep("confirm");
     } catch (e) {
       setResetError(e.message || "No fue posible enviar el correo.");
     } finally {
@@ -1107,36 +1088,11 @@ function LoginScreen({ onLogin, onToggleTheme, theme }) {
     }
   }
 
-  async function submitResetConfirm(event) {
-    event.preventDefault();
-    setResetError("");
-    setResetSuccess("");
-    if (!resetEmail.trim() || !resetUid.trim() || !resetToken.trim()) { setResetError("Completa correo, uid y token recibidos por correo."); return; }
-    if (resetPasswordValue.length < 8) { setResetError("La nueva contraseña debe tener al menos 8 caracteres."); return; }
-    if (resetPasswordValue !== resetConfirm) { setResetError("Las contraseñas no coinciden."); return; }
-    setResetting(true);
-    try {
-      await confirmPasswordReset({ email: resetEmail.trim().toLowerCase(), uid: resetUid.trim(), token: resetToken.trim(), newPassword: resetPasswordValue });
-      setResetSuccess("Contraseña restablecida correctamente. Ya puedes iniciar sesión con la nueva clave.");
-      setResetPasswordValue("");
-      setResetConfirm("");
-    } catch (e) {
-      setResetError(e.message || "No fue posible confirmar el restablecimiento.");
-    } finally {
-      setResetting(false);
-    }
-  }
-
   function openReset() {
     setResetEmail(email);
-    setResetUid("");
-    setResetToken("");
-    setResetPasswordValue("");
-    setResetConfirm("");
     setResetError("");
     setResetSuccess("");
     setRequestInfo("");
-    setResetStep("request");
     setShowReset(true);
   }
 
@@ -1173,7 +1129,71 @@ function LoginScreen({ onLogin, onToggleTheme, theme }) {
           <div className="login-help"><strong>Entorno local</strong><span>Ejecuta primero Django y carga los datos con <code>seed_demo</code>.</span></div>
         </form>
       </section>
-      {showReset && <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowReset(false)}><section className="ticket-modal user-modal" role="dialog" aria-modal="true" aria-labelledby="reset-title" onMouseDown={(e) => e.stopPropagation()}><header className="modal-header"><div><p className="eyebrow">Recuperar acceso</p><h2 id="reset-title">Restablecer contraseña</h2><p>{resetStep === "request" ? "Te enviaremos un correo con un enlace seguro (válido 1 hora)." : "Ingresa el token recibido por correo y tu nueva clave."}</p></div><button className="icon-button" type="button" aria-label="Cerrar" onClick={() => setShowReset(false)}><Icon name="close" /></button></header>{resetStep === "request" ? <form onSubmit={submitResetRequest}><div className="form-grid user-form-grid"><label className="field field-wide"><span>Correo institucional <b>*</b></span><input autoFocus required type="email" value={resetEmail} onChange={(e) => setResetEmail(e.target.value)} placeholder="nombre@empresa.com" /></label></div>{resetError && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> {resetError}</p>}{resetSuccess && <p className="form-success" role="status"><Icon name="checkCircle" size={16} /> {resetSuccess}</p>}{requestInfo && <p className="form-info" role="status"><Icon name="shield" size={16} /> {requestInfo}</p>}<footer className="modal-actions"><button className="secondary-button" type="button" onClick={() => setShowReset(false)}>Cerrar</button><button className="primary-button" disabled={resetting} type="submit"><Icon name="shield" size={18} /> {resetting ? "Enviando..." : "Enviar correo"}</button></footer></form> : <form onSubmit={submitResetConfirm}><div className="form-grid user-form-grid"><label className="field field-wide"><span>Correo institucional <b>*</b></span><input required type="email" value={resetEmail} onChange={(e) => setResetEmail(e.target.value)} placeholder="nombre@empresa.com" /></label><label className="field"><span>UID <b>*</b></span><input required value={resetUid} onChange={(e) => setResetUid(e.target.value)} placeholder="Uid del correo" /></label><label className="field"><span>Token <b>*</b></span><input required value={resetToken} onChange={(e) => setResetToken(e.target.value)} placeholder="Token del correo" /></label><label className="field"><span>Nueva contraseña <b>*</b></span><input required minLength="8" type="password" value={resetPasswordValue} onChange={(e) => setResetPasswordValue(e.target.value)} placeholder="Mínimo 8 caracteres" /></label><label className="field"><span>Confirmar contraseña <b>*</b></span><input required minLength="8" type="password" value={resetConfirm} onChange={(e) => setResetConfirm(e.target.value)} placeholder="Repite la clave" /></label></div>{resetError && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> {resetError}</p>}{resetSuccess && <p className="form-success" role="status"><Icon name="checkCircle" size={16} /> {resetSuccess}</p>}{requestInfo && <p className="form-info" role="status"><Icon name="shield" size={16} /> {requestInfo}</p>}<footer className="modal-actions"><button className="secondary-button" type="button" onClick={() => setResetStep("request")}>Volver</button><button className="primary-button" disabled={resetting} type="submit"><Icon name="check" size={18} /> {resetting ? "Validando..." : "Restablecer clave"}</button></footer></form>}</section></div>}
+      {showReset && <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowReset(false)}><section className="ticket-modal user-modal" role="dialog" aria-modal="true" aria-labelledby="reset-title" onMouseDown={(e) => e.stopPropagation()}><header className="modal-header"><div><p className="eyebrow">Recuperar acceso</p><h2 id="reset-title">Restablecer contraseña</h2><p>Te enviaremos un correo con un enlace seguro (válido 1 hora). Desde el correo accederás al módulo exclusivo para definir tu nueva clave.</p></div><button className="icon-button" type="button" aria-label="Cerrar" onClick={() => setShowReset(false)}><Icon name="close" /></button></header><form onSubmit={submitResetRequest}><div className="form-grid user-form-grid"><label className="field field-wide"><span>Correo institucional <b>*</b></span><input autoFocus required type="email" value={resetEmail} onChange={(e) => setResetEmail(e.target.value)} placeholder="nombre@empresa.com" /></label></div>{resetError && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> {resetError}</p>}{resetSuccess && <p className="form-success" role="status"><Icon name="checkCircle" size={16} /> {resetSuccess}</p>}{requestInfo && <p className="form-info" role="status"><Icon name="shield" size={16} /> {requestInfo}</p>}<footer className="modal-actions"><button className="secondary-button" type="button" onClick={() => setShowReset(false)}>Cerrar</button><button className="primary-button" disabled={resetting} type="submit"><Icon name="shield" size={18} /> {resetting ? "Enviando..." : "Enviar correo"}</button></footer></form></section></div>}
+    </main>
+  );
+}
+
+function PasswordResetPage({ theme, onToggleTheme }) {
+  const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
+  const initialUid = params.get("uid") || "";
+  const initialToken = params.get("token") || "";
+  const [email, setEmail] = useState("");
+  const [uid, setUid] = useState(initialUid);
+  const [token, setToken] = useState(initialToken);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const hasLink = Boolean(initialUid && initialToken);
+
+  async function submit(e) {
+    e.preventDefault();
+    setError("");
+    setSuccess("");
+    if (!email.trim() || !uid.trim() || !token.trim()) { setError("El enlace debe contener uid y token. Solicita un nuevo correo si es necesario."); return; }
+    if (newPassword.length < 8) { setError("La nueva contraseña debe tener al menos 8 caracteres."); return; }
+    if (newPassword !== confirm) { setError("Las contraseñas no coinciden."); return; }
+    setSubmitting(true);
+    try {
+      await confirmPasswordReset({ email: email.trim().toLowerCase(), uid: uid.trim(), token: token.trim(), newPassword });
+      setSuccess("Clave restablecida correctamente. Ya puedes iniciar sesión.");
+    } catch (err) {
+      setError(err.message || "No fue posible restablecer la clave.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <main className="login-screen app-shell" data-theme={theme}>
+      <section className="login-intro" aria-label="Información del sistema">
+        <a className="brand login-brand" href="/"><span className="brand-mark" aria-hidden="true"><span /><span /><span /></span><span><strong>Sestel</strong><small>Centro de control</small></span></a>
+        <div className="login-intro-content">
+          <p className="eyebrow">Acceso seguro</p>
+          <h1>Restablece tu clave.</h1>
+          <p>Este módulo solo permite definir una nueva contraseña mediante el enlace enviado a tu correo. No expone otras acciones del sistema.</p>
+          {!hasLink && <p className="form-info"><Icon name="alert" size={16} /> Abre el enlace recibido por correo para autocompletar el token. Si no tienes el enlace, vuelve al login y solicita uno nuevo.</p>}
+        </div>
+      </section>
+      <section className="login-form-area">
+        <div className="login-form-top"><span>Módulo exclusivo</span><button className="icon-button" type="button" aria-label={theme === "light" ? "Activar tema oscuro" : "Activar tema claro"} onClick={onToggleTheme}><Icon name={theme === "light" ? "moon" : "sun"} size={19} /></button></div>
+        <form className="login-card" onSubmit={submit}>
+          <p className="eyebrow">Restablecer</p>
+          <h2>Nueva contraseña</h2>
+          <p className="login-copy">Ingresa el correo y define tu nueva clave. El enlace es válido por 1 hora y de un solo uso.</p>
+          <label className="login-field"><span>Correo institucional</span><input autoComplete="email" required type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="nombre@empresa.com" /></label>
+          <input type="hidden" value={uid} />
+          <input type="hidden" value={token} />
+          <label className="login-field"><span>Nueva contraseña</span><input required minLength="8" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Mínimo 8 caracteres" /></label>
+          <label className="login-field"><span>Confirmar contraseña</span><input required minLength="8" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Repite la clave" /></label>
+          {error && <p className="login-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}
+          {success && <p className="form-success" role="status"><Icon name="checkCircle" size={16} /> {success}</p>}
+          <button className="primary-button login-submit" disabled={submitting} type="submit">{submitting ? "Guardando..." : "Restablecer clave"}</button>
+          <a className="text-button" href="/" style={{ display: "inline-flex", marginTop: "12px", justifyContent: "center", width: "100%", textDecoration: "none" }}>Volver al inicio de sesión</a>
+        </form>
+      </section>
     </main>
   );
 }

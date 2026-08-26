@@ -138,6 +138,12 @@ SIMPLE_JWT = {
 MAX_TICKET_ATTACHMENT_SIZE = 5 * 1024 * 1024
 
 EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
+EMAIL_HOST = os.getenv("EMAIL_HOST", "")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587") or "587")
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = environment_flag("EMAIL_USE_TLS", True)
+EMAIL_USE_SSL = environment_flag("EMAIL_USE_SSL", False)
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "Sestel Centro de Control <noreply@sestel.local>")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://127.0.0.1:5175")
 PASSWORD_RESET_TIMEOUT = int(os.getenv("PASSWORD_RESET_TIMEOUT", "3600"))
