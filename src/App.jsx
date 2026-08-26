@@ -158,6 +158,13 @@ function App() {
   const [activeView, setActiveView] = useState("Resumen");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [theme, setTheme] = useState("light");
+  const [brand, setBrand] = useState(() => {
+    try {
+      return localStorage.getItem("sestel-brand") || "sestel";
+    } catch {
+      return "sestel";
+    }
+  });
   const [session, setSession] = useState(readStoredSession);
   const [tickets, setTickets] = useState([]);
   const [dashboard, setDashboard] = useState(null);
@@ -211,6 +218,12 @@ function App() {
   useEffect(() => {
     if (session?.role === "ADMIN" && activeView === "Usuarios") refreshUsers();
   }, [activeView, session?.role]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("sestel-brand", brand);
+    } catch {}
+  }, [brand]);
 
   function notify(message) {
     setToast(message);
@@ -404,15 +417,15 @@ function App() {
   const visibleNavigation = session?.role === "ADMIN" ? [...navigation, { label: "Usuarios", icon: "users" }] : navigation;
 
   if (typeof window !== "undefined" && window.location.pathname === "/reset-password") {
-    return <PasswordResetPage theme={theme} onToggleTheme={() => setTheme((currentTheme) => (currentTheme === "light" ? "dark" : "light"))} />;
+    return <PasswordResetPage brand={brand} theme={theme} onToggleTheme={() => setTheme((currentTheme) => (currentTheme === "light" ? "dark" : "light"))} onToggleBrand={() => setBrand((b) => (b === "tigo" ? "sestel" : "tigo"))} />;
   }
 
   if (!session) {
-    return <LoginScreen onLogin={startSession} onToggleTheme={() => setTheme((currentTheme) => (currentTheme === "light" ? "dark" : "light"))} theme={theme} />;
+    return <LoginScreen brand={brand} onLogin={startSession} onToggleTheme={() => setTheme((currentTheme) => (currentTheme === "light" ? "dark" : "light"))} onToggleBrand={() => setBrand((b) => (b === "tigo" ? "sestel" : "tigo"))} theme={theme} />;
   }
 
   return (
-    <div className="app-shell" data-theme={theme}>
+    <div className="app-shell" data-brand={brand} data-theme={theme}>
       <aside className={`sidebar ${sidebarOpen ? "is-open" : ""}`} aria-label="Navegación principal">
         <div className="sidebar-top">
           <a className="brand" href="#inicio" onClick={() => changeView("Resumen")}>
@@ -439,6 +452,10 @@ function App() {
           <div className="mobile-brand">Sestel</div>
           <label className="global-search"><Icon name="search" size={19} /><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} onFocus={() => setActiveView("Tickets")} placeholder="Buscar ticket, técnico o equipo..." aria-label="Buscar tickets" /><kbd>Ctrl K</kbd></label>
           <div className="topbar-actions">
+            <div className="brand-switch" role="group" aria-label="Cambiar paleta de marca">
+              <button type="button" className={brand === "sestel" ? "selected" : ""} onClick={() => setBrand("sestel")} title="Paleta Sestel (verde)">Sestel</button>
+              <button type="button" className={brand === "tigo" ? "selected" : ""} onClick={() => setBrand("tigo")} title="Paleta Tigo Guatemala (#001EB4)">Tigo</button>
+            </div>
             <button className="icon-button theme-button" type="button" aria-label={theme === "light" ? "Activar tema oscuro" : "Activar tema claro"} aria-pressed={theme === "dark"} onClick={() => setTheme((currentTheme) => (currentTheme === "light" ? "dark" : "light"))}><Icon name={theme === "light" ? "moon" : "sun"} size={19} /></button>
             <button className="icon-button notification-button" type="button" aria-label="Actualizar datos" onClick={() => refreshWorkspace()}><Icon name="bell" size={20} /><span /></button>
             <div className="topbar-user"><div className={`avatar ${session.avatarClass}`}>{session.initials}</div><div><strong>{session.name}</strong><span>{session.team}</span></div><Icon name="chevronDown" size={15} /></div>
@@ -1044,7 +1061,7 @@ function Toast({ message, onClose }) {
   return <div className="toast" role="status"><span><Icon name="checkCircle" size={19} /></span><p>{message}</p><button type="button" aria-label="Cerrar mensaje" onClick={onClose}><Icon name="close" size={16} /></button></div>;
 }
 
-function LoginScreen({ onLogin, onToggleTheme, theme }) {
+function LoginScreen({ brand, onLogin, onToggleBrand, onToggleTheme, theme }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -1097,7 +1114,7 @@ function LoginScreen({ onLogin, onToggleTheme, theme }) {
   }
 
   return (
-    <main className="login-screen app-shell" data-theme={theme}>
+    <main className="login-screen app-shell" data-brand={brand} data-theme={theme}>
       <section className="login-intro" aria-label="Información del sistema">
         <a className="brand login-brand" href="#inicio">
           <span className="brand-mark" aria-hidden="true"><span /><span /><span /></span>
@@ -1115,7 +1132,7 @@ function LoginScreen({ onLogin, onToggleTheme, theme }) {
       </section>
 
       <section className="login-form-area">
-        <div className="login-form-top"><span>Acceso seguro</span><button className="icon-button" type="button" aria-label={theme === "light" ? "Activar tema oscuro" : "Activar tema claro"} onClick={onToggleTheme}><Icon name={theme === "light" ? "moon" : "sun"} size={19} /></button></div>
+        <div className="login-form-top"><span>Acceso seguro</span><div style={{ display: "flex", gap: "8px", alignItems: "center" }}><div className="brand-switch small" role="group" aria-label="Cambiar paleta"><button type="button" className={brand === "sestel" ? "selected" : ""} onClick={() => onToggleBrand()}>Sestel</button><button type="button" className={brand === "tigo" ? "selected" : ""} onClick={() => onToggleBrand()}>Tigo</button></div><button className="icon-button" type="button" aria-label={theme === "light" ? "Activar tema oscuro" : "Activar tema claro"} onClick={onToggleTheme}><Icon name={theme === "light" ? "moon" : "sun"} size={19} /></button></div></div>
         <form className="login-card" onSubmit={submit}>
           <p className="eyebrow">Bienvenido</p>
           <h2>Inicia sesión</h2>
@@ -1134,7 +1151,7 @@ function LoginScreen({ onLogin, onToggleTheme, theme }) {
   );
 }
 
-function PasswordResetPage({ theme, onToggleTheme }) {
+function PasswordResetPage({ brand, theme, onToggleBrand, onToggleTheme }) {
   const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
   const initialUid = params.get("uid") || "";
   const initialToken = params.get("token") || "";
@@ -1167,7 +1184,7 @@ function PasswordResetPage({ theme, onToggleTheme }) {
   }
 
   return (
-    <main className="login-screen app-shell" data-theme={theme}>
+    <main className="login-screen app-shell" data-brand={brand} data-theme={theme}>
       <section className="login-intro" aria-label="Información del sistema">
         <a className="brand login-brand" href="/"><span className="brand-mark" aria-hidden="true"><span /><span /><span /></span><span><strong>Sestel</strong><small>Centro de control</small></span></a>
         <div className="login-intro-content">
@@ -1178,7 +1195,7 @@ function PasswordResetPage({ theme, onToggleTheme }) {
         </div>
       </section>
       <section className="login-form-area">
-        <div className="login-form-top"><span>Módulo exclusivo</span><button className="icon-button" type="button" aria-label={theme === "light" ? "Activar tema oscuro" : "Activar tema claro"} onClick={onToggleTheme}><Icon name={theme === "light" ? "moon" : "sun"} size={19} /></button></div>
+        <div className="login-form-top"><span>Módulo exclusivo</span><div style={{ display: "flex", gap: "8px", alignItems: "center" }}><div className="brand-switch small" role="group" aria-label="Cambiar paleta"><button type="button" className={brand === "sestel" ? "selected" : ""} onClick={() => onToggleBrand()}>Sestel</button><button type="button" className={brand === "tigo" ? "selected" : ""} onClick={() => onToggleBrand()}>Tigo</button></div><button className="icon-button" type="button" aria-label={theme === "light" ? "Activar tema oscuro" : "Activar tema claro"} onClick={onToggleTheme}><Icon name={theme === "light" ? "moon" : "sun"} size={19} /></button></div></div>
         {success ? (
           <div className="login-card" style={{ textAlign: "center", padding: "32px 24px" }}>
             <span style={{ display: "inline-grid", placeItems: "center", width: "56px", height: "56px", borderRadius: "50%", background: "var(--accent-soft)", color: "var(--accent)", marginBottom: "16px" }}><Icon name="checkCircle" size={28} /></span>
