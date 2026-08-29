@@ -179,7 +179,8 @@ function App() {
   const [teamModal, setTeamModal] = useState(null);
   const [groupModal, setGroupModal] = useState(null);
   const [passwordModal, setPasswordModal] = useState(null);
-  const [query, setQuery] = useState("");
+  const [showProfile, setShowProfile] = useState(false);
+  const [query, setQuery] = useState("Todos");
   const [filter, setFilter] = useState("Todos");
   const [toast, setToast] = useState("");
 
@@ -194,6 +195,7 @@ function App() {
         setTeamModal(null);
         setGroupModal(null);
         setPasswordModal(null);
+        setShowProfile(false);
         setShowNotifications(false);
         setShowUserMenu(false);
       }
@@ -203,11 +205,11 @@ function App() {
   }, []);
 
   useEffect(() => {
-    document.body.style.overflow = sidebarOpen || newTicketOpen || ticketToResolve || ticketDetail || userModal || teamModal || groupModal || passwordModal ? "hidden" : "";
+    document.body.style.overflow = sidebarOpen || newTicketOpen || ticketToResolve || ticketDetail || userModal || teamModal || groupModal || passwordModal || showProfile ? "hidden" : "";
     return () => {
       document.body.style.overflow = "";
     };
-  }, [sidebarOpen, newTicketOpen, ticketToResolve, ticketDetail, userModal, teamModal, groupModal, passwordModal]);
+  }, [sidebarOpen, newTicketOpen, ticketToResolve, ticketDetail, userModal, teamModal, groupModal, passwordModal, showProfile]);
 
   useEffect(() => {
     if (session) refreshWorkspace();
@@ -485,7 +487,7 @@ function App() {
                       <div className="user-dropdown-info"><strong>{session.name}</strong><span>{session.roleLabel}</span><small>{session.email} · {session.team}</small></div>
                     </div>
                     <div className="user-dropdown-menu">
-                      <button type="button" className="user-dropdown-item" role="menuitem" onClick={() => { setShowUserMenu(false); notify(`Sesión: ${session.name} · ${session.group} · ${session.team}`); }}><Icon name="users" size={16} /> Ver perfil</button>
+                      <button type="button" className="user-dropdown-item" role="menuitem" onClick={() => { setShowUserMenu(false); setShowProfile(true); }}><Icon name="users" size={16} /> Ver perfil</button>
                       <button type="button" className="user-dropdown-item danger" role="menuitem" onClick={() => { setShowUserMenu(false); endSession(); }}><Icon name="logout" size={16} /> Cerrar sesión</button>
                     </div>
                   </div>
@@ -513,6 +515,7 @@ function App() {
       {teamModal && <TeamFormModal groups={groups} onClose={() => setTeamModal(null)} onSave={saveTeam} team={teamModal === "new" ? null : teamModal} />}
       {groupModal && <GroupFormModal onClose={() => setGroupModal(null)} onSave={saveGroup} group={groupModal === "new" ? null : groupModal} />}
       {passwordModal && <PasswordResetModal onClose={() => setPasswordModal(null)} onSave={resetUserPassword} user={passwordModal} />}
+      {showProfile && <ProfileModal onClose={() => setShowProfile(false)} tickets={tickets} user={session} />}
       {toast && <Toast message={toast} onClose={() => setToast("")} />}
     </div>
   );
@@ -1251,6 +1254,34 @@ function PasswordResetPage({ brand, theme, onToggleTheme }) {
         )}
       </section>
     </main>
+  );
+}
+
+function ProfileModal({ onClose, tickets, user }) {
+  const created = tickets.filter((t) => t.requester === user.name).length;
+  const assigned = tickets.filter((t) => t.assignee === user.name).length;
+  const active = tickets.filter((t) => (t.requester === user.name || t.assignee === user.name) && t.statusCode !== "CERRADO").length;
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section className="ticket-modal profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-title" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="profile-header">
+          <div className={`avatar ${user.avatarClass}`} style={{ width: "48px", height: "48px", fontSize: "14px" }}>{user.initials}</div>
+          <div><strong id="profile-title">{user.name}</strong><span>{user.roleLabel} · {user.team}</span><small>{user.email} · {user.group}</small></div>
+        </div>
+        <div className="profile-details">
+          <div className="profile-row"><span>Usuario</span><span>{user.username}</span></div>
+          <div className="profile-row"><span>Grupo</span><span>{user.group}</span></div>
+          <div className="profile-row"><span>Equipo</span><span>{user.team}</span></div>
+          <div className="profile-row"><span>Estado</span><span>{user.is_locked ? "Bloqueada" : "Activa"}</span></div>
+        </div>
+        <div className="profile-stats">
+          <div className="profile-stat"><strong>{created}</strong><span>Creados</span></div>
+          <div className="profile-stat"><strong>{assigned}</strong><span>Asignados</span></div>
+          <div className="profile-stat"><strong>{active}</strong><span>Activos</span></div>
+        </div>
+        <footer className="modal-actions" style={{ marginTop: "16px" }}><button className="secondary-button" type="button" onClick={onClose}>Cerrar</button></footer>
+      </section>
+    </div>
   );
 }
 
