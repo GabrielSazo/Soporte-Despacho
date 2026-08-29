@@ -159,6 +159,8 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [theme, setTheme] = useState("light");
   const [brand] = useState("tigo");
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
   const [session, setSession] = useState(readStoredSession);
   const [tickets, setTickets] = useState([]);
   const [dashboard, setDashboard] = useState(null);
@@ -192,6 +194,8 @@ function App() {
         setTeamModal(null);
         setGroupModal(null);
         setPasswordModal(null);
+        setShowNotifications(false);
+        setShowUserMenu(false);
       }
     };
     window.addEventListener("keydown", closeOnEscape);
@@ -405,6 +409,11 @@ function App() {
   });
   const canCreateTickets = session && ["DESPACHADOR", "ADMIN"].includes(session.role);
   const visibleNavigation = session?.role === "ADMIN" ? [...navigation, { label: "Usuarios", icon: "users" }] : navigation;
+  const notifications = [
+    ...tickets.filter((t) => t.slaTone === "danger").slice(0, 3).map((t) => ({ key: `sla-${t.id}`, type: "danger", title: `SLA vencido: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
+    ...validationTickets.slice(0, 3).map((t) => ({ key: `val-${t.id}`, type: "warning", title: `Validación pendiente: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
+    ...tickets.filter((t) => t.priority === "Crítica").slice(0, 2).map((t) => ({ key: `crit-${t.id}`, type: "info", title: `Crítico: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
+  ].slice(0, 5);
 
   if (typeof window !== "undefined" && window.location.pathname === "/reset-password") {
     return <PasswordResetPage brand={brand} theme={theme} onToggleTheme={() => setTheme((currentTheme) => (currentTheme === "light" ? "dark" : "light"))} />;
@@ -442,9 +451,47 @@ function App() {
           <div className="mobile-brand">Soporte Despacho</div>
           <label className="global-search"><Icon name="search" size={19} /><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} onFocus={() => setActiveView("Tickets")} placeholder="Buscar ticket, técnico o equipo..." aria-label="Buscar tickets" /><kbd>Ctrl K</kbd></label>
           <div className="topbar-actions">
-            <button className="icon-button theme-button" type="button" aria-label={theme === "light" ? "Activar tema oscuro" : "Activar tema claro"} aria-pressed={theme === "dark"} onClick={() => setTheme((currentTheme) => (currentTheme === "light" ? "dark" : "light"))}><Icon name={theme === "light" ? "moon" : "sun"} size={19} /></button>
-            <button className="icon-button notification-button" type="button" aria-label="Actualizar datos" onClick={() => refreshWorkspace()}><Icon name="bell" size={20} /><span /></button>
-            <div className="topbar-user"><div className={`avatar ${session.avatarClass}`}>{session.initials}</div><div><strong>{session.name}</strong><span>{session.team}</span></div><Icon name="chevronDown" size={15} /></div>
+            <button className="icon-button theme-button" type="button" aria-label={theme === "light" ? "Activar tema oscuro" : "Activar tema claro"} aria-pressed={theme === "dark"} onClick={() => setTheme((currentTheme) => (currentTheme === "light" ? "dark" : "light"))} title={theme === "light" ? "Cambiar a modo oscuro" : "Cambiar a modo claro"}><Icon name={theme === "light" ? "moon" : "sun"} size={19} /></button>
+            <div className="notification-wrapper">
+              <button className={`icon-button notification-button ${notifications.length ? "has-notifications" : ""}`} type="button" aria-label={`Notificaciones ${notifications.length ? `(${notifications.length} nuevas)` : ""}`} aria-expanded={showNotifications} onClick={() => { setShowNotifications((v) => !v); setShowUserMenu(false); if (!showNotifications) refreshWorkspace(true); }}><Icon name="bell" size={20} />{notifications.length > 0 && <span />}</button>
+              {showNotifications && (
+                <>
+                  <button className="dropdown-overlay" type="button" aria-label="Cerrar notificaciones" onClick={() => setShowNotifications(false)} />
+                  <div className="notification-dropdown" role="region" aria-label="Notificaciones">
+                    <div className="notification-header"><strong>Notificaciones</strong><span>{notifications.length}</span></div>
+                    <div className="notification-list">
+                      {notifications.length ? notifications.map((n) => (
+                        <button key={n.key} type="button" className="notification-item" onClick={() => { setShowNotifications(false); openTicketDetail(n.ticket); }}>
+                          <span className={`notification-icon ${n.type}`}><Icon name={n.type === "danger" ? "alert" : n.type === "warning" ? "clock" : "ticket"} size={16} /></span>
+                          <span className="notification-content"><strong>{n.title}</strong><p>{n.desc}</p><small>{n.time} · {n.ticket.team}</small></span>
+                        </button>
+                      )) : <div className="notification-empty"><Icon name="checkCircle" size={24} /><p>Todo al día</p><small>No hay alertas pendientes</small></div>}
+                    </div>
+                    <div className="notification-footer"><button type="button" className="text-button" onClick={() => { setShowNotifications(false); refreshWorkspace(); }}>Actualizar</button></div>
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="user-menu-wrapper">
+              <button type="button" className="topbar-user" aria-label="Abrir menú de usuario" aria-expanded={showUserMenu} onClick={() => { setShowUserMenu((v) => !v); setShowNotifications(false); }}>
+                <div className={`avatar ${session.avatarClass}`}>{session.initials}</div><div><strong>{session.name}</strong><span>{session.team}</span></div><Icon name="chevronDown" size={15} style={{ transform: showUserMenu ? "rotate(180deg)" : "none", transition: "transform 150ms ease" }} />
+              </button>
+              {showUserMenu && (
+                <>
+                  <button className="dropdown-overlay" type="button" aria-label="Cerrar menú de usuario" onClick={() => setShowUserMenu(false)} />
+                  <div className="user-dropdown" role="menu">
+                    <div className="user-dropdown-header">
+                      <div className={`avatar ${session.avatarClass}`}>{session.initials}</div>
+                      <div className="user-dropdown-info"><strong>{session.name}</strong><span>{session.roleLabel}</span><small>{session.email} · {session.team}</small></div>
+                    </div>
+                    <div className="user-dropdown-menu">
+                      <button type="button" className="user-dropdown-item" role="menuitem" onClick={() => { setShowUserMenu(false); notify(`Sesión: ${session.name} · ${session.group} · ${session.team}`); }}><Icon name="users" size={16} /> Ver perfil</button>
+                      <button type="button" className="user-dropdown-item danger" role="menuitem" onClick={() => { setShowUserMenu(false); endSession(); }}><Icon name="logout" size={16} /> Cerrar sesión</button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </header>
         <section className="page-content">
