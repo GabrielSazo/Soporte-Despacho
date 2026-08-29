@@ -37,10 +37,12 @@ class CurrentUserSerializer(serializers.ModelSerializer):
     name = serializers.CharField(source="display_name", read_only=True)
     group = serializers.SerializerMethodField()
     team = TeamSummarySerializer(read_only=True)
+    is_locked = serializers.BooleanField(source="is_account_locked", read_only=True)
 
     class Meta:
         model = User
-        fields = ["id", "name", "email", "username", "role", "group", "team"]
+        fields = ["id", "name", "email", "username", "role", "group", "team", "is_locked", "failed_login_attempts", "locked_at"]
+        read_only_fields = ["failed_login_attempts", "locked_at"]
 
     def get_group(self, user):
         if not user.group:
@@ -52,6 +54,7 @@ class UserSerializer(serializers.ModelSerializer):
     name = serializers.CharField(source="display_name", read_only=True)
     password = serializers.CharField(write_only=True, required=False, min_length=8)
     team_detail = TeamSummarySerializer(source="team", read_only=True)
+    is_locked = serializers.BooleanField(source="is_account_locked", read_only=True)
 
     class Meta:
         model = User
@@ -66,8 +69,12 @@ class UserSerializer(serializers.ModelSerializer):
             "team",
             "team_detail",
             "is_active",
+            "is_locked",
+            "failed_login_attempts",
+            "locked_at",
             "password",
         ]
+        read_only_fields = ["is_locked", "failed_login_attempts", "locked_at"]
         extra_kwargs = {"password": {"write_only": True}}
 
     def create(self, validated_data):
@@ -89,4 +96,7 @@ class UserSerializer(serializers.ModelSerializer):
         if password:
             user.set_password(password)
             user.save(update_fields=["password"])
+            # Desbloqueo también aplica si admin restablece clave (es cambio de contraseña)
+            if user.is_account_locked:
+                user.unlock_via_password_reset()
         return user

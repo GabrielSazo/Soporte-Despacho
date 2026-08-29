@@ -26,7 +26,43 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
     username_field = "email"
 
     def validate(self, attrs):
-        data = super().validate(attrs)
+        email = (attrs.get("email") or "").strip().lower()
+        if email:
+            try:
+                user = User.objects.get(email__iexact=email)
+                if user.is_account_locked:
+                    raise ValidationError(
+                        {"detail": "Cuenta bloqueada por 5 intentos fallidos. Usa '¿Olvidaste tu contraseña?' para desbloquearla vía correo."},
+                        code="account_locked",
+                    )
+            except User.DoesNotExist:
+                pass
+        try:
+            data = super().validate(attrs)
+        except Exception as exc:
+            # El backend ya registró el intento fallido; propagar mensaje genérico
+            detail = getattr(exc, "detail", None)
+            if isinstance(detail, dict) and "detail" in detail:
+                raise
+            # Si el backend no encontró usuario, DRF ya devuelve 'No active account'
+            # Verificamos si es por bloqueo para dar mensaje más claro
+            if email:
+                try:
+                    u = User.objects.get(email__iexact=email)
+                    if u.is_account_locked:
+                        raise ValidationError(
+                            {"detail": "Cuenta bloqueada por 5 intentos fallidos. Usa '¿Olvidaste tu contraseña?' para desbloquearla vía correo."},
+                            code="account_locked",
+                        )
+                    remaining = 5 - u.failed_login_attempts
+                    if remaining <= 2 and remaining > 0:
+                        raise ValidationError(
+                            {"detail": f"Credenciales inválidas. Te quedan {remaining} intentos antes del bloqueo."},
+                            code="invalid",
+                        )
+                except User.DoesNotExist:
+                    pass
+            raise
         data["user"] = CurrentUserSerializer(self.user).data
         return data
 
@@ -133,7 +169,9 @@ class PasswordResetConfirmView(APIView):
             raise ValidationError({"new_password": list(exc.messages)})
         user.set_password(new_password)
         user.save(update_fields=["password"])
-        return Response({"detail": "Contraseña restablecida correctamente. Ya puedes iniciar sesión."})
+        # Desbloqueo: solo vía restablecimiento por correo (requisito)
+        user.unlock_via_password_reset()
+        return Response({"detail": "Contraseña restablecida correctamente. Cuenta desbloqueada. Ya puedes iniciar sesión."})
 
 
 # Compatibilidad: endpoint anterior que pedía clave directa ahora delega al flujo por correo.

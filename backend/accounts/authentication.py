@@ -16,6 +16,14 @@ class EmailOrUsernameBackend(ModelBackend):
             user_model().set_password(password)
             return None
 
+        if user.is_account_locked:
+            return None
+
         if user.check_password(password) and self.user_can_authenticate(user):
+            if user.failed_login_attempts or user.locked_at:
+                user.reset_login_attempts()
             return user
+
+        # Contraseña incorrecta: registrar intento
+        user.record_failed_login()
         return None
