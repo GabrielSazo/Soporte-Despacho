@@ -1,15 +1,3 @@
-# Desarrollo local — Docker Compose
-# Uso: docker-compose -f compose.dev.yaml up --build
-#
-# Servicios:
-#   postgres  → localhost:5433 (DB: sestel_dev)
-#   api       → localhost:8010 (Django runserver con auto-reload)
-#   frontend  → localhost:5173 (Vite dev server con hot-reload)
-#
-# Persistencia:
-#   - volumes postgres_dev_data y frontend_node_modules
-#   - Para reiniciar limpio: docker-compose -f compose.dev.yaml down -v
-
 services:
   postgres:
     image: postgres:16-alpine

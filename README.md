@@ -17,6 +17,29 @@ Sistema web para el seguimiento y escalamiento de soporte técnico de HFC, FTTH 
 
 El frontend consulta `http://127.0.0.1:8010/api` por defecto. Se usa el puerto `8010` porque el `8000` está ocupado en este entorno.
 
+### Desarrollo con Docker (Recomendado)
+
+Un solo comando levanta postgres, api y frontend con hot-reload:
+
+```powershell
+docker compose -f compose.yaml up --build
+```
+
+| Servicio | Puerto | Descripción |
+| --- | --- | --- |
+| postgres | `5433` | PostgreSQL 16, DB `sestel_dev` |
+| api | `8010` | Django runserver con auto-reload |
+| frontend | `5173` | Vite dev server con hot-reload |
+
+Para reiniciar limpio (borrar datos):
+
+```powershell
+docker compose -f compose.yaml down -v
+docker compose -f compose.yaml up --build
+```
+
+### Desarrollo sin Docker
+
 1. Instala las dependencias del frontend:
 
 ```powershell
@@ -49,7 +72,7 @@ py -m venv .venv
 npm run dev
 ```
 
-Abre la dirección indicada por Vite. En este entorno usa `http://127.0.0.1:5175` porque los puertos `5173` y `5174` pertenecen a otros procesos.
+Abre la dirección indicada por Vite (por defecto `http://127.0.0.1:5173`).
 
 ## Usuarios De Prueba
 
@@ -60,18 +83,6 @@ Todos usan la contraseña temporal `Sestel2026!`.
 | Despachadora | `despacho@sestel.local` | Crear y validar sus tickets |
 | Agente de soporte | `soporte@sestel.local` | Atender tickets de FTTH Norte |
 | Administradora | `admin@sestel.local` | Vista global y administración API |
-
-## PostgreSQL Con Docker
-
-Cuando Docker Desktop esté iniciado, ejecuta:
-
-```powershell
-docker compose up --build
-```
-
-Esto inicia PostgreSQL 16 y Django en `http://127.0.0.1:8010`. El frontend se inicia con `npm run dev` por separado.
-
-Para conectar una instancia PostgreSQL externa, copia `backend/.env.example` como `backend/.env`, ajusta las variables `POSTGRES_*` y cárgalas en el entorno antes de iniciar Django. Si `POSTGRES_DB` no está definido, Django usa `backend/db.sqlite3`.
 
 ## API Principal
 
