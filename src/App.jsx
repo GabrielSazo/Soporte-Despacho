@@ -405,9 +405,10 @@ function App() {
   const openTickets = tickets.filter((ticket) => ticket.statusCode !== "CERRADO").length;
   const validationTickets = tickets.filter((ticket) => ticket.statusCode === "VALIDACION");
   const criticalTickets = tickets.filter((ticket) => ticket.priorityCode === "CRITICA").length;
+  const statusMap = { "Todos": null, "Abierto": "ABIERTO", "Asignado": "ASIGNADO", "En proceso": "EN_PROCESO", "Validación": "VALIDACION" };
   const filteredTickets = tickets.filter((ticket) => {
     const searchable = `${ticket.id} ${ticket.title} ${ticket.team} ${ticket.requester}`.toLowerCase();
-    return searchable.includes(query.toLowerCase()) && (filter === "Todos" || ticket.status === filter);
+    return searchable.includes(query.toLowerCase()) && (!statusMap[filter] || ticket.statusCode === statusMap[filter]);
   });
   const canCreateTickets = session && ["DESPACHADOR", "ADMIN"].includes(session.role);
   const visibleNavigation = session?.role === "ADMIN" ? [...navigation, { label: "Usuarios", icon: "users" }] : navigation;
