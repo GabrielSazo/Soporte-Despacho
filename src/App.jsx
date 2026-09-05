@@ -844,6 +844,15 @@ function UserFormModal({ onClose, onSave, teams, groups, user }) {
       managedGroups: current.managedGroups.includes(id) ? current.managedGroups.filter((g) => g !== id) : [...current.managedGroups, id],
     }));
   }
+  function toggleGroupTeams(groupId) {
+    const groupTeams = teams.filter((t) => String(t.group) === String(groupId) || String(t.group_detail?.id) === String(groupId));
+    const groupTeamIds = groupTeams.map((t) => String(t.id));
+    const allSelected = groupTeamIds.every((id) => form.teams.includes(id));
+    setForm((current) => ({
+      ...current,
+      teams: allSelected ? current.teams.filter((id) => !groupTeamIds.includes(id)) : [...new Set([...current.teams, ...groupTeamIds])],
+    }));
+  }
 
   async function submit(event) {
     event.preventDefault();
@@ -875,7 +884,7 @@ function UserFormModal({ onClose, onSave, teams, groups, user }) {
             <label className="field"><span>Apellidos <b>*</b></span><input required name="lastName" value={form.lastName} onChange={updateField} placeholder="Apellidos" /></label>
             <label className="field field-wide"><span>Correo institucional <b>*</b></span><input required type="email" name="email" value={form.email} onChange={updateField} placeholder="nombre@empresa.com" /></label>
             <label className="field"><span>Rol <b>*</b></span><select name="role" value={form.role} onChange={updateField}><option value="DESPACHADOR">Despachador</option><option value="SOPORTE">Agente de soporte</option><option value="SUPERVISOR">Supervisor</option><option value="ADMIN">Administrador</option></select></label>
-            {form.role === "SUPERVISOR" ? <label className="field field-wide"><span>Grupos supervisados <b>*</b></span><div className="teams-checklist">{groups.map((g) => <label key={g.id} className="team-check"><input type="checkbox" checked={form.managedGroups.includes(String(g.id))} onChange={() => toggleGroup(g.id)} />{g.name} · {g.code}</label>)}{groups.length === 0 && <small>Sin grupos registrados</small>}</div></label> : <label className="field field-wide"><span>Equipos {(form.role !== "ADMIN") && <b>*</b>}</span><div className="teams-checklist">{teams.map((team) => <label key={team.id} className="team-check"><input type="checkbox" checked={form.teams.includes(String(team.id))} onChange={() => toggleTeam(team.id)} />{team.group_detail?.name || team.group?.name} · {team.name}</label>)}{teams.length === 0 && <small>Sin equipos registrados</small>}</div><small style={{ color: "var(--quiet)", fontSize: "10px" }}>Para Tigo: con 1 Estación ves las 14 (por grupo).</small></label>}
+            {form.role === "SUPERVISOR" ? <label className="field field-wide"><span>Grupos supervisados <b>*</b></span><div className="teams-checklist">{groups.map((g) => <label key={g.id} className="team-check"><input type="checkbox" checked={form.managedGroups.includes(String(g.id))} onChange={() => toggleGroup(g.id)} />{g.name} · {g.code}</label>)}{groups.length === 0 && <small>Sin grupos registrados</small>}</div></label> : <label className="field field-wide"><span>Equipos {(form.role !== "ADMIN") && <b>*</b>}</span><div className="teams-checklist">{groups.map((g) => { const groupTeams = teams.filter((t) => String(t.group) === String(g.id) || String(t.group_detail?.id) === String(g.id)); if (!groupTeams.length) return null; const allSelected = groupTeams.every((t) => form.teams.includes(String(t.id))); return <div key={g.id} style={{ marginBottom: "8px" }}><label className="team-check" style={{ fontWeight: 800, background: "var(--surface)", padding: "4px 6px", borderRadius: "6px" }}><input type="checkbox" checked={allSelected} onChange={() => toggleGroupTeams(g.id)} />{g.name} ({groupTeams.length}) — Seleccionar todo</label><div style={{ marginLeft: "12px", marginTop: "4px", display: "grid", gap: "4px" }}>{groupTeams.map((team) => <label key={team.id} className="team-check"><input type="checkbox" checked={form.teams.includes(String(team.id))} onChange={() => toggleTeam(team.id)} />{team.name}</label>)}</div></div>; })}{teams.length === 0 && <small>Sin equipos registrados</small>}</div><small style={{ color: "var(--quiet)", fontSize: "10px" }}>Tip: marca 1 Estación de Tigo y verás las 14 (por grupo). O usa Seleccionar todo.</small></label>}
             <label className="field field-wide"><span>{isNew ? "Contraseña temporal" : "Nueva contraseña"} {isNew && <b>*</b>}</span><input required={isNew} minLength="8" name="password" type="password" value={form.password} onChange={updateField} placeholder={isNew ? "Mínimo 8 caracteres" : "Déjalo vacío para conservarla"} /></label>
           </div>
           <label className="active-user-toggle"><input checked={form.isActive} name="isActive" type="checkbox" onChange={updateField} /><span><i /></span><div><strong>Usuario activo</strong><small>Puede iniciar sesión y recibir asignaciones.</small></div></label>
