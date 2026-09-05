@@ -67,10 +67,19 @@ class TicketFlowTests(APITestCase):
         self.assertEqual(ticket.creator, self.dispatcher)
         self.assertEqual(ticket.origin_team, self.team)
 
+        # Same group (Tigo) sees ticket created by group member
         self.client.force_authenticate(self.other_dispatcher)
         response = self.client.get("/api/tickets/")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["count"], 0)
+        self.assertEqual(response.data["count"], 1)
+        # Different group should not see
+        other_group = WorkGroup.objects.create(name="BBI N-2", code="bbi-n2-test")
+        other_team = Team.objects.create(group=other_group, name="Soporte-N2", code="reclamos-test")
+        outsider = User.objects.create_user(username="outsider@sestel.local", email="outsider@sestel.local", password="Sestel2026!", role=User.Role.DISPATCHER)
+        outsider.teams.set([other_team])
+        self.client.force_authenticate(outsider)
+        response2 = self.client.get("/api/tickets/")
+        self.assertEqual(response2.data["count"], 0)
 
     def test_support_resolution_requires_creator_validation(self):
         ticket = self.create_ticket_through_api()
@@ -92,7 +101,8 @@ class TicketFlowTests(APITestCase):
             {"approved": True},
             format="json",
         )
-        self.assertEqual(rejected_response.status_code, 404)
+        # Now visible by group, so 403 (no es creador) en vez de 404
+        self.assertEqual(rejected_response.status_code, 403)
 
         self.client.force_authenticate(self.dispatcher)
         approved_response = self.client.post(

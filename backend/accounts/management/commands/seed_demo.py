@@ -12,13 +12,23 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         tigo, _ = WorkGroup.objects.get_or_create(name="Tigo", defaults={"code": "tigo"})
-        contrata, _ = WorkGroup.objects.get_or_create(name="Contrata", defaults={"code": "contrata"})
         bbi, _ = WorkGroup.objects.get_or_create(name="BBI N-2", defaults={"code": "bbi-n2"})
+        celtech, _ = WorkGroup.objects.get_or_create(name="celtech", defaults={"code": "celtech"})
+        cellus, _ = WorkGroup.objects.get_or_create(name="cellus", defaults={"code": "cellus"})
+        nexel, _ = WorkGroup.objects.get_or_create(name="nexel", defaults={"code": "nexel"})
 
-        estacion1, _ = Team.objects.get_or_create(group=tigo, name="Estacion 1", defaults={"code": "estacion1"})
-        estacion2, _ = Team.objects.get_or_create(group=tigo, name="Estacion 2", defaults={"code": "estacion2"})
-        cellus_dth, _ = Team.objects.get_or_create(group=contrata, name="Cellus-DTH", defaults={"code": "dth-cellus"})
+        # Tigo: 14 estaciones
+        estaciones = []
+        for i in range(1, 15):
+            team, _ = Team.objects.get_or_create(group=tigo, name=f"Estacion {i}", defaults={"code": f"estacion{i}"})
+            estaciones.append(team)
+        estacion1 = estaciones[0]
+        estacion2 = estaciones[1] if len(estaciones) > 1 else estacion1
+
         soporte_n2, _ = Team.objects.get_or_create(group=bbi, name="Soporte-N2", defaults={"code": "reclamos"})
+        Team.objects.get_or_create(group=celtech, name="Celtech", defaults={"code": "celtech"})
+        Team.objects.get_or_create(group=cellus, name="Cellus", defaults={"code": "cellus"})
+        Team.objects.get_or_create(group=nexel, name="Nexel", defaults={"code": "nexel"})
 
         dispatcher = self.upsert_user(
             "despacho@sestel.local",
@@ -47,7 +57,8 @@ class Command(BaseCommand):
             "Luis",
             "González",
             User.Role.SUPERVISOR,
-            [estacion1, estacion2, cellus_dth, soporte_n2],
+            [],  # sin equipos, solo grupo supervisado
+            managed_groups=[tigo],
         )
 
         if not Ticket.objects.exists():
@@ -82,7 +93,7 @@ class Command(BaseCommand):
         self.stdout.write("Usuarios: despacho@sestel.local, soporte@sestel.local, admin@sestel.local, supervisor@sestel.local")
         self.stdout.write(f"Contraseña temporal: {self.password}")
 
-    def upsert_user(self, email, first_name, last_name, role, teams, is_staff=False):
+    def upsert_user(self, email, first_name, last_name, role, teams, is_staff=False, managed_groups=None):
         user, _ = User.objects.get_or_create(username=email, defaults={"email": email})
         user.email = email
         user.first_name = first_name
@@ -93,4 +104,6 @@ class Command(BaseCommand):
         user.set_password(self.password)
         user.save()
         user.teams.set(teams)
+        if managed_groups is not None:
+            user.managed_groups.set(managed_groups)
         return user

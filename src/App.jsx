@@ -22,6 +22,7 @@ import {
   updateTeam as updateTeamRequest,
   updateUser as updateUserRequest,
   uploadAttachment,
+  reassignTicket as reassignTicketRequest,
   validateTicket as validateTicketRequest,
 } from "./api";
 import { Icon } from "./icons";
@@ -118,8 +119,13 @@ function mapUser(user) {
 function mapManagedUser(user) {
   const teams = user.teams_detail || user.teams || (user.team_detail ? [user.team_detail] : user.team ? [{ name: user.team_detail?.name, group: user.team_detail?.group }] : []);
   const teamIds = (user.teams || []).map(String);
+  const mgroups = user.managed_groups_detail || user.managed_groups || [];
   const teamNames = teams.length ? teams.map((t) => t.name).join(", ") : user.team_detail?.name || "Sin equipo";
-  const groupNames = teams.length ? [...new Set(teams.map((t) => t.group?.name || t.group_detail?.name).filter(Boolean))].join(", ") : user.team_detail?.group?.name || "Sin grupo";
+  let groupNames = teams.length ? [...new Set(teams.map((t) => t.group?.name || t.group_detail?.name).filter(Boolean))].join(", ") : user.team_detail?.group?.name || "Sin grupo";
+  if (user.role === "SUPERVISOR" && mgroups.length) {
+    groupNames = mgroups.map((g) => g.name).join(", ");
+    // mostrar equipos supervisados como grupos
+  }
   return {
     ...user,
     avatarClass: avatarClass(user.name),
@@ -127,8 +133,9 @@ function mapManagedUser(user) {
     roleLabel: roleLabels[user.role] || user.role,
     teamId: teamIds[0] || user.team || "",
     teamIds,
+    managedGroups: mgroups.map((g) => String(g.id)),
     teams,
-    teamName: teamNames,
+    teamName: user.role === "SUPERVISOR" ? (mgroups.length ? `Supervisa: ${groupNames}` : teamNames) : teamNames,
     groupName: groupNames,
   };
 }
@@ -354,6 +361,15 @@ function App() {
     notify(`${ticket.id} fue enviado al despachador para validación.`);
   }
 
+  async function reassignTicket(ticket, teamId) {
+    const updated = await reassignTicketRequest(ticket.apiId, teamId);
+    const mapped = mapTicket(updated);
+    setTicketDetail(mapped);
+    replaceTicket(updated);
+    await refreshWorkspace(true);
+    notify(`${ticket.id} reasignado a ${mapped.team}.`);
+  }
+
   async function saveUser(form, existingUser) {
     const payload = {
       username: form.email.trim().toLowerCase(),
@@ -362,6 +378,7 @@ function App() {
       last_name: form.lastName.trim(),
       role: form.role,
       teams: form.teams.map((id) => Number(id)),
+      managed_groups: form.managedGroups ? form.managedGroups.map((id) => Number(id)) : [],
       is_active: form.isActive,
     };
     if (form.password) payload.password = form.password;
@@ -524,8 +541,8 @@ function App() {
       </main>
       {newTicketOpen && canCreateTickets && <NewTicketModal onClose={() => setNewTicketOpen(false)} onCreate={createTicket} session={session} />}
       {ticketToResolve && <ResolveTicketModal onClose={() => setTicketToResolve(null)} onResolve={resolveTicket} ticket={ticketToResolve} />}
-      {ticketDetail && <TicketDetailModal currentUser={session} isLoading={isDetailLoading} onAttach={attachToTicket} onClose={() => setTicketDetail(null)} onResolve={(ticket) => { setTicketDetail(null); setTicketToResolve(ticket); }} onTake={async (ticket) => { await takeTicket(ticket); setTicketDetail(null); }} onValidate={async (ticket, accepted) => { await validateTicket(ticket, accepted); setTicketDetail(null); }} ticket={ticketDetail} />}
-      {userModal && <UserFormModal onClose={() => setUserModal(null)} onSave={saveUser} teams={teams} user={userModal === "new" ? null : userModal} />}
+      {ticketDetail && <TicketDetailModal currentUser={session} isLoading={isDetailLoading} onAttach={attachToTicket} onClose={() => setTicketDetail(null)} onReassign={reassignTicket} onResolve={(ticket) => { setTicketDetail(null); setTicketToResolve(ticket); }} onTake={async (ticket) => { await takeTicket(ticket); setTicketDetail(null); }} onValidate={async (ticket, accepted) => { await validateTicket(ticket, accepted); setTicketDetail(null); }} teams={teams} ticket={ticketDetail} />}
+      {userModal && <UserFormModal onClose={() => setUserModal(null)} onSave={saveUser} teams={teams} groups={groups} user={userModal === "new" ? null : userModal} />}
       {teamModal && <TeamFormModal groups={groups} onClose={() => setTeamModal(null)} onSave={saveTeam} team={teamModal === "new" ? null : teamModal} />}
       {groupModal && <GroupFormModal onClose={() => setGroupModal(null)} onSave={saveGroup} group={groupModal === "new" ? null : groupModal} />}
       {passwordModal && <PasswordResetModal onClose={() => setPasswordModal(null)} onSave={resetUserPassword} user={passwordModal} />}
@@ -782,7 +799,7 @@ function UsersView({ error, groups, loading, onCreate, onCreateGroup, onCreateTe
   );
 }
 
-function UserFormModal({ onClose, onSave, teams, user }) {
+function UserFormModal({ onClose, onSave, teams, groups, user }) {
   const isNew = !user;
   const [form, setForm] = useState({
     firstName: user?.first_name || "",
@@ -791,6 +808,7 @@ function UserFormModal({ onClose, onSave, teams, user }) {
     password: "",
     role: user?.role || "DESPACHADOR",
     teams: user?.teamIds || (user?.teamId ? [String(user.teamId)] : []),
+    managedGroups: user?.managedGroups?.map(String) || user?.managed_groups?.map(String) || [],
     isActive: user?.is_active ?? true,
   });
   const [error, setError] = useState("");
@@ -808,15 +826,22 @@ function UserFormModal({ onClose, onSave, teams, user }) {
       teams: current.teams.includes(id) ? current.teams.filter((t) => t !== id) : [...current.teams, id],
     }));
   }
+  function toggleGroup(groupId) {
+    const id = String(groupId);
+    setForm((current) => ({
+      ...current,
+      managedGroups: current.managedGroups.includes(id) ? current.managedGroups.filter((g) => g !== id) : [...current.managedGroups, id],
+    }));
+  }
 
   async function submit(event) {
     event.preventDefault();
-    if (form.role !== "ADMIN" && form.role !== "SUPERVISOR" && form.teams.length === 0) {
-      setError("Selecciona al menos un equipo para despachador o soporte.");
+    if (form.role === "SUPERVISOR" && form.managedGroups.length === 0) {
+      setError("Selecciona al menos un grupo para el supervisor.");
       return;
     }
-    if (form.role === "SUPERVISOR" && form.teams.length === 0) {
-      setError("Supervisor debe tener al menos un equipo/grupo asignado.");
+    if (form.role !== "ADMIN" && form.role !== "SUPERVISOR" && form.teams.length === 0) {
+      setError("Selecciona al menos un equipo para despachador o soporte.");
       return;
     }
     setSubmitting(true);
@@ -839,7 +864,7 @@ function UserFormModal({ onClose, onSave, teams, user }) {
             <label className="field"><span>Apellidos <b>*</b></span><input required name="lastName" value={form.lastName} onChange={updateField} placeholder="Apellidos" /></label>
             <label className="field field-wide"><span>Correo institucional <b>*</b></span><input required type="email" name="email" value={form.email} onChange={updateField} placeholder="nombre@empresa.com" /></label>
             <label className="field"><span>Rol <b>*</b></span><select name="role" value={form.role} onChange={updateField}><option value="DESPACHADOR">Despachador</option><option value="SOPORTE">Agente de soporte</option><option value="SUPERVISOR">Supervisor</option><option value="ADMIN">Administrador</option></select></label>
-            <label className="field field-wide"><span>Equipos {(form.role !== "ADMIN") && <b>*</b>}</span><div className="teams-checklist">{teams.map((team) => <label key={team.id} className="team-check"><input type="checkbox" checked={form.teams.includes(String(team.id))} onChange={() => toggleTeam(team.id)} />{team.group_detail?.name || team.group?.name} · {team.name}</label>)}{teams.length === 0 && <small>Sin equipos registrados</small>}</div></label>
+            {form.role === "SUPERVISOR" ? <label className="field field-wide"><span>Grupos supervisados <b>*</b></span><div className="teams-checklist">{groups.map((g) => <label key={g.id} className="team-check"><input type="checkbox" checked={form.managedGroups.includes(String(g.id))} onChange={() => toggleGroup(g.id)} />{g.name} · {g.code}</label>)}{groups.length === 0 && <small>Sin grupos registrados</small>}</div></label> : <label className="field field-wide"><span>Equipos {(form.role !== "ADMIN") && <b>*</b>}</span><div className="teams-checklist">{teams.map((team) => <label key={team.id} className="team-check"><input type="checkbox" checked={form.teams.includes(String(team.id))} onChange={() => toggleTeam(team.id)} />{team.group_detail?.name || team.group?.name} · {team.name}</label>)}{teams.length === 0 && <small>Sin equipos registrados</small>}</div><small style={{ color: "var(--quiet)", fontSize: "10px" }}>Para Tigo: con 1 Estación ves las 14 (por grupo).</small></label>}
             <label className="field field-wide"><span>{isNew ? "Contraseña temporal" : "Nueva contraseña"} {isNew && <b>*</b>}</span><input required={isNew} minLength="8" name="password" type="password" value={form.password} onChange={updateField} placeholder={isNew ? "Mínimo 8 caracteres" : "Déjalo vacío para conservarla"} /></label>
           </div>
           <label className="active-user-toggle"><input checked={form.isActive} name="isActive" type="checkbox" onChange={updateField} /><span><i /></span><div><strong>Usuario activo</strong><small>Puede iniciar sesión y recibir asignaciones.</small></div></label>
@@ -972,16 +997,18 @@ function ResolveTicketModal({ onClose, onResolve, ticket }) {
   );
 }
 
-function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onResolve, onTake, onValidate, ticket }) {
+function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onReassign, onResolve, onTake, onValidate, teams, ticket }) {
   const [actionError, setActionError] = useState("");
   const [acting, setActing] = useState(false);
   const [attachFile, setAttachFile] = useState(null);
   const [attachError, setAttachError] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [reassignTeam, setReassignTeam] = useState("");
   const canTake = currentUser.role === "SOPORTE" && ["ABIERTO", "ASIGNADO"].includes(ticket.statusCode);
   const canResolve = currentUser.role === "SOPORTE" && ticket.statusCode === "EN_PROCESO";
   const canValidate = currentUser.role !== "SOPORTE" && ticket.statusCode === "VALIDACION";
   const canAttach = currentUser.is_administrator || currentUser.role === "ADMIN" || ticket.requester === currentUser.name || (currentUser.role === "SOPORTE" && currentUser.team === ticket.team);
+  const canReassign = ticket.statusCode !== "CERRADO" && ["DESPACHADOR", "SOPORTE", "SUPERVISOR", "ADMIN"].includes(currentUser.role);
 
   async function runAction(action, accepted) {
     setActing(true);
@@ -1054,6 +1081,7 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onResolv
               {canResolve && <button className="primary-button" type="button" onClick={() => onResolve(ticket)}>Registrar solución</button>}
               {canValidate && <><button className="primary-button" disabled={acting} type="button" onClick={() => runAction(onValidate, true)}><Icon name="check" size={17} /> Aprobar solución</button><button className="secondary-button" disabled={acting} type="button" onClick={() => runAction(onValidate, false)}>Rechazar y devolver</button></>}
             </div>}
+            {canReassign && teams && <div className="detail-meta" style={{ marginTop: "14px" }}><span className="detail-label">Reasignar equipo</span><div style={{ display: "flex", gap: "6px", marginTop: "6px" }}><select value={reassignTeam} onChange={(e) => setReassignTeam(e.target.value)} style={{ flex: 1, height: "34px", border: "1px solid var(--line-strong)", borderRadius: "6px", padding: "0 8px", fontSize: "11px" }}><option value="">Seleccionar equipo</option>{teams.map((t) => <option key={t.id} value={t.id}>{t.group_detail?.name || t.group?.name} · {t.name}</option>)}</select><button className="secondary-button" disabled={acting || !reassignTeam} type="button" style={{ minHeight: "34px" }} onClick={async () => { setActing(true); setActionError(""); try { await onReassign(ticket, Number(reassignTeam)); setReassignTeam(""); } catch (e) { setActionError(e.message || "No se pudo reasignar."); } finally { setActing(false); } }}>Mover</button></div></div>}
             {actionError && <p className="detail-action-error" role="alert"><Icon name="alert" size={15} /> {actionError}</p>}
           </aside>
         </div>}

@@ -205,3 +205,7 @@ export function resolveTicket(ticketId, resolutionNotes) {
 export function validateTicket(ticketId, approved, comment = "") {
   return request(`/tickets/${ticketId}/validate/`, { method: "POST", body: { approved, comment } });
 }
+
+export function reassignTicket(ticketId, teamId) {
+  return request(`/tickets/${ticketId}/reassign/`, { method: "POST", body: { team_id: teamId } });
+}

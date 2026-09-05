@@ -23,6 +23,7 @@ class TicketViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = visible_tickets_for(self.request.user)
+        user = self.request.user
         status_value = self.request.query_params.get("status")
         priority = self.request.query_params.get("priority")
         team = self.request.query_params.get("team")
@@ -107,6 +108,26 @@ class TicketViewSet(viewsets.ModelViewSet):
         validate_ticket(ticket, request.user, **serializer.validated_data)
         return Response(TicketSerializer(ticket, context={"request": request}).data)
 
+    @action(detail=True, methods=["post"])
+    def reassign(self, request, pk=None):
+        ticket = self.get_object()
+        require_support_access(request.user, ticket)
+        team_id = request.data.get("team_id") or request.data.get("team")
+        if not team_id:
+            raise ValidationError({"team": "Debes indicar el equipo destino."})
+        from accounts.models import Team
+        try:
+            new_team = Team.objects.get(pk=team_id)
+        except Team.DoesNotExist:
+            raise ValidationError({"team": "Equipo no existe."})
+        # Despachador/Supervisor solo dentro de su grupo, soporte a cualquier grupo
+        if request.user.role in {User.Role.DESPACHADOR, User.Role.SUPERVISOR} and new_team.group.code not in request.user.group_codes:
+            raise PermissionDenied("Solo puedes reasignar dentro de tu grupo.")
+        ticket.assigned_team = new_team
+        ticket.save(update_fields=["assigned_team", "updated_at"])
+        route_ticket(ticket, actor=request.user)
+        return Response(TicketSerializer(ticket, context={"request": request}).data)
+
     @action(detail=True, methods=["post"], permission_classes=[IsAdministrator])
     def escalate(self, request, pk=None):
         ticket = self.get_object()
@@ -117,7 +138,9 @@ class TicketViewSet(viewsets.ModelViewSet):
     def attachments(self, request, pk=None):
         ticket = self.get_object()
         can_attach = request.user.is_administrator or ticket.creator_id == request.user.id
-        can_attach = can_attach or (request.user.role == User.Role.SUPPORT and request.user.teams.filter(id=ticket.assigned_team_id).exists())
+        can_attach = can_attach or (request.user.role == User.Role.SUPPORT and ticket.assigned_team.group.code in request.user.group_codes)
+        can_attach = can_attach or (request.user.role == User.Role.SUPERVISOR and ticket.assigned_team.group.code in request.user.group_codes)
+        can_attach = can_attach or (request.user.role == User.Role.DESPACHADOR and ticket.origin_team.group.code in request.user.group_codes)
         if not can_attach:
             raise PermissionDenied("No puedes adjuntar evidencia a este ticket.")
         serializer = TicketAttachmentSerializer(data=request.data, context={"request": request, "ticket": ticket})

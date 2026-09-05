@@ -42,18 +42,23 @@ class User(AbstractUser):
     email = models.EmailField(unique=True)
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.DISPATCHER)
     teams = models.ManyToManyField(Team, related_name="members", blank=True)
+    managed_groups = models.ManyToManyField(WorkGroup, related_name="managers", blank=True, help_text="Solo para SUPERVISOR: grupos que supervisa sin necesidad de equipos")
     last_assigned_at = models.DateTimeField(null=True, blank=True)
     failed_login_attempts = models.PositiveIntegerField(default=0)
     locked_at = models.DateTimeField(null=True, blank=True)
 
     @property
     def group(self):
-        groups = list(self.teams.values_list("group", flat=True).distinct())
-        return groups[0] if groups else None
+        if self.managed_groups.exists():
+            return self.managed_groups.first()
+        t = self.teams.select_related("group").first()
+        return t.group if t else None
 
     @property
     def group_codes(self):
-        return list(self.teams.values_list("group__code", flat=True).distinct())
+        codes = set(self.teams.values_list("group__code", flat=True))
+        codes.update(self.managed_groups.values_list("code", flat=True))
+        return list(codes)
 
     @property
     def team_names(self):
@@ -70,11 +75,19 @@ class User(AbstractUser):
 
     @property
     def is_administrator(self):
-        return self.is_superuser or self.role in {self.Role.ADMIN, self.Role.SUPERVISOR}
+        return self.is_superuser or self.role == self.Role.ADMIN
+
+    @property
+    def is_supervisor(self):
+        return self.role == self.Role.SUPERVISOR
 
     @property
     def can_manage_all(self):
-        return self.role in {self.Role.ADMIN, self.Role.SUPERVISOR}
+        return self.role == self.Role.ADMIN
+
+    @property
+    def can_supervise(self):
+        return self.role in {self.Role.SUPERVISOR, self.Role.ADMIN}
 
     def record_failed_login(self):
         self.failed_login_attempts += 1
