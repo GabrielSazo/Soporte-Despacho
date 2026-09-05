@@ -15,32 +15,39 @@ class Command(BaseCommand):
         contrata, _ = WorkGroup.objects.get_or_create(name="Contrata", defaults={"code": "contrata"})
         bbi, _ = WorkGroup.objects.get_or_create(name="BBI N-2", defaults={"code": "bbi-n2"})
 
-        ftth, _ = Team.objects.get_or_create(group=tigo, name="FTTH Norte", defaults={"code": "ftth-norte"})
-        hfc, _ = Team.objects.get_or_create(group=tigo, name="HFC Central", defaults={"code": "hfc-central"})
-        Team.objects.get_or_create(group=contrata, name="DTH Occidente", defaults={"code": "dth-occidente"})
-        Team.objects.get_or_create(group=bbi, name="Reclamos Norte", defaults={"code": "reclamos-norte"})
+        estacion1, _ = Team.objects.get_or_create(group=tigo, name="Estacion 1", defaults={"code": "estacion1"})
+        estacion2, _ = Team.objects.get_or_create(group=tigo, name="Estacion 2", defaults={"code": "estacion2"})
+        cellus_dth, _ = Team.objects.get_or_create(group=contrata, name="Cellus-DTH", defaults={"code": "dth-cellus"})
+        soporte_n2, _ = Team.objects.get_or_create(group=bbi, name="Soporte-N2", defaults={"code": "reclamos"})
 
         dispatcher = self.upsert_user(
             "despacho@sestel.local",
             "Andrea",
             "Morales",
             User.Role.DISPATCHER,
-            ftth,
+            [estacion1, estacion2],
         )
         support = self.upsert_user(
             "soporte@sestel.local",
             "Mario",
             "Ramírez",
             User.Role.SUPPORT,
-            ftth,
+            [estacion1, estacion2],
         )
         self.upsert_user(
             "admin@sestel.local",
             "Carla",
             "Alvarado",
             User.Role.ADMIN,
-            hfc,
+            [estacion1, estacion2],
             is_staff=True,
+        )
+        supervisor = self.upsert_user(
+            "supervisor@sestel.local",
+            "Luis",
+            "González",
+            User.Role.SUPERVISOR,
+            [estacion1, estacion2, cellus_dth, soporte_n2],
         )
 
         if not Ticket.objects.exists():
@@ -72,18 +79,18 @@ class Command(BaseCommand):
             )
 
         self.stdout.write(self.style.SUCCESS("Datos de demostración disponibles."))
-        self.stdout.write("Usuarios: despacho@sestel.local, soporte@sestel.local, admin@sestel.local")
+        self.stdout.write("Usuarios: despacho@sestel.local, soporte@sestel.local, admin@sestel.local, supervisor@sestel.local")
         self.stdout.write(f"Contraseña temporal: {self.password}")
 
-    def upsert_user(self, email, first_name, last_name, role, team, is_staff=False):
+    def upsert_user(self, email, first_name, last_name, role, teams, is_staff=False):
         user, _ = User.objects.get_or_create(username=email, defaults={"email": email})
         user.email = email
         user.first_name = first_name
         user.last_name = last_name
         user.role = role
-        user.team = team
         user.is_staff = is_staff
         user.is_active = True
         user.set_password(self.password)
         user.save()
+        user.teams.set(teams)
         return user

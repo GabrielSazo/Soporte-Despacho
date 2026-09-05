@@ -53,6 +53,7 @@ const priorityClass = {
 const roleLabels = {
   DESPACHADOR: "Despachadora",
   SOPORTE: "Agente de soporte",
+  SUPERVISOR: "Supervisor",
   ADMIN: "Administradora",
 };
 
@@ -98,25 +99,37 @@ function formatDateTime(value) {
 }
 
 function mapUser(user) {
+  const teams = user.teams || (user.team ? [user.team] : []);
+  const firstTeam = teams[0];
+  const groups = user.groups || (user.group ? [user.group] : []);
   return {
     ...user,
     initials: initials(user.name),
     avatarClass: avatarClass(user.name),
-    group: user.group?.name || "Sin grupo",
+    group: firstTeam?.group?.name || groups[0]?.name || user.group?.name || "Sin grupo",
+    groupsLabel: teams.length ? [...new Set(teams.map((t) => t.group?.name).filter(Boolean))].join(", ") : "Sin grupo",
     roleLabel: roleLabels[user.role] || user.role,
-    team: user.team?.name || "Vista global",
+    team: teams.length ? teams.map((t) => t.name).join(", ") : user.team?.name || "Vista global",
+    teams,
+    groups,
   };
 }
 
 function mapManagedUser(user) {
+  const teams = user.teams_detail || user.teams || (user.team_detail ? [user.team_detail] : user.team ? [{ name: user.team_detail?.name, group: user.team_detail?.group }] : []);
+  const teamIds = (user.teams || []).map(String);
+  const teamNames = teams.length ? teams.map((t) => t.name).join(", ") : user.team_detail?.name || "Sin equipo";
+  const groupNames = teams.length ? [...new Set(teams.map((t) => t.group?.name || t.group_detail?.name).filter(Boolean))].join(", ") : user.team_detail?.group?.name || "Sin grupo";
   return {
     ...user,
     avatarClass: avatarClass(user.name),
     initials: initials(user.name),
     roleLabel: roleLabels[user.role] || user.role,
-    teamId: user.team || "",
-    teamName: user.team_detail?.name || "Sin equipo",
-    groupName: user.team_detail?.group?.name || "Sin grupo",
+    teamId: teamIds[0] || user.team || "",
+    teamIds,
+    teams,
+    teamName: teamNames,
+    groupName: groupNames,
   };
 }
 
@@ -348,7 +361,7 @@ function App() {
       first_name: form.firstName.trim(),
       last_name: form.lastName.trim(),
       role: form.role,
-      team: form.team ? Number(form.team) : null,
+      teams: form.teams.map((id) => Number(id)),
       is_active: form.isActive,
     };
     if (form.password) payload.password = form.password;
@@ -410,8 +423,8 @@ function App() {
     const searchable = `${ticket.id} ${ticket.title} ${ticket.team} ${ticket.requester}`.toLowerCase();
     return searchable.includes(query.toLowerCase()) && (!statusMap[filter] || ticket.statusCode === statusMap[filter]);
   });
-  const canCreateTickets = session && ["DESPACHADOR", "ADMIN"].includes(session.role);
-  const visibleNavigation = session?.role === "ADMIN" ? [...navigation, { label: "Usuarios", icon: "users" }] : navigation;
+  const canCreateTickets = session && ["DESPACHADOR", "ADMIN", "SUPERVISOR"].includes(session.role);
+  const visibleNavigation = session && ["ADMIN", "SUPERVISOR"].includes(session.role) ? [...navigation, { label: "Usuarios", icon: "users" }] : navigation;
   const notifications = [
     ...tickets.filter((t) => t.slaTone === "danger").slice(0, 3).map((t) => ({ key: `sla-${t.id}`, type: "danger", title: `SLA vencido: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
     ...validationTickets.slice(0, 3).map((t) => ({ key: `val-${t.id}`, type: "warning", title: `Validación pendiente: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
@@ -442,7 +455,7 @@ function App() {
           {visibleNavigation.map((item) => <button className={`nav-item ${activeView === item.label ? "active" : ""}`} key={item.label} onClick={() => changeView(item.label)} type="button"><Icon name={item.icon} size={19} /><span>{item.label}</span>{item.badge && <b>{item.label === "Tickets" ? openTickets : validationTickets.length}</b>}</button>)}
         </nav>
         <div className="sidebar-bottom">
-          <button className="nav-item" type="button" onClick={() => session.role === "ADMIN" ? changeView("Usuarios") : notify("La gestión de usuarios está disponible para administración.")}><Icon name="settings" size={19} /><span>{session.role === "ADMIN" ? "Gestionar usuarios" : "Configuración"}</span></button>
+          <button className="nav-item" type="button" onClick={() => ["ADMIN","SUPERVISOR"].includes(session.role) ? changeView("Usuarios") : notify("La gestión de usuarios está disponible para administración.")}><Icon name="settings" size={19} /><span>{["ADMIN","SUPERVISOR"].includes(session.role) ? "Gestionar usuarios" : "Configuración"}</span></button>
           <button className="nav-item logout-item" type="button" onClick={endSession}><Icon name="logout" size={19} /><span>Cerrar sesión</span></button>
           <div className="user-card"><div className={`avatar ${session.avatarClass}`}>{session.initials}</div><div><strong>{session.name}</strong><span>{session.roleLabel}</span></div><Icon name="dots" size={18} /></div>
         </div>
@@ -505,7 +518,7 @@ function App() {
             {activeView === "Validaciones" && <ValidationsView canValidate={session.role !== "SOPORTE"} tickets={validationTickets} onValidate={validateTicket} />}
             {activeView === "Mi equipo" && <TeamView currentUser={session} onNotify={notify} tickets={tickets} />}
             {activeView === "Informes" && <ReportsView tickets={tickets} />}
-            {activeView === "Usuarios" && session.role === "ADMIN" && <UsersView error={usersError} groups={groups} loading={usersLoading} onCreate={() => setUserModal("new")} onCreateGroup={() => setGroupModal("new")} onCreateTeam={() => setTeamModal("new")} onEdit={setUserModal} onEditGroup={setGroupModal} onEditTeam={setTeamModal} onResetPassword={setPasswordModal} onRetry={refreshUsers} teams={teams} users={users} />}
+            {activeView === "Usuarios" && ["ADMIN","SUPERVISOR"].includes(session.role) && <UsersView error={usersError} groups={groups} loading={usersLoading} onCreate={() => setUserModal("new")} onCreateGroup={() => setGroupModal("new")} onCreateTeam={() => setTeamModal("new")} onEdit={setUserModal} onEditGroup={setGroupModal} onEditTeam={setTeamModal} onResetPassword={setPasswordModal} onRetry={refreshUsers} teams={teams} users={users} />}
           </>}
         </section>
       </main>
@@ -761,7 +774,7 @@ function UsersView({ error, groups, loading, onCreate, onCreateGroup, onCreateTe
       {loading ? <LoadingState /> : tab === "usuarios" ? <article className="panel users-panel">
         <div className="toolbar users-toolbar">
           <label className="table-search"><Icon name="search" size={18} /><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar nombre, correo o equipo" /></label>
-          <div className="filter-row" aria-label="Filtrar usuarios por rol"><Icon name="filter" size={17} />{[["Todos", "Todos"], ["DESPACHADOR", "Despachadores"], ["SOPORTE", "Soporte"], ["ADMIN", "Administración"]].map(([value, label]) => <button className={role === value ? "selected" : ""} key={value} type="button" onClick={() => setRole(value)}>{label}</button>)}</div>
+          <div className="filter-row" aria-label="Filtrar usuarios por rol"><Icon name="filter" size={17} />{[["Todos", "Todos"], ["DESPACHADOR", "Despachadores"], ["SOPORTE", "Soporte"], ["SUPERVISOR", "Supervisores"], ["ADMIN", "Administración"]].map(([value, label]) => <button className={role === value ? "selected" : ""} key={value} type="button" onClick={() => setRole(value)}>{label}</button>)}</div>
         </div>
         <div className="table-summary"><span><b>{filteredUsers.length}</b> usuarios encontrados</span><span>Bloqueo tras 5 intentos · Solo desbloquea vía correo</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Usuario</th><th>Rol</th><th>Grupo / equipo</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{filteredUsers.map((user) => <tr key={user.id}><td data-label="Usuario"><div className="managed-user"><div className={`avatar ${user.avatarClass}`}>{user.initials}</div><div><strong>{user.name}</strong><small>{user.email}</small></div></div></td><td data-label="Rol"><span className={`role-pill role-${user.role.toLowerCase()}`}>{user.roleLabel}</span></td><td data-label="Grupo / equipo"><div className="team-cell"><strong>{user.teamName}</strong><small>{user.groupName}</small></div></td><td data-label="Estado"><span className={`user-status ${user.is_locked ? "locked" : user.is_active ? "active" : "inactive"}`}><i /> {user.is_locked ? `Bloqueada (${user.failed_login_attempts})` : user.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action"><button type="button" onClick={() => onEdit(user)}>Editar</button><button className="reset-link" type="button" onClick={() => onResetPassword(user)}>Contraseña</button></td></tr>)}</tbody></table></div>{filteredUsers.length === 0 && <EmptyState />}
       </article> : tab === "equipos" ? <article className="panel users-panel"><div className="table-summary"><span><b>{teams.length}</b> equipos registrados</span><span>Agrupados por grupo · Código único</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Equipo</th><th>Grupo</th><th>Código</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{teams.map((team) => <tr key={team.id}><td data-label="Equipo"><strong>{team.name}</strong></td><td data-label="Grupo"><span className="team-label">{team.group_detail?.name || team.group?.name || "-"}</span></td><td data-label="Código"><span className="team-label">{team.code}</span></td><td data-label="Estado"><span className={`user-status ${team.is_active ? "active" : "inactive"}`}><i /> {team.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action"><button type="button" onClick={() => onEditTeam(team)}>Editar</button></td></tr>)}</tbody></table></div>{teams.length === 0 && <EmptyState />}</article> : <article className="panel users-panel"><div className="table-summary"><span><b>{groups.length}</b> grupos registrados</span><span>Área macro (Tigo, Contrata, BBI N-2, etc.)</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Grupo</th><th>Código</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{groups.map((group) => <tr key={group.id}><td data-label="Grupo"><strong>{group.name}</strong></td><td data-label="Código"><span className="team-label">{group.code}</span></td><td data-label="Estado"><span className={`user-status ${group.is_active ? "active" : "inactive"}`}><i /> {group.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action"><button type="button" onClick={() => onEditGroup(group)}>Editar</button></td></tr>)}</tbody></table></div>{groups.length === 0 && <EmptyState />}</article>}
@@ -777,7 +790,7 @@ function UserFormModal({ onClose, onSave, teams, user }) {
     email: user?.email || "",
     password: "",
     role: user?.role || "DESPACHADOR",
-    team: user?.teamId ? String(user.teamId) : "",
+    teams: user?.teamIds || (user?.teamId ? [String(user.teamId)] : []),
     isActive: user?.is_active ?? true,
   });
   const [error, setError] = useState("");
@@ -788,10 +801,22 @@ function UserFormModal({ onClose, onSave, teams, user }) {
     setForm((current) => ({ ...current, [name]: type === "checkbox" ? checked : value }));
   }
 
+  function toggleTeam(teamId) {
+    const id = String(teamId);
+    setForm((current) => ({
+      ...current,
+      teams: current.teams.includes(id) ? current.teams.filter((t) => t !== id) : [...current.teams, id],
+    }));
+  }
+
   async function submit(event) {
     event.preventDefault();
-    if (form.role !== "ADMIN" && !form.team) {
-      setError("Selecciona un equipo para un despachador o agente de soporte.");
+    if (form.role !== "ADMIN" && form.role !== "SUPERVISOR" && form.teams.length === 0) {
+      setError("Selecciona al menos un equipo para despachador o soporte.");
+      return;
+    }
+    if (form.role === "SUPERVISOR" && form.teams.length === 0) {
+      setError("Supervisor debe tener al menos un equipo/grupo asignado.");
       return;
     }
     setSubmitting(true);
@@ -813,8 +838,8 @@ function UserFormModal({ onClose, onSave, teams, user }) {
             <label className="field"><span>Nombres <b>*</b></span><input autoFocus required name="firstName" value={form.firstName} onChange={updateField} placeholder="Nombres" /></label>
             <label className="field"><span>Apellidos <b>*</b></span><input required name="lastName" value={form.lastName} onChange={updateField} placeholder="Apellidos" /></label>
             <label className="field field-wide"><span>Correo institucional <b>*</b></span><input required type="email" name="email" value={form.email} onChange={updateField} placeholder="nombre@empresa.com" /></label>
-            <label className="field"><span>Rol <b>*</b></span><select name="role" value={form.role} onChange={updateField}><option value="DESPACHADOR">Despachador</option><option value="SOPORTE">Agente de soporte</option><option value="ADMIN">Administrador</option></select></label>
-            <label className="field"><span>Equipo {form.role !== "ADMIN" && <b>*</b>}</span><select name="team" value={form.team} onChange={updateField}><option value="">Sin equipo</option>{teams.map((team) => <option key={team.id} value={team.id}>{team.group_detail?.name || team.group?.name} · {team.name}</option>)}</select></label>
+            <label className="field"><span>Rol <b>*</b></span><select name="role" value={form.role} onChange={updateField}><option value="DESPACHADOR">Despachador</option><option value="SOPORTE">Agente de soporte</option><option value="SUPERVISOR">Supervisor</option><option value="ADMIN">Administrador</option></select></label>
+            <label className="field field-wide"><span>Equipos {(form.role !== "ADMIN") && <b>*</b>}</span><div className="teams-checklist">{teams.map((team) => <label key={team.id} className="team-check"><input type="checkbox" checked={form.teams.includes(String(team.id))} onChange={() => toggleTeam(team.id)} />{team.group_detail?.name || team.group?.name} · {team.name}</label>)}{teams.length === 0 && <small>Sin equipos registrados</small>}</div></label>
             <label className="field field-wide"><span>{isNew ? "Contraseña temporal" : "Nueva contraseña"} {isNew && <b>*</b>}</span><input required={isNew} minLength="8" name="password" type="password" value={form.password} onChange={updateField} placeholder={isNew ? "Mínimo 8 caracteres" : "Déjalo vacío para conservarla"} /></label>
           </div>
           <label className="active-user-toggle"><input checked={form.isActive} name="isActive" type="checkbox" onChange={updateField} /><span><i /></span><div><strong>Usuario activo</strong><small>Puede iniciar sesión y recibir asignaciones.</small></div></label>

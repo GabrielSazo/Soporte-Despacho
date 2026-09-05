@@ -13,15 +13,15 @@ class AuthenticationTests(APITestCase):
             email="despacho@sestel.local",
             password="Sestel2026!",
             role=User.Role.DISPATCHER,
-            team=self.team,
         )
+        self.user.teams.set([self.team])
         self.admin = User.objects.create_user(
             username="admin@sestel.local",
             email="admin@sestel.local",
             password="Sestel2026!",
             role=User.Role.ADMIN,
-            team=self.team,
         )
+        self.admin.teams.set([self.team])
 
     def test_user_can_request_a_token_with_email(self):
         response = self.client.post(
@@ -62,7 +62,7 @@ class AuthenticationTests(APITestCase):
                 "last_name": "Usuario",
                 "password": "Sestel2026!",
                 "role": User.Role.SUPPORT,
-                "team": self.team.id,
+                "teams": [self.team.id],
                 "is_active": True,
             },
             format="json",

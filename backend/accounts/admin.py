@@ -19,6 +19,12 @@ class TeamAdmin(admin.ModelAdmin):
 
 @admin.register(User)
 class SestelUserAdmin(UserAdmin):
-    fieldsets = UserAdmin.fieldsets + (("Operación", {"fields": ("role", "team", "last_assigned_at")}),)
-    list_display = ("username", "email", "first_name", "last_name", "role", "team", "is_active")
-    list_filter = ("role", "team", "is_active")
+    fieldsets = UserAdmin.fieldsets + (("Operación", {"fields": ("role", "teams", "last_assigned_at")}),)
+    filter_horizontal = ("teams",)
+
+    def get_teams(self, obj):
+        return ", ".join(t.name for t in obj.teams.all())
+    get_teams.short_description = "Equipos"
+
+    list_display = ("username", "email", "first_name", "last_name", "role", "get_teams", "is_active")
+    list_filter = ("role", "is_active")

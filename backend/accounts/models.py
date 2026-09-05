@@ -36,18 +36,28 @@ class User(AbstractUser):
     class Role(models.TextChoices):
         DISPATCHER = "DESPACHADOR", "Despachador"
         SUPPORT = "SOPORTE", "Agente de soporte"
+        SUPERVISOR = "SUPERVISOR", "Supervisor"
         ADMIN = "ADMIN", "Administrador"
 
     email = models.EmailField(unique=True)
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.DISPATCHER)
-    team = models.ForeignKey(Team, on_delete=models.PROTECT, related_name="members", null=True, blank=True)
+    teams = models.ManyToManyField(Team, related_name="members", blank=True)
     last_assigned_at = models.DateTimeField(null=True, blank=True)
     failed_login_attempts = models.PositiveIntegerField(default=0)
     locked_at = models.DateTimeField(null=True, blank=True)
 
     @property
     def group(self):
-        return self.team.group if self.team_id else None
+        groups = list(self.teams.values_list("group", flat=True).distinct())
+        return groups[0] if groups else None
+
+    @property
+    def group_codes(self):
+        return list(self.teams.values_list("group__code", flat=True).distinct())
+
+    @property
+    def team_names(self):
+        return list(self.teams.values_list("name", flat=True))
 
     @property
     def display_name(self):
@@ -60,7 +70,11 @@ class User(AbstractUser):
 
     @property
     def is_administrator(self):
-        return self.is_superuser or self.role == self.Role.ADMIN
+        return self.is_superuser or self.role in {self.Role.ADMIN, self.Role.SUPERVISOR}
+
+    @property
+    def can_manage_all(self):
+        return self.role in {self.Role.ADMIN, self.Role.SUPERVISOR}
 
     def record_failed_login(self):
         self.failed_login_attempts += 1

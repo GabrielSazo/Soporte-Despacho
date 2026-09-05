@@ -94,9 +94,9 @@ class Ticket(models.Model):
         return "EN_TIEMPO"
 
     def clean(self):
-        if self.origin_team_id and self.creator_id and self.creator.team_id and self.creator.team_id != self.origin_team_id:
+        if self.origin_team_id and self.creator_id and not self.creator.teams.filter(id=self.origin_team_id).exists():
             raise ValidationError("El equipo origen debe corresponder al equipo del creador.")
-        if self.assignee_id and self.assigned_team_id and self.assignee.team_id != self.assigned_team_id:
+        if self.assignee_id and self.assigned_team_id and not self.assignee.teams.filter(id=self.assigned_team_id).exists():
             raise ValidationError("La persona asignada debe pertenecer al equipo asignado.")
 
     def save(self, *args, **kwargs):

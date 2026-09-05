@@ -181,7 +181,7 @@ class PublicPasswordResetView(PasswordResetRequestView):
 
 
 class UserViewSet(viewsets.ModelViewSet):
-    queryset = User.objects.select_related("team__group").all()
+    queryset = User.objects.prefetch_related("teams__group").all()
     serializer_class = UserSerializer
     permission_classes = [IsAdministrator]
     http_method_names = ["get", "post", "patch", "head", "options"]

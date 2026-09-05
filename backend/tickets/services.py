@@ -23,7 +23,7 @@ def record_event(ticket, event_type, actor=None, from_status="", to_status="", c
 def route_ticket(ticket, actor=None):
     agents = (
         User.objects.select_for_update()
-        .filter(team=ticket.assigned_team, role=User.Role.SUPPORT, is_active=True)
+        .filter(teams=ticket.assigned_team, role=User.Role.SUPPORT, is_active=True)
         .order_by("last_assigned_at", "id")
     )
     agent = agents.first()
@@ -51,13 +51,14 @@ def route_ticket(ticket, actor=None):
 
 @transaction.atomic
 def create_ticket(*, creator, **data):
-    if not creator.team_id:
+    if not creator.teams.exists():
         raise ValueError("El usuario no tiene un equipo asignado.")
 
+    first_team = creator.teams.first()
     ticket = Ticket.objects.create(
         creator=creator,
-        origin_team=creator.team,
-        assigned_team=creator.team,
+        origin_team=first_team,
+        assigned_team=first_team,
         **data,
     )
     record_event(ticket, TicketEvent.EventType.CREATED, actor=creator, to_status=ticket.status)

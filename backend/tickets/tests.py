@@ -30,22 +30,22 @@ class TicketFlowTests(APITestCase):
             first_name="Andrea",
             last_name="Morales",
             role=User.Role.DISPATCHER,
-            team=self.team,
         )
+        self.dispatcher.teams.set([self.team])
         self.other_dispatcher = User.objects.create_user(
             username="otro@sestel.local",
             email="otro@sestel.local",
             password="Sestel2026!",
             role=User.Role.DISPATCHER,
-            team=self.team,
         )
+        self.other_dispatcher.teams.set([self.team])
         self.support = User.objects.create_user(
             username="soporte@sestel.local",
             email="soporte@sestel.local",
             password="Sestel2026!",
             role=User.Role.SUPPORT,
-            team=self.team,
         )
+        self.support.teams.set([self.team])
 
     def create_ticket_through_api(self):
         self.client.force_authenticate(self.dispatcher)
@@ -65,7 +65,7 @@ class TicketFlowTests(APITestCase):
     def test_ticket_is_scoped_to_its_creator_for_dispatchers(self):
         ticket = self.create_ticket_through_api()
         self.assertEqual(ticket.creator, self.dispatcher)
-        self.assertEqual(ticket.origin_team, self.dispatcher.team)
+        self.assertEqual(ticket.origin_team, self.team)
 
         self.client.force_authenticate(self.other_dispatcher)
         response = self.client.get("/api/tickets/")

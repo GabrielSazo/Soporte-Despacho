@@ -32,8 +32,10 @@ class TicketViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(status=status_value)
         if priority:
             queryset = queryset.filter(priority=priority)
-        if team and self.request.user.is_administrator:
+        if team and user.is_administrator:
             queryset = queryset.filter(assigned_team_id=team)
+        if team and user.role == User.Role.SUPERVISOR:
+            queryset = queryset.filter(assigned_team__group__code=team)
         if query:
             filters = Q(title__icontains=query) | Q(description__icontains=query) | Q(creator__username__icontains=query)
             reference_number = query.upper().replace("INC-", "")
@@ -115,7 +117,7 @@ class TicketViewSet(viewsets.ModelViewSet):
     def attachments(self, request, pk=None):
         ticket = self.get_object()
         can_attach = request.user.is_administrator or ticket.creator_id == request.user.id
-        can_attach = can_attach or (request.user.role == User.Role.SUPPORT and request.user.team_id == ticket.assigned_team_id)
+        can_attach = can_attach or (request.user.role == User.Role.SUPPORT and request.user.teams.filter(id=ticket.assigned_team_id).exists())
         if not can_attach:
             raise PermissionDenied("No puedes adjuntar evidencia a este ticket.")
         serializer = TicketAttachmentSerializer(data=request.data, context={"request": request, "ticket": ticket})
