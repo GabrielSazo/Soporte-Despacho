@@ -1020,6 +1020,9 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onReassi
   const canValidate = currentUser.role !== "SOPORTE" && ticket.statusCode === "VALIDACION";
   const canAttach = currentUser.is_administrator || currentUser.role === "ADMIN" || ticket.requester === currentUser.name || (currentUser.role === "SOPORTE" && currentUser.team === ticket.team);
   const canReassign = ticket.statusCode !== "CERRADO" && ["DESPACHADOR", "SOPORTE", "SUPERVISOR", "ADMIN"].includes(currentUser.role);
+  const userGroupCodes = (currentUser.groups || []).map((g) => g.code);
+  const isUnrestrictedReassign = ["ADMIN", "SOPORTE"].includes(currentUser.role);
+  const allowedTeams = isUnrestrictedReassign ? teams : teams.filter((t) => userGroupCodes.includes(t.group?.code || t.group_detail?.code));
 
   async function runAction(action, accepted) {
     setActing(true);
@@ -1092,7 +1095,7 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onReassi
               {canResolve && <button className="primary-button" type="button" onClick={() => onResolve(ticket)}>Registrar solución</button>}
               {canValidate && <><button className="primary-button" disabled={acting} type="button" onClick={() => runAction(onValidate, true)}><Icon name="check" size={17} /> Aprobar solución</button><button className="secondary-button" disabled={acting} type="button" onClick={() => runAction(onValidate, false)}>Rechazar y devolver</button></>}
             </div>}
-            {canReassign && teams && <div className="detail-meta" style={{ marginTop: "14px" }}><span className="detail-label">Reasignar equipo</span><div style={{ display: "flex", gap: "6px", marginTop: "6px" }}><select value={reassignTeam} onChange={(e) => setReassignTeam(e.target.value)} style={{ flex: 1, height: "34px", border: "1px solid var(--line-strong)", borderRadius: "6px", padding: "0 8px", fontSize: "11px" }}><option value="">Seleccionar equipo</option>{teams.map((t) => <option key={t.id} value={t.id}>{t.group_detail?.name || t.group?.name} · {t.name}</option>)}</select><button className="secondary-button" disabled={acting || !reassignTeam} type="button" style={{ minHeight: "34px" }} onClick={async () => { setActing(true); setActionError(""); try { await onReassign(ticket, Number(reassignTeam)); setReassignTeam(""); } catch (e) { setActionError(e.message || "No se pudo reasignar."); } finally { setActing(false); } }}>Mover</button></div></div>}
+            {canReassign && allowedTeams && <div className="detail-meta" style={{ marginTop: "14px" }}><span className="detail-label">Reasignar equipo</span><div style={{ display: "flex", gap: "6px", marginTop: "6px" }}><select value={reassignTeam} onChange={(e) => setReassignTeam(e.target.value)} style={{ flex: 1, height: "34px", border: "1px solid var(--line-strong)", borderRadius: "6px", padding: "0 8px", fontSize: "11px" }}><option value="">Seleccionar equipo</option>{allowedTeams.map((t) => <option key={t.id} value={t.id}>{t.group_detail?.name || t.group?.name} · {t.name}</option>)}</select><button className="secondary-button" disabled={acting || !reassignTeam} type="button" style={{ minHeight: "34px" }} onClick={async () => { setActing(true); setActionError(""); try { await onReassign(ticket, Number(reassignTeam)); setReassignTeam(""); } catch (e) { setActionError(e.message || "No se pudo reasignar."); } finally { setActing(false); } }}>Mover</button></div></div>}
             {actionError && <p className="detail-action-error" role="alert"><Icon name="alert" size={15} /> {actionError}</p>}
           </aside>
         </div>}
