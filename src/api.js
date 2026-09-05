@@ -1,4 +1,4 @@
-const apiUrl = (import.meta.env.VITE_API_URL || "http://127.0.0.1:8010/api").replace(/\/$/, "");
+const apiUrl = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
 const accessTokenKey = "sestel-access-token";
 const refreshTokenKey = "sestel-refresh-token";
 
