@@ -193,7 +193,7 @@ function App() {
   const [groupModal, setGroupModal] = useState(null);
   const [passwordModal, setPasswordModal] = useState(null);
   const [showProfile, setShowProfile] = useState(false);
-  const [query, setQuery] = useState("Todos");
+  const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("Todos");
   const [toast, setToast] = useState("");
 
