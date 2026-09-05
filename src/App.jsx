@@ -232,11 +232,22 @@ function App() {
   }, [sidebarOpen, newTicketOpen, ticketToResolve, ticketDetail, userModal, teamModal, groupModal, passwordModal, showProfile]);
 
   useEffect(() => {
-    if (session) refreshWorkspace();
+    if (session) {
+      refreshWorkspace();
+      refreshTeams();
+    }
   }, [session?.id]);
 
+  async function refreshTeams() {
+    try {
+      const [teamPayload, groupPayload] = await Promise.all([getTeams(), getGroups()]);
+      setTeams(teamPayload.results || teamPayload);
+      setGroups(groupPayload.results || groupPayload);
+    } catch {}
+  }
+
   useEffect(() => {
-    if (session?.role === "ADMIN" && activeView === "Usuarios") refreshUsers();
+    if (session && ["ADMIN", "SUPERVISOR"].includes(session?.role) && activeView === "Usuarios") refreshUsers();
   }, [activeView, session?.role]);
 
   // Tema Tigo fijo para producción

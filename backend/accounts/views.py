@@ -96,13 +96,21 @@ class LogoutView(APIView):
 class WorkGroupViewSet(viewsets.ModelViewSet):
     queryset = WorkGroup.objects.all()
     serializer_class = WorkGroupSerializer
-    permission_classes = [IsAdministrator]
+
+    def get_permissions(self):
+        if self.action in ["list", "retrieve"]:
+            return [IsAuthenticated()]
+        return [IsAdministrator()]
 
 
 class TeamViewSet(viewsets.ModelViewSet):
     queryset = Team.objects.select_related("group").all()
     serializer_class = TeamSerializer
-    permission_classes = [IsAdministrator]
+
+    def get_permissions(self):
+        if self.action in ["list", "retrieve"]:
+            return [IsAuthenticated()]
+        return [IsAdministrator()]
 
 
 class PasswordResetRequestView(APIView):
