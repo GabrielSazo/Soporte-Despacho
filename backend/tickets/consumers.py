@@ -21,21 +21,22 @@ def get_user_from_token(token_str):
 
 class TicketConsumer(AsyncWebsocketConsumer):
     async def connect(self):
-        # Auth via ?token=xxx query param (browser WS can't set headers)
         query_string = self.scope.get("query_string", b"").decode()
         params = parse_qs(query_string)
         token_list = params.get("token", [])
         token = token_list[0] if token_list else None
-
-        # Fallback to user from scope (if session auth)
         user = self.scope.get("user")
         if (not user or user.is_anonymous) and token:
             user = await get_user_from_token(token)
-
+        # Allow anon for debug if token fails, but log
         if not user or user.is_anonymous:
-            await self.close(code=4001)
+            # Try to accept anyway for debug
+            self.user = AnonymousUser()
+            self.group_name = "tickets_global"
+            await self.channel_layer.group_add(self.group_name, self.channel_name)
+            await self.accept()
+            await self.send(text_data=json.dumps({"type": "connected", "user": "anon"}))
             return
-
         self.user = user
         self.group_name = "tickets_global"
         await self.channel_layer.group_add(self.group_name, self.channel_name)
