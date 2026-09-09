@@ -62,7 +62,7 @@ def create_ticket(*, creator, **data):
         **data,
     )
     record_event(ticket, TicketEvent.EventType.CREATED, actor=creator, to_status=ticket.status)
-    return route_ticket(ticket, actor=creator)
+    return ticket
 
 
 @transaction.atomic
