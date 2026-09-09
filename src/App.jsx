@@ -157,7 +157,10 @@ function mapTicket(ticket) {
     status: ticket.status_label,
     statusCode: ticket.status,
     team: ticket.assigned_team?.name || "Sin asignar",
+    teamId: ticket.assigned_team?.id || null,
     requester: ticket.creator?.name || "Sin asignar",
+    creatorId: ticket.creator?.id || null,
+    assigneeId: ticket.assignee?.id || null,
     created: formatRelativeDate(ticket.created_at),
     createdAt: ticket.created_at,
     sla: formatRemaining(ticket.sla?.remaining_seconds),
@@ -203,6 +206,13 @@ function App() {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("Todos");
   const [toast, setToast] = useState("");
+
+  useEffect(() => {
+    if (!session) return;
+    if (session.role === "SOPORTE") setFilter("Trabajables");
+    else if (session.role === "DESPACHADOR") setFilter("Míos");
+    else setFilter("Todos");
+  }, [session?.id]);
 
   useEffect(() => {
     const closeOnEscape = (event) => {
@@ -350,9 +360,13 @@ function App() {
     notify(`${ticket.reference} fue enviado a Soporte Despacho.`);
   }
 
-  async function validateTicket(ticket, accepted) {
-    const updatedTicket = await validateTicketRequest(ticket.apiId, accepted);
+  async function validateTicket(ticket, accepted, comment = "") {
+    const updatedTicket = await validateTicketRequest(ticket.apiId, accepted, comment);
     replaceTicket(updatedTicket);
+    if (ticketDetail && ticketDetail.apiId === ticket.apiId) {
+      const detail = await getTicket(ticket.apiId);
+      setTicketDetail(mapTicket(detail));
+    }
     await refreshWorkspace(true);
     notify(accepted ? `${ticket.id} se cerró correctamente.` : `${ticket.id} volvió a Soporte para retrabajo.`);
   }
@@ -444,12 +458,16 @@ function App() {
   }
 
   const openTickets = tickets.filter((ticket) => ticket.statusCode !== "CERRADO").length;
-  const validationTickets = tickets.filter((ticket) => ticket.statusCode === "VALIDACION");
+  const validationTickets = tickets.filter((ticket) => ticket.statusCode === "VALIDACION" && (session?.role === "DESPACHADOR" ? ticket.creatorId === session.id : true));
+  const myValidationCount = tickets.filter((t) => t.statusCode === "VALIDACION" && t.creatorId === session?.id).length;
   const criticalTickets = tickets.filter((ticket) => ticket.priorityCode === "CRITICA").length;
-  const statusMap = { "Todos": null, "Abierto": "ABIERTO", "Asignado": "ASIGNADO", "En proceso": "EN_PROCESO", "Validación": "VALIDACION" };
+  const statusMap = { "Todos": null, "Míos": null, "Trabajables": null, "Abierto": "ABIERTO", "Asignado": "ASIGNADO", "En proceso": "EN_PROCESO", "Validación": "VALIDACION" };
   const filteredTickets = tickets.filter((ticket) => {
     const searchable = `${ticket.id} ${ticket.title} ${ticket.team} ${ticket.requester}`.toLowerCase();
-    return searchable.includes(query.toLowerCase()) && (!statusMap[filter] || ticket.statusCode === statusMap[filter]);
+    if (!searchable.includes(query.toLowerCase())) return false;
+    if (filter === "Míos") return ticket.assigneeId === session?.id || ticket.creatorId === session?.id;
+    if (filter === "Trabajables") return ["ABIERTO", "ASIGNADO"].includes(ticket.statusCode) && ticket.assigneeId !== session?.id;
+    return !statusMap[filter] || ticket.statusCode === statusMap[filter];
   });
   const canCreateTickets = session && ["DESPACHADOR", "ADMIN", "SUPERVISOR"].includes(session.role);
   const visibleNavigation = session && ["ADMIN", "SUPERVISOR"].includes(session.role) ? [...navigation, { label: "Usuarios", icon: "users" }] : navigation;
@@ -665,7 +683,7 @@ function Dashboard({ canCreate, criticalTickets, dashboard, onCreate, onOpen, on
 }
 
 function TicketsView({ canCreate, currentUser, filter, filteredTickets, onCreate, onFilterChange, onNotify, onOpen, onResolve, onTake, query, setQuery }) {
-  const filters = ["Todos", "Abierto", "Asignado", "En proceso", "Validación"];
+  const filters = currentUser?.role === "SOPORTE" ? ["Trabajables", "Míos", "Asignado", "En proceso", "Validación", "Todos"] : currentUser?.role === "DESPACHADOR" ? ["Míos", "Asignado", "En proceso", "Validación", "Todos"] : ["Todos", "Abierto", "Asignado", "En proceso", "Validación"];
 
   return (
     <>
@@ -1024,6 +1042,8 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onReassi
   const [attachError, setAttachError] = useState("");
   const [uploading, setUploading] = useState(false);
   const [reassignTeam, setReassignTeam] = useState("");
+  const [rejectComment, setRejectComment] = useState("");
+  const [showReject, setShowReject] = useState(false);
   const canTake = currentUser.role === "SOPORTE" && ["ABIERTO", "ASIGNADO"].includes(ticket.statusCode);
   const canResolve = currentUser.role === "SOPORTE" && ticket.statusCode === "EN_PROCESO";
   const canValidate = currentUser.role !== "SOPORTE" && ticket.statusCode === "VALIDACION";
@@ -1102,7 +1122,10 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onReassi
             {(canTake || canResolve || canValidate) && <div className="detail-actions">
               {canTake && <button className="primary-button" disabled={acting} type="button" onClick={() => runAction(onTake)}>Tomar ticket</button>}
               {canResolve && <button className="primary-button" type="button" onClick={() => onResolve(ticket)}>Registrar solución</button>}
-              {canValidate && <><button className="primary-button" disabled={acting} type="button" onClick={() => runAction(onValidate, true)}><Icon name="check" size={17} /> Aprobar solución</button><button className="secondary-button" disabled={acting} type="button" onClick={() => runAction(onValidate, false)}>Rechazar y devolver</button></>}
+              {canValidate && <>
+                <button className="primary-button" disabled={acting} type="button" onClick={() => runAction((t) => onValidate(t, true), true)}><Icon name="check" size={17} /> Aprobar solución</button>
+                {!showReject ? <button className="secondary-button" disabled={acting} type="button" onClick={() => setShowReject(true)}>Rechazar y devolver</button> : <div style={{ display: "grid", gap: "6px", marginTop: "8px", width: "100%" }}><textarea value={rejectComment} onChange={(e) => setRejectComment(e.target.value)} placeholder="Motivo del rechazo (obligatorio) — explica qué falta o por qué se devuelve" rows="3" style={{ width: "100%", border: "1px solid var(--line-strong)", borderRadius: "6px", padding: "8px", fontSize: "11px" }} /><div style={{ display: "flex", gap: "6px" }}><button className="secondary-button" disabled={acting || !rejectComment.trim()} type="button" onClick={async () => { setActing(true); setActionError(""); try { await onValidate(ticket, false, rejectComment); setShowReject(false); setRejectComment(""); } catch (e) { setActionError(e.message || "No se pudo rechazar."); } finally { setActing(false); } }}>Confirmar rechazo</button><button className="secondary-button" type="button" onClick={() => { setShowReject(false); setRejectComment(""); }}>Cancelar</button></div></div>}
+              </>}
             </div>}
             {canReassign && allowedTeams && <div className="detail-meta" style={{ marginTop: "14px" }}><span className="detail-label">Reasignar equipo</span><div style={{ display: "flex", gap: "6px", marginTop: "6px" }}><select value={reassignTeam} onChange={(e) => setReassignTeam(e.target.value)} style={{ flex: 1, height: "34px", border: "1px solid var(--line-strong)", borderRadius: "6px", padding: "0 8px", fontSize: "11px" }}><option value="">Seleccionar equipo</option>{allowedTeams.map((t) => <option key={t.id} value={t.id}>{t.group_detail?.name || t.group?.name} · {t.name}</option>)}</select><button className="secondary-button" disabled={acting || !reassignTeam} type="button" style={{ minHeight: "34px" }} onClick={async () => { setActing(true); setActionError(""); try { await onReassign(ticket, Number(reassignTeam)); setReassignTeam(""); } catch (e) { setActionError(e.message || "No se pudo reasignar."); } finally { setActing(false); } }}>Mover</button></div></div>}
             {actionError && <p className="detail-action-error" role="alert"><Icon name="alert" size={15} /> {actionError}</p>}
