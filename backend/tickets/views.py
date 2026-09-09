@@ -132,6 +132,15 @@ class TicketViewSet(viewsets.ModelViewSet):
         ticket.status = Ticket.Status.OPEN
         ticket.save(update_fields=["assigned_team", "assignee", "assigned_at", "status", "updated_at"])
         record_event(ticket, TicketEvent.EventType.ASSIGNED, actor=request.user, from_status=previous_team.name if previous_team else "", to_status=new_team.name, comment=f"Reasignado de {previous_team} a {new_team}.")
+        # Broadcast real-time
+        try:
+            from channels.layers import get_channel_layer
+            from asgiref.sync import async_to_sync
+            channel_layer = get_channel_layer()
+            if channel_layer:
+                async_to_sync(channel_layer.group_send)("tickets_global", {"type": "ticket_update", "data": {"type": "ticket_update", "ticket_id": ticket.id, "action": "reassigned"}})
+        except Exception:
+            pass
         return Response(TicketSerializer(ticket, context={"request": request}).data)
 
     @action(detail=True, methods=["post"], permission_classes=[IsAdministrator])

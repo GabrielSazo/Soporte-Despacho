@@ -3,9 +3,25 @@ from datetime import timedelta
 from django.db import transaction
 from django.utils import timezone
 
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
+
 from accounts.models import User
 
 from .models import Ticket, TicketEvent
+
+
+def broadcast_ticket_update(ticket_id, action="update"):
+    try:
+        channel_layer = get_channel_layer()
+        if channel_layer is None:
+            return
+        async_to_sync(channel_layer.group_send)(
+            "tickets_global",
+            {"type": "ticket_update", "data": {"type": "ticket_update", "ticket_id": ticket_id, "action": action}},
+        )
+    except Exception:
+        pass
 
 
 def record_event(ticket, event_type, actor=None, from_status="", to_status="", comment=""):
@@ -62,6 +78,7 @@ def create_ticket(*, creator, **data):
         **data,
     )
     record_event(ticket, TicketEvent.EventType.CREATED, actor=creator, to_status=ticket.status)
+    broadcast_ticket_update(ticket.id, "created")
     return ticket
 
 
@@ -73,6 +90,7 @@ def take_ticket(ticket, actor):
     ticket.assigned_at = ticket.assigned_at or timezone.now()
     ticket.save(update_fields=["assignee", "status", "assigned_at", "updated_at"])
     record_event(ticket, TicketEvent.EventType.TAKEN, actor=actor, from_status=previous_status, to_status=ticket.status)
+    broadcast_ticket_update(ticket.id, "taken")
     return ticket
 
 
@@ -86,6 +104,7 @@ def resolve_ticket(ticket, actor, resolution_notes):
     ticket.validation_due_at = now + timedelta(hours=24)
     ticket.save(update_fields=["status", "resolution_notes", "resolved_at", "validation_due_at", "updated_at"])
     record_event(ticket, TicketEvent.EventType.RESOLVED, actor=actor, from_status=previous_status, to_status=ticket.status, comment=resolution_notes)
+    broadcast_ticket_update(ticket.id, "resolved")
     return ticket
 
 
@@ -105,6 +124,7 @@ def validate_ticket(ticket, actor, approved, comment=""):
         ticket.save(update_fields=["status", "assignee", "assigned_at", "validation_due_at", "updated_at"])
         event_type = TicketEvent.EventType.REJECTED
     record_event(ticket, event_type, actor=actor, from_status=previous_status, to_status=ticket.status, comment=comment)
+    broadcast_ticket_update(ticket.id, "validated" if approved else "rejected")
     return ticket
 
 

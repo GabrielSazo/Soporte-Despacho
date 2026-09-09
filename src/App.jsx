@@ -248,6 +248,36 @@ function App() {
     }
   }, [session?.id]);
 
+  useEffect(() => {
+    if (!session) return;
+    const token = sessionStorage.getItem("sestel-access-token");
+    if (!token) return;
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${protocol}//${window.location.host}/ws/tickets/?token=${token}`;
+    let ws;
+    let closed = false;
+    function connect() {
+      ws = new WebSocket(wsUrl);
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === "ticket_update" || data.type === "connected") {
+            if (data.type === "ticket_update") refreshWorkspace(true);
+          }
+        } catch {
+          if (event.data === "pong") return;
+        }
+      };
+      ws.onclose = () => {
+        if (!closed) setTimeout(connect, 5000);
+      };
+      ws.onerror = () => ws.close();
+    }
+    connect();
+    const ping = setInterval(() => { if (ws && ws.readyState === WebSocket.OPEN) ws.send("ping"); }, 30000);
+    return () => { closed = true; clearInterval(ping); if (ws) ws.close(); };
+  }, [session?.id]);
+
   async function refreshTeams() {
     try {
       const [teamPayload, groupPayload] = await Promise.all([getTeams(), getGroups()]);

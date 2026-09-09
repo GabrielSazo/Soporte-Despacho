@@ -10,6 +10,11 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path,
       },
+      '/ws': {
+        target: 'ws://api:8000',
+        ws: true,
+        changeOrigin: true,
+      },
     },
   },
 });
