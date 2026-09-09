@@ -98,9 +98,11 @@ def validate_ticket(ticket, actor, approved, comment=""):
         ticket.save(update_fields=["status", "closed_at", "updated_at"])
         event_type = TicketEvent.EventType.APPROVED
     else:
-        ticket.status = Ticket.Status.IN_PROGRESS
+        ticket.status = Ticket.Status.OPEN
+        ticket.assignee = None
+        ticket.assigned_at = None
         ticket.validation_due_at = None
-        ticket.save(update_fields=["status", "validation_due_at", "updated_at"])
+        ticket.save(update_fields=["status", "assignee", "assigned_at", "validation_due_at", "updated_at"])
         event_type = TicketEvent.EventType.REJECTED
     record_event(ticket, event_type, actor=actor, from_status=previous_status, to_status=ticket.status, comment=comment)
     return ticket
