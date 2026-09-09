@@ -30,17 +30,18 @@ class TicketConsumer(AsyncWebsocketConsumer):
             user = await get_user_from_token(token)
         # Allow anon for debug if token fails, but log
         if not user or user.is_anonymous:
-            # Try to accept anyway for debug
             self.user = AnonymousUser()
             self.group_name = "tickets_global"
             await self.channel_layer.group_add(self.group_name, self.channel_name)
             await self.accept()
+            print("WSCONNECT /ws/tickets/ - anon")
             await self.send(text_data=json.dumps({"type": "connected", "user": "anon"}))
             return
         self.user = user
         self.group_name = "tickets_global"
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()
+        print(f"WSCONNECT /ws/tickets/ - {user} ({getattr(user, 'id', 'anon')})")
         await self.send(text_data=json.dumps({"type": "connected", "user": str(user)}))
 
     async def disconnect(self, close_code):
