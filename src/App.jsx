@@ -548,7 +548,7 @@ function App() {
         <header className="topbar">
           <button className="icon-button menu-toggle" type="button" aria-label="Abrir menú" onClick={() => setSidebarOpen(true)}><Icon name="menu" /></button>
           <div className="mobile-brand">Soporte Despacho</div>
-          <label className="global-search"><Icon name="search" size={19} /><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} onFocus={() => setActiveView("Tickets")} placeholder="Buscar ticket, técnico o equipo..." aria-label="Buscar tickets" /><kbd>Ctrl K</kbd></label>
+          <label className="global-search"><Icon name="search" size={19} /><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} onFocus={() => setActiveView("Tickets")} placeholder="Buscar ticket, técnico o equipo..." aria-label="Buscar tickets" /></label>
           <div className="topbar-actions">
             <button className="icon-button theme-button" type="button" aria-label={theme === "light" ? "Activar tema oscuro" : "Activar tema claro"} aria-pressed={theme === "dark"} onClick={() => setTheme((currentTheme) => (currentTheme === "light" ? "dark" : "light"))} title={theme === "light" ? "Cambiar a modo oscuro" : "Cambiar a modo claro"}><Icon name={theme === "light" ? "moon" : "sun"} size={19} /></button>
             <div className="notification-wrapper">
