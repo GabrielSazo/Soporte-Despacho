@@ -154,6 +154,8 @@ class TicketViewSet(viewsets.ModelViewSet):
         can_attach = can_attach or (request.user.role == User.Role.SUPPORT and ticket.assigned_team.group.code in request.user.group_codes)
         can_attach = can_attach or (request.user.role == User.Role.SUPERVISOR and ticket.assigned_team.group.code in request.user.group_codes)
         can_attach = can_attach or (request.user.role == User.Role.DESPACHADOR and ticket.origin_team.group.code in request.user.group_codes)
+        if ticket.attachments.count() >= 5:
+            raise ValidationError("Máximo 5 imágenes por ticket.")
         if not can_attach:
             raise PermissionDenied("No puedes adjuntar evidencia a este ticket.")
         serializer = TicketAttachmentSerializer(data=request.data, context={"request": request, "ticket": ticket})
