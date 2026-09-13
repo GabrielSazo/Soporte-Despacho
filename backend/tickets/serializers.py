@@ -49,12 +49,37 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
         )
         record_event(ticket, TicketEvent.EventType.ATTACHMENT, actor=request.user, comment=file.name)
         try:
-            from PIL import Image
+            from PIL import Image, ImageEnhance
             import pytesseract
             img = Image.open(attachment.file.path)
-            text = pytesseract.image_to_string(img, lang="spa+eng").strip()
-            if text:
-                snippet = text[:500].replace("\n", " ")
+            if img.mode != "L":
+                img = img.convert("L")
+            w, h = img.size
+            img = img.resize((w * 2, h * 2), Image.LANCZOS)
+            img = ImageEnhance.Contrast(img).enhance(1.8)
+            img = ImageEnhance.Sharpness(img).enhance(2.0)
+            img = img.point(lambda x: 255 if x > 140 else 0, "1").convert("L")
+            cfg = "--oem 3 --psm 6 -c preserve_interword_spaces=1"
+            text = pytesseract.image_to_string(img, lang="spa+eng", config=cfg).strip()
+            if len(text) < 20:
+                text2 = pytesseract.image_to_string(Image.open(attachment.file.path).convert("L"), lang="spa+eng", config="--oem 3 --psm 3").strip()
+                if len(text2) > len(text):
+                    text = text2
+            barcode_text = ""
+            try:
+                from pyzbar.pyzbar import decode
+                barcodes = decode(Image.open(attachment.file.path))
+                if barcodes:
+                    vals = [b.data.decode(errors="ignore") for b in barcodes if b.data]
+                    if vals:
+                        barcode_text = " | ".join(f"BARCODE:{v}" for v in vals)
+            except Exception:
+                pass
+            full = text
+            if barcode_text:
+                full = f"{text} {barcode_text}" if text else barcode_text
+            if full:
+                snippet = " ".join(full.split())[:800]
                 record_event(ticket, TicketEvent.EventType.ATTACHMENT, actor=None, comment=f"OCR: {snippet}")
         except Exception:
             pass
