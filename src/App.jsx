@@ -601,7 +601,7 @@ function App() {
           {isLoading ? <LoadingState /> : <>
             {activeView === "Resumen" && <Dashboard canCreate={canCreateTickets} criticalTickets={criticalTickets} dashboard={dashboard} onCreate={() => setNewTicketOpen(true)} onOpen={openTicketDetail} onShowTickets={() => setActiveView("Tickets")} tickets={tickets} validationTickets={validationTickets} />}
             {activeView === "Tickets" && <TicketsView canCreate={canCreateTickets} currentUser={session} filter={filter} filteredTickets={filteredTickets} onCreate={() => setNewTicketOpen(true)} onFilterChange={setFilter} onNotify={notify} onOpen={openTicketDetail} onResolve={setTicketToResolve} onTake={takeTicket} query={query} setQuery={setQuery} />}
-            {activeView === "Validaciones" && <ValidationsView canValidate={session.role !== "SOPORTE"} tickets={validationTickets} onValidate={validateTicket} />}
+            {activeView === "Validaciones" && <ValidationsView canValidate={session.role !== "SOPORTE"} tickets={validationTickets} onOpen={openTicketDetail} onValidate={validateTicket} />}
             {activeView === "Mi equipo" && <TeamView currentUser={session} onNotify={notify} tickets={tickets} />}
             {activeView === "Informes" && <ReportsView tickets={tickets} />}
             {activeView === "Usuarios" && ["ADMIN","SUPERVISOR"].includes(session.role) && <UsersView error={usersError} groups={groups} loading={usersLoading} onCreate={() => setUserModal("new")} onCreateGroup={() => setGroupModal("new")} onCreateTeam={() => setTeamModal("new")} onEdit={setUserModal} onEditGroup={setGroupModal} onEditTeam={setTeamModal} onResetPassword={setPasswordModal} onRetry={refreshUsers} teams={teams} users={users} />}
@@ -754,7 +754,7 @@ function TicketsView({ canCreate, currentUser, filter, filteredTickets, onCreate
   );
 }
 
-function ValidationsView({ canValidate, tickets, onValidate }) {
+function ValidationsView({ canValidate, tickets, onOpen, onValidate }) {
   const [rejectId, setRejectId] = useState(null);
   const [rejectComment, setRejectComment] = useState("");
   return (
@@ -767,12 +767,13 @@ function ValidationsView({ canValidate, tickets, onValidate }) {
       <section className="validation-grid">
         {!canValidate ? <EmptyValidation /> : null}
         {canValidate && tickets.length > 0 ? tickets.map((ticket) => (
-          <article className="validation-card" key={ticket.id}>
+          <article className="validation-card" key={ticket.id} onClick={() => onOpen && onOpen(ticket)} style={{ cursor: onOpen ? "pointer" : "default" }}>
             <div className="validation-card-top"><span className="ticket-id">{ticket.id}</span><span className="status-pill status-validation">Validación</span></div>
             <h2>{ticket.title}</h2>
             <div className="solution-note"><Icon name="checkCircle" size={19} /><div><span>Solución de Soporte</span><p>{ticket.resolutionNotes || "Soporte marcó este caso como resuelto. Confirma el resultado en campo."}</p></div></div>
             <div className="validation-meta"><span><div className="avatar small-avatar">{initials(ticket.assignee)}</div> {ticket.assignee}</span><span><Icon name="clock" size={16} /> {ticket.created}</span></div>
-            {rejectId === ticket.apiId ? <div style={{ display: "grid", gap: "8px", marginTop: "10px" }}><textarea value={rejectComment} onChange={(e) => setRejectComment(e.target.value)} placeholder="Motivo del rechazo (obligatorio)" rows="3" style={{ width: "100%", border: "1px solid var(--line-strong)", borderRadius: "6px", padding: "8px", fontSize: "11px" }} /><div style={{ display: "flex", gap: "6px" }}><button className="secondary-button" disabled={!rejectComment.trim()} type="button" onClick={() => { onValidate(ticket, false, rejectComment); setRejectId(null); setRejectComment(""); }}>Confirmar rechazo</button><button className="secondary-button" type="button" onClick={() => { setRejectId(null); setRejectComment(""); }}>Cancelar</button></div></div> : <div className="validation-actions"><button className="secondary-button" type="button" onClick={() => setRejectId(ticket.apiId)}>Rechazar y devolver</button><button className="primary-button" type="button" onClick={() => onValidate(ticket, true)}><Icon name="check" size={17} /> Aprobar solución</button></div>}
+            {rejectId === ticket.apiId ? <div style={{ display: "grid", gap: "8px", marginTop: "10px" }} onClick={(e) => e.stopPropagation()}><textarea value={rejectComment} onChange={(e) => setRejectComment(e.target.value)} placeholder="Motivo del rechazo (obligatorio)" rows="3" style={{ width: "100%", border: "1px solid var(--line-strong)", borderRadius: "6px", padding: "8px", fontSize: "11px" }} /><div style={{ display: "flex", gap: "6px" }}><button className="secondary-button" disabled={!rejectComment.trim()} type="button" onClick={() => { onValidate(ticket, false, rejectComment); setRejectId(null); setRejectComment(""); }}>Confirmar rechazo</button><button className="secondary-button" type="button" onClick={() => { setRejectId(null); setRejectComment(""); }}>Cancelar</button></div></div> : <div className="validation-actions" onClick={(e) => e.stopPropagation()}><button className="secondary-button" type="button" onClick={() => setRejectId(ticket.apiId)}>Rechazar y devolver</button><button className="primary-button" type="button" onClick={() => onValidate(ticket, true)}><Icon name="check" size={17} /> Aprobar solución</button></div>}
+            <div style={{ marginTop: "8px", fontSize: "10px", color: "var(--quiet)", textAlign: "center" }}>Clic para ver detalle →</div>
           </article>
         )) : null}
         {canValidate && tickets.length === 0 ? <EmptyValidation /> : null}
