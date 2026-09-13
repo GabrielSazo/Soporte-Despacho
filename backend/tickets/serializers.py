@@ -50,36 +50,63 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
         record_event(ticket, TicketEvent.EventType.ATTACHMENT, actor=request.user, comment=file.name)
         try:
             from PIL import Image, ImageEnhance
-            import pytesseract
-            img = Image.open(attachment.file.path)
-            if img.mode != "L":
-                img = img.convert("L")
+            import pytesseract, re
+            img0 = Image.open(attachment.file.path)
+            # OCR top (SSID/PASSWORD) with clean psm6
+            img = img0.convert("L")
             w, h = img.size
             img = img.resize((w * 2, h * 2), Image.LANCZOS)
-            img = ImageEnhance.Contrast(img).enhance(1.8)
-            img = ImageEnhance.Sharpness(img).enhance(2.0)
-            img = img.point(lambda x: 255 if x > 140 else 0, "1").convert("L")
+            img = ImageEnhance.Contrast(img).enhance(1.6)
             cfg = "--oem 3 --psm 6 -c preserve_interword_spaces=1"
-            text = pytesseract.image_to_string(img, lang="spa+eng", config=cfg).strip()
-            if len(text) < 20:
-                text2 = pytesseract.image_to_string(Image.open(attachment.file.path).convert("L"), lang="spa+eng", config="--oem 3 --psm 3").strip()
-                if len(text2) > len(text):
-                    text = text2
-            barcode_text = ""
+            text_top = pytesseract.image_to_string(img, lang="eng", config=cfg).strip()
+            # Extract SSID/PASSWORD lines via regex, ignore noise
+            lines = []
+            for line in text_top.splitlines():
+                l = line.strip()
+                if re.search(r"SSID\s*:", l, re.I):
+                    l = re.sub(r".*?(SSID\s*:.*)", r"\1", l, flags=re.I).strip()
+                    lines.append(l)
+                elif re.search(r"PASSWORD", l, re.I):
+                    l = re.sub(r".*?(PASSWORD.*)", r"\1", l, flags=re.I).strip()
+                    # next line may be the password itself
+                    lines.append(l)
+                elif re.match(r"^[0-9A-Z]{10,}$", l):
+                    lines.append(l)
+            # Fallback: if lines empty, use raw top 2 lines
+            if not lines:
+                lines = [l.strip() for l in text_top.splitlines() if l.strip()][:2]
+            # Barcodes -> SN/MAC/EMTA in order top->bottom
+            barcode_lines = []
             try:
                 from pyzbar.pyzbar import decode
-                barcodes = decode(Image.open(attachment.file.path))
+                barcodes = decode(img0)
                 if barcodes:
-                    vals = [b.data.decode(errors="ignore") for b in barcodes if b.data]
-                    if vals:
-                        barcode_text = " | ".join(f"BARCODE:{v}" for v in vals)
+                    # sort by y (top to bottom)
+                    barcodes = sorted(barcodes, key=lambda b: b.rect.top)
+                    vals = [b.data.decode(errors="ignore").strip() for b in barcodes if b.data]
+                    labels = ["SN", "MAC", "EMTA MAC"]
+                    for i, v in enumerate(vals[:3]):
+                        barcode_lines.append(f"{labels[i] if i < len(labels) else f'BARCODE{i+1}'} {v}")
             except Exception:
                 pass
-            full = text
-            if barcode_text:
-                full = f"{text} {barcode_text}" if text else barcode_text
-            if full:
-                snippet = " ".join(full.split())[:800]
+            # Combine
+            parts = []
+            # SSID/PASSWORD block
+            ssid_pass = []
+            for l in lines:
+                if "SSID" in l.upper() or "PASSWORD" in l.upper() or re.match(r"^[0-9A-Z]{10,}$", l):
+                    ssid_pass.append(l)
+            if ssid_pass:
+                parts.extend(ssid_pass[:3])
+            else:
+                # fallback to first 2 non-empty lines
+                parts.extend([l for l in text_top.splitlines() if l.strip()][:2])
+            parts.extend(barcode_lines)
+            if parts:
+                snippet = "\n".join(parts)[:800]
+                record_event(ticket, TicketEvent.EventType.ATTACHMENT, actor=None, comment=f"OCR:\n{snippet}")
+            elif text_top.strip():
+                snippet = " ".join(text_top.split())[:500]
                 record_event(ticket, TicketEvent.EventType.ATTACHMENT, actor=None, comment=f"OCR: {snippet}")
         except Exception:
             pass
