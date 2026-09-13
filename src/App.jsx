@@ -538,7 +538,7 @@ function App() {
         <div className="context-card"><span className="context-dot" /><div><span>Equipo actual</span><strong>{session.team}</strong></div><Icon name="chevronDown" size={16} /></div>
         <nav className="main-nav">
           <p className="nav-caption">Operación</p>
-          {visibleNavigation.map((item) => <button className={`nav-item ${activeView === item.label ? "active" : ""}`} key={item.label} onClick={() => changeView(item.label)} type="button"><Icon name={item.icon} size={19} /><span>{item.label}</span>{item.badge && <b>{item.label === "Tickets" ? openTickets : validationTickets.length}</b>}</button>)}
+          {visibleNavigation.map((item) => <button className={`nav-item ${activeView === item.label ? "active" : ""}`} key={item.label} onClick={() => changeView(item.label)} type="button"><Icon name={item.icon} size={19} /><span>{item.label}</span>{item.badge && <b>{item.label === "Tickets" ? openTickets : session.role !== "SOPORTE" ? validationTickets.length : 0}</b>}</button>)}
         </nav>
         <div className="sidebar-bottom">
           <button className="nav-item" type="button" onClick={() => ["ADMIN","SUPERVISOR"].includes(session.role) ? changeView("Usuarios") : notify("La gestión de usuarios está disponible para administración.")}><Icon name="settings" size={19} /><span>{["ADMIN","SUPERVISOR"].includes(session.role) ? "Gestionar usuarios" : "Configuración"}</span></button>
