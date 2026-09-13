@@ -48,6 +48,16 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
             uploaded_by=request.user,
         )
         record_event(ticket, TicketEvent.EventType.ATTACHMENT, actor=request.user, comment=file.name)
+        try:
+            from PIL import Image
+            import pytesseract
+            img = Image.open(attachment.file.path)
+            text = pytesseract.image_to_string(img, lang="spa+eng").strip()
+            if text:
+                snippet = text[:500].replace("\n", " ")
+                record_event(ticket, TicketEvent.EventType.ATTACHMENT, actor=None, comment=f"OCR: {snippet}")
+        except Exception:
+            pass
         return attachment
 
 
