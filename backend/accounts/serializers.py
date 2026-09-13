@@ -57,7 +57,6 @@ class CurrentUserSerializer(serializers.ModelSerializer):
     def get_groups(self, user):
         groups = WorkGroup.objects.filter(teams__members=user).distinct()
         mgroups = user.managed_groups.all()
-        # Union both
         all_ids = set(g.id for g in groups) | set(g.id for g in mgroups)
         all_groups = WorkGroup.objects.filter(id__in=all_ids)
         return WorkGroupSerializer(all_groups, many=True).data
@@ -110,7 +109,6 @@ class UserSerializer(serializers.ModelSerializer):
         if not self.instance and not attrs.get("password"):
             raise serializers.ValidationError({"password": "La contraseña es obligatoria al crear un usuario."})
         role = attrs.get("role", getattr(self.instance, "role", None))
-        # For M2M, validated teams are in attrs if provided, otherwise check instance
         if self.instance:
             has_teams = attrs.get("teams") is not None and len(attrs.get("teams")) > 0 or self.instance.teams.exists()
         else:
@@ -119,7 +117,6 @@ class UserSerializer(serializers.ModelSerializer):
                 has_teams = False
         if role in {User.Role.DISPATCHER, User.Role.SUPPORT} and not has_teams and "teams" in attrs:
             raise serializers.ValidationError({"teams": "Un despachador o agente de soporte requiere al menos un equipo asignado."})
-        # Allow creation without teams initially, will be set via .set() in create()
         return attrs
 
     def update(self, instance, validated_data):

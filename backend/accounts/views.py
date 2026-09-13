@@ -40,12 +40,9 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
         try:
             data = super().validate(attrs)
         except Exception as exc:
-            # El backend ya registró el intento fallido; propagar mensaje genérico
             detail = getattr(exc, "detail", None)
             if isinstance(detail, dict) and "detail" in detail:
                 raise
-            # Si el backend no encontró usuario, DRF ya devuelve 'No active account'
-            # Verificamos si es por bloqueo para dar mensaje más claro
             if email:
                 try:
                     u = User.objects.get(email__iexact=email)
@@ -120,7 +117,6 @@ class PasswordResetRequestView(APIView):
         email = (request.data.get("email") or "").strip().lower()
         if not email:
             raise ValidationError({"email": "Debes indicar el correo."})
-        # Respuesta genérica para no enumerar usuarios; en demo mostramos detalle si no existe para facilitar pruebas.
         try:
             user = User.objects.get(email__iexact=email)
         except User.DoesNotExist:
@@ -134,15 +130,19 @@ class PasswordResetRequestView(APIView):
         token = password_reset_token_generator.make_token(user)
         reset_link = f"{settings.FRONTEND_URL.rstrip('/')}/reset-password?uid={uid}&token={token}"
         subject = "Soporte Despacho Tigo - Restablece tu contraseña"
-        message = (
-            f"Hola {user.display_name},\n\n"
-            f"Recibimos una solicitud para restablecer tu contraseña en Soporte Despacho Tigo - Centro de Control.\n"
-            f"Usa este enlace para definir una nueva clave (válido por 1 hora):\n\n"
-            f"{reset_link}\n\n"
-            f"Si no solicitaste este cambio, puedes ignorar este correo.\n"
-            f"Este es un correo automático, no respondas a esta dirección."
-        )
-        send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [user.email], fail_silently=False)
+        html_message = f"""
+        <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; background: #f3f6ff; border-radius: 12px;">
+          <h2 style="color: #001eb4; margin: 0 0 12px;">Hola {user.display_name},</h2>
+          <p style="color: #0f1a4a; font-size: 14px; line-height: 1.6;">Recibimos una solicitud para restablecer tu contraseña en <b>Soporte Despacho Tigo</b>.</p>
+          <p style="text-align: center; margin: 28px 0;">
+            <a href="{reset_link}" style="display: inline-block; padding: 12px 28px; background: #001eb4; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 700; font-size: 14px;">Restablecer contraseña</a>
+          </p>
+          <p style="color: #5a658d; font-size: 12px;">Este botón es válido por 1 hora. Si no solicitaste este cambio, ignora este correo.</p>
+          <p style="color: #8d97b5; font-size: 11px; word-break: break-all;">Si el botón no funciona, copia este enlace: {reset_link}</p>
+        </div>
+        """
+        message = f"Hola {user.display_name},\n\nRestablece tu contraseña aquí: {reset_link}\n\nVálido por 1 hora."
+        send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [user.email], fail_silently=False, html_message=html_message)
 
         response_data = {"detail": "Se envió un correo con instrucciones para restablecer tu contraseña. Revisa tu bandeja de entrada."}
         if settings.DEBUG:
@@ -177,13 +177,10 @@ class PasswordResetConfirmView(APIView):
             raise ValidationError({"new_password": list(exc.messages)})
         user.set_password(new_password)
         user.save(update_fields=["password"])
-        # Desbloqueo: solo vía restablecimiento por correo (requisito)
         user.unlock_via_password_reset()
         return Response({"detail": "Contraseña restablecida correctamente. Cuenta desbloqueada. Ya puedes iniciar sesión."})
 
 
-# Compatibilidad: endpoint anterior que pedía clave directa ahora delega al flujo por correo.
-# Se mantiene para no romper el modal administrativo, pero el login usará el flujo por correo.
 class PublicPasswordResetView(PasswordResetRequestView):
     pass
 

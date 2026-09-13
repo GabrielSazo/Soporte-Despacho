@@ -124,7 +124,7 @@ function mapManagedUser(user) {
   let groupNames = teams.length ? [...new Set(teams.map((t) => t.group?.name || t.group_detail?.name).filter(Boolean))].join(", ") : user.team_detail?.group?.name || "Sin grupo";
   if (user.role === "SUPERVISOR" && mgroups.length) {
     groupNames = mgroups.map((g) => g.name).join(", ");
-    // mostrar equipos supervisados como grupos
+
   }
   return {
     ...user,
@@ -290,7 +290,6 @@ function App() {
     if (session && ["ADMIN", "SUPERVISOR"].includes(session?.role) && activeView === "Usuarios") refreshUsers();
   }, [activeView, session?.role]);
 
-  // Tema Tigo fijo para producción
 
   function notify(message) {
     setToast(message);
@@ -1298,13 +1297,9 @@ function LoginScreen({ brand, onLogin, onToggleTheme, theme }) {
         </a>
         <div className="login-intro-content">
           <p className="eyebrow">Soporte técnico conectado</p>
-          <h1>Decisiones claras para cada solicitud.</h1>
-          <p>Centraliza la operación de HFC, FTTH y DTH desde una única bandeja con seguimiento de SLA.</p>
-          <div className="login-flow" aria-label="Flujo de un ticket">
-            <span>Solicitud</span><Icon name="arrowRight" size={16} /><span>Soporte</span><Icon name="arrowRight" size={16} /><span>Validación</span>
-          </div>
+          <h1>Soporte Despacho</h1>
+          <p>Centro de control Tigo.</p>
         </div>
-        <div className="login-intro-footer"><span><b>3</b> perfiles de operación</span><span><b>1</b> vista centralizada</span></div>
       </section>
 
       <section className="login-form-area">

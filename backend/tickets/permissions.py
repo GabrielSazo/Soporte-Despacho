@@ -27,9 +27,7 @@ def visible_tickets_for(user):
         group_codes = user.group_codes
         if not group_codes:
             return queryset.none()
-        # Ve todo su grupo por grupo (no necesita seleccionar 14 equipos)
         return queryset.filter(assigned_team__group__code__in=group_codes)
-    # DESPACHADOR: ve todo lo creado por su grupo
     group_codes = user.group_codes
     if not group_codes:
         return queryset.filter(creator=user)
@@ -47,12 +45,10 @@ def require_support_access(user, ticket):
             return
         raise PermissionDenied("No tienes acceso a este grupo.")
     if user.role == User.Role.SUPPORT:
-        # Soporte ve por grupo y puede reasignar a cualquier grupo
         if ticket_group in group_codes:
             return
         raise PermissionDenied("No tienes acceso operativo a este ticket.")
     if user.role == User.Role.DESPACHADOR:
-        # Despachador ve/reassigna dentro de su grupo
         if ticket_group in group_codes or origin_group in group_codes:
             return
         raise PermissionDenied("Solo puedes reasignar tickets de tu grupo.")

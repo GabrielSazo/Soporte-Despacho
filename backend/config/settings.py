@@ -147,7 +147,6 @@ CHANNEL_LAYERS = {
         },
     },
 }
-# Fallback to in-memory if redis not available (dev without redis)
 if environment_flag("CHANNEL_LAYERS_IN_MEMORY", False):
     CHANNEL_LAYERS = {"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}}
 

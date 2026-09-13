@@ -120,7 +120,6 @@ class TicketViewSet(viewsets.ModelViewSet):
             new_team = Team.objects.get(pk=team_id)
         except Team.DoesNotExist:
             raise ValidationError({"team": "Equipo no existe."})
-        # Despachador/Supervisor solo dentro de su grupo, soporte a cualquier grupo
         if request.user.role in {User.Role.DESPACHADOR, User.Role.SUPERVISOR} and new_team.group.code not in request.user.group_codes:
             raise PermissionDenied("Solo puedes reasignar dentro de tu grupo.")
         from .services import record_event
@@ -132,7 +131,6 @@ class TicketViewSet(viewsets.ModelViewSet):
         ticket.status = Ticket.Status.OPEN
         ticket.save(update_fields=["assigned_team", "assignee", "assigned_at", "status", "updated_at"])
         record_event(ticket, TicketEvent.EventType.ASSIGNED, actor=request.user, from_status=previous_team.name if previous_team else "", to_status=new_team.name, comment=f"Reasignado de {previous_team} a {new_team}.")
-        # Broadcast real-time
         try:
             from channels.layers import get_channel_layer
             from asgiref.sync import async_to_sync

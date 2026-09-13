@@ -28,7 +28,6 @@ class TicketConsumer(AsyncWebsocketConsumer):
         user = self.scope.get("user")
         if (not user or user.is_anonymous) and token:
             user = await get_user_from_token(token)
-        # Allow anon for debug if token fails, but log
         if not user or user.is_anonymous:
             self.user = AnonymousUser()
             self.group_name = "tickets_global"
@@ -49,7 +48,6 @@ class TicketConsumer(AsyncWebsocketConsumer):
             await self.channel_layer.group_discard(self.group_name, self.channel_name)
 
     async def receive(self, text_data=None, bytes_data=None):
-        # Keepalive ping
         if text_data == "ping":
             await self.send(text_data="pong")
 

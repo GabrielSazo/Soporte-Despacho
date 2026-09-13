@@ -24,6 +24,5 @@ class EmailOrUsernameBackend(ModelBackend):
                 user.reset_login_attempts()
             return user
 
-        # Contraseña incorrecta: registrar intento
         user.record_failed_login()
         return None

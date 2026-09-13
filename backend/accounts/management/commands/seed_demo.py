@@ -17,7 +17,6 @@ class Command(BaseCommand):
         cellus, _ = WorkGroup.objects.get_or_create(name="cellus", defaults={"code": "cellus"})
         nexel, _ = WorkGroup.objects.get_or_create(name="nexel", defaults={"code": "nexel"})
 
-        # Tigo: 14 estaciones
         estaciones = []
         for i in range(1, 15):
             team, _ = Team.objects.get_or_create(group=tigo, name=f"Estacion {i}", defaults={"code": f"estacion{i}"})
@@ -57,7 +56,7 @@ class Command(BaseCommand):
             "Luis",
             "González",
             User.Role.SUPERVISOR,
-            [],  # sin equipos, solo grupo supervisado
+            [],
             managed_groups=[tigo],
         )
 
