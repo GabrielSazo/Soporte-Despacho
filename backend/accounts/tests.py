@@ -6,8 +6,8 @@ from .models import Team, User, WorkGroup
 
 class AuthenticationTests(APITestCase):
     def setUp(self):
-        group = WorkGroup.objects.create(name="Tigo", code="tigo")
-        self.team = Team.objects.create(group=group, name="FTTH Norte", code="ftth-norte")
+        group, _ = WorkGroup.objects.get_or_create(name="Tigo", defaults={"code": "tigo"})
+        self.team, _ = Team.objects.get_or_create(group=group, name="FTTH Norte", defaults={"code": "ftth-norte"})
         self.user = User.objects.create_user(
             username="despacho@sestel.local",
             email="despacho@sestel.local",
@@ -50,7 +50,26 @@ class AuthenticationTests(APITestCase):
     def test_only_administrators_can_manage_users(self):
         self.client.force_authenticate(self.user)
         denied = self.client.get(reverse("user-list"))
-        self.assertEqual(denied.status_code, 403)
+        # Dispatcher can list but only sees self
+        self.assertEqual(denied.status_code, 200)
+        self.assertEqual(denied.data["count"], 1)
+
+        # Dispatcher cannot create
+        forbidden = self.client.post(
+            reverse("user-list"),
+            {
+                "username": "otro@sestel.local",
+                "email": "otro@sestel.local",
+                "first_name": "Otro",
+                "last_name": "Usuario",
+                "password": "Sestel2026!",
+                "role": User.Role.SUPPORT,
+                "teams": [self.team.id],
+                "is_active": True,
+            },
+            format="json",
+        )
+        self.assertEqual(forbidden.status_code, 403)
 
         self.client.force_authenticate(self.admin)
         created = self.client.post(

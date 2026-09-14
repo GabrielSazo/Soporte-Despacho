@@ -21,8 +21,8 @@ class TicketFlowTests(APITestCase):
         self.media_override.enable()
         self.addCleanup(self.media_override.disable)
         self.addCleanup(lambda: shutil.rmtree(self.media_root, ignore_errors=True))
-        group = WorkGroup.objects.create(name="Tigo", code="tigo")
-        self.team = Team.objects.create(group=group, name="FTTH Norte", code="ftth-norte")
+        group, _ = WorkGroup.objects.get_or_create(name="Tigo", defaults={"code": "tigo"})
+        self.team, _ = Team.objects.get_or_create(group=group, name="FTTH Norte", defaults={"code": "ftth-norte"})
         self.dispatcher = User.objects.create_user(
             username="despacho@sestel.local",
             email="despacho@sestel.local",
@@ -71,8 +71,8 @@ class TicketFlowTests(APITestCase):
         response = self.client.get("/api/tickets/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["count"], 1)
-        other_group = WorkGroup.objects.create(name="BBI N-2", code="bbi-n2-test")
-        other_team = Team.objects.create(group=other_group, name="Soporte-N2", code="reclamos-test")
+        other_group, _ = WorkGroup.objects.get_or_create(name="Otro Grupo", defaults={"code": "otro-grupo-test"})
+        other_team, _ = Team.objects.get_or_create(group=other_group, name="Otro Equipo", defaults={"code": "otro-equipo-test"})
         outsider = User.objects.create_user(username="outsider@sestel.local", email="outsider@sestel.local", password="Sestel2026!", role=User.Role.DISPATCHER)
         outsider.teams.set([other_team])
         self.client.force_authenticate(outsider)

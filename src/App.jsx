@@ -31,7 +31,7 @@ const navigation = [
   { label: "Resumen", icon: "dashboard" },
   { label: "Tickets", icon: "ticket", badge: "12" },
   { label: "Validaciones", icon: "checkCircle", badge: "3" },
-  { label: "Mi equipo", icon: "users" },
+  { label: "Mi grupo", icon: "users" },
   { label: "Informes", icon: "chart" },
 ];
 
@@ -103,14 +103,15 @@ function mapUser(user) {
   const teams = user.teams || (user.team ? [user.team] : []);
   const firstTeam = teams[0];
   const groups = user.groups || (user.group ? [user.group] : []);
+  const groupsLabel = teams.length ? [...new Set(teams.map((t) => t.group?.name).filter(Boolean))].join(", ") : groups.length ? groups.map((g) => g.name).join(", ") : user.group?.name || "Sin grupo";
   return {
     ...user,
     initials: initials(user.name),
     avatarClass: avatarClass(user.name),
     group: firstTeam?.group?.name || groups[0]?.name || user.group?.name || "Sin grupo",
-    groupsLabel: teams.length ? [...new Set(teams.map((t) => t.group?.name).filter(Boolean))].join(", ") : "Sin grupo",
+    groupsLabel,
     roleLabel: roleLabels[user.role] || user.role,
-    team: teams.length ? teams.map((t) => t.name).join(", ") : user.team?.name || "Vista global",
+    team: groupsLabel === "Sin grupo" ? "Vista global" : groupsLabel,
     teams,
     groups,
   };
@@ -120,11 +121,13 @@ function mapManagedUser(user) {
   const teams = user.teams_detail || user.teams || (user.team_detail ? [user.team_detail] : user.team ? [{ name: user.team_detail?.name, group: user.team_detail?.group }] : []);
   const teamIds = (user.teams || []).map(String);
   const mgroups = user.managed_groups_detail || user.managed_groups || [];
-  const teamNames = teams.length ? teams.map((t) => t.name).join(", ") : user.team_detail?.name || "Sin equipo";
   let groupNames = teams.length ? [...new Set(teams.map((t) => t.group?.name || t.group_detail?.name).filter(Boolean))].join(", ") : user.team_detail?.group?.name || "Sin grupo";
   if (user.role === "SUPERVISOR" && mgroups.length) {
     groupNames = mgroups.map((g) => g.name).join(", ");
 
+  }
+  if (!groupNames || groupNames === "Sin grupo") {
+    groupNames = "Sin grupo";
   }
   return {
     ...user,
@@ -135,7 +138,7 @@ function mapManagedUser(user) {
     teamIds,
     managedGroups: mgroups.map((g) => String(g.id)),
     teams,
-    teamName: user.role === "SUPERVISOR" ? (mgroups.length ? `Supervisa: ${groupNames}` : teamNames) : teamNames,
+    teamName: user.role === "SUPERVISOR" ? (mgroups.length ? `Supervisa: ${groupNames}` : groupNames) : groupNames,
     groupName: groupNames,
   };
 }
@@ -156,7 +159,7 @@ function mapTicket(ticket) {
     priorityCode: ticket.priority,
     status: ticket.status_label,
     statusCode: ticket.status,
-    team: ticket.assigned_team?.name || "Sin asignar",
+    team: ticket.assigned_team?.group?.name || ticket.assigned_team?.name || "Sin asignar",
     teamId: ticket.assigned_team?.id || null,
     requester: ticket.creator?.name || "Sin asignar",
     creatorId: ticket.creator?.id || null,
@@ -171,7 +174,7 @@ function mapTicket(ticket) {
     description: ticket.description,
     resolutionNotes: ticket.resolution_notes,
     assignee: ticket.assignee?.name || "Sin asignar",
-    originTeam: ticket.origin_team?.name || "Sin asignar",
+    originTeam: ticket.origin_team?.group?.name || ticket.origin_team?.name || "Sin asignar",
     attachments: ticket.attachments || [],
     events: ticket.events || [],
   };
@@ -535,7 +538,7 @@ function App() {
           </a>
           <button className="icon-button sidebar-close" type="button" aria-label="Cerrar menú" onClick={() => setSidebarOpen(false)}><Icon name="close" /></button>
         </div>
-        <div className="context-card"><span className="context-dot" /><div><span>Equipo actual</span><strong>{session.team}</strong></div><Icon name="chevronDown" size={16} /></div>
+        <div className="context-card"><span className="context-dot" /><div><span>Grupo actual</span><strong>{session.team}</strong></div><Icon name="chevronDown" size={16} /></div>
         {session.role === "SOPORTE" && <div style={{ margin: "0 4px 16px", padding: "10px", background: "rgba(255,255,255,0.06)", borderRadius: "8px" }}><span style={{ fontSize: "10px", fontWeight: 700, color: "var(--sidebar-muted)", textTransform: "uppercase" }}>Mis grupos</span><div style={{ display: "grid", gap: "6px", marginTop: "8px" }}>{groups.map((g) => { const checked = session.teams?.some((t) => t.group?.id === g.id) || session.groups?.some((sg) => sg.id === g.id); return <label key={g.id} style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "11px", color: "var(--sidebar-text)" }}><input type="checkbox" checked={checked} onChange={async () => { const teamIds = teams.filter((t) => t.group === g.id || t.group_detail?.id === g.id).map((t) => t.id); const currentTeamIds = session.teams?.map((t) => t.id) || []; const hasAll = teamIds.every((id) => currentTeamIds.includes(id)); const newTeamIds = hasAll ? currentTeamIds.filter((id) => !teamIds.includes(id)) : [...new Set([...currentTeamIds, ...teamIds])]; try { const updated = await updateMyTeams(newTeamIds, null); setSession(mapUser(updated)); notify(hasAll ? `Ya no atiendes ${g.name}` : `Ahora atiendes ${g.name}`); refreshWorkspace(true); } catch (e) { notify(e.message || "No se pudo actualizar"); } }} />{g.name}</label>; })}</div></div>}
         <nav className="main-nav">
           <p className="nav-caption">Operación</p>
@@ -552,7 +555,7 @@ function App() {
         <header className="topbar">
           <button className="icon-button menu-toggle" type="button" aria-label="Abrir menú" onClick={() => setSidebarOpen(true)}><Icon name="menu" /></button>
           <div className="mobile-brand">Soporte Despacho</div>
-          <label className="global-search"><Icon name="search" size={19} /><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} onFocus={() => setActiveView("Tickets")} placeholder="Buscar ticket, técnico o equipo..." aria-label="Buscar tickets" /></label>
+          <label className="global-search"><Icon name="search" size={19} /><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} onFocus={() => setActiveView("Tickets")} placeholder="Buscar ticket, técnico o grupo..." aria-label="Buscar tickets" /></label>
           <div className="topbar-actions">
             <button className="icon-button theme-button" type="button" aria-label={theme === "light" ? "Activar tema oscuro" : "Activar tema claro"} aria-pressed={theme === "dark"} onClick={() => setTheme((currentTheme) => (currentTheme === "light" ? "dark" : "light"))} title={theme === "light" ? "Cambiar a modo oscuro" : "Cambiar a modo claro"}><Icon name={theme === "light" ? "moon" : "sun"} size={19} /></button>
             <div className="notification-wrapper">
@@ -731,7 +734,7 @@ function TicketsView({ canCreate, currentUser, filter, filteredTickets, onCreate
       <PageHeader
         eyebrow="Gestión de solicitudes"
         title="Bandeja de tickets"
-        description="Consulta y prioriza los casos asignados a tu grupo y equipo de trabajo."
+        description="Consulta y prioriza los casos asignados a tu grupo de trabajo."
         action={canCreate ? <button className="primary-button" type="button" onClick={onCreate}><Icon name="plus" size={18} /> Nuevo ticket</button> : null}
       />
       <article className="panel tickets-page-panel">
@@ -797,7 +800,7 @@ function TeamView({ currentUser, onNotify, tickets }) {
   const people = [...peopleByName.values()];
   return (
     <>
-      <PageHeader eyebrow="Disponibilidad del equipo" title="Personas que respaldan tu operación" description="La carga se calcula a partir de los tickets visibles para tu perfil y equipo." action={<button className="secondary-button" type="button" onClick={() => onNotify("La asignación automática prioriza al agente que lleva más tiempo sin recibir un caso.")}><Icon name="users" size={18} /> Ver reglas de asignación</button>} />
+      <PageHeader eyebrow="Disponibilidad del grupo" title="Personas que respaldan tu operación" description="La carga se calcula a partir de los tickets visibles para tu perfil y grupo." action={<button className="secondary-button" type="button" onClick={() => onNotify("La asignación automática prioriza al agente que lleva más tiempo sin recibir un caso.")}><Icon name="users" size={18} /> Ver reglas de asignación</button>} />
       <section className="team-grid">
         {people.length ? people.map((person) => (
           <article className="team-card" key={person.name}>
@@ -830,7 +833,7 @@ function ReportsView({ tickets }) {
     <>
       <PageHeader eyebrow="Indicadores operativos" title="El turno en cifras" description="Vista consolidada para identificar capacidad, cumplimiento y oportunidades de mejora." action={<div className="date-picker"><Icon name="calendar" size={18} /> Hoy, 22 de agosto <Icon name="chevronDown" size={15} /></div>} />
       <section className="report-highlights">
-        <article><span>Tickets visibles</span><strong>{total}</strong><p><b>Según tu perfil</b> y restricciones de equipo</p></article>
+        <article><span>Tickets visibles</span><strong>{total}</strong><p><b>Según tu perfil</b> y restricciones de grupo</p></article>
         <article><span>Tickets cerrados</span><strong>{closed}</strong><p><b>{percentage(closed)}%</b> de los tickets visibles</p></article>
         <article><span>Cumplimiento SLA</span><strong>{percentage(withinSla)}<small>%</small></strong><p><b>Meta: 90%</b> del turno</p></article>
       </section>
@@ -853,7 +856,7 @@ function UsersView({ error, groups, loading, onCreate, onCreateGroup, onCreateTe
 
   return (
     <>
-      <PageHeader eyebrow="Administración" title="Usuarios y accesos" description="Gestiona personas, equipos y grupos. Los roles son asignables por administrador y las credenciales se restablecen desde aquí." action={tab === "usuarios" ? <button className="primary-button" type="button" onClick={onCreate}><Icon name="plus" size={18} /> Nuevo usuario</button> : tab === "equipos" ? <button className="primary-button" type="button" onClick={onCreateTeam}><Icon name="plus" size={18} /> Nuevo equipo</button> : <button className="primary-button" type="button" onClick={onCreateGroup}><Icon name="plus" size={18} /> Nuevo grupo</button>} />
+      <PageHeader eyebrow="Administración" title="Usuarios y accesos" description="Gestiona personas y grupos. Los roles son asignables por administrador y las credenciales se restablecen desde aquí." action={tab === "usuarios" ? <button className="primary-button" type="button" onClick={onCreate}><Icon name="plus" size={18} /> Nuevo usuario</button> : <button className="primary-button" type="button" onClick={onCreateGroup}><Icon name="plus" size={18} /> Nuevo grupo</button>} />
       {error && <ApiConnectionError message={error} onRetry={onRetry} />}
       {currentRole !== "SUPERVISOR" && <div className="admin-tabs" role="tablist">
         <button className={tab === "usuarios" ? "selected" : ""} type="button" role="tab" aria-selected={tab === "usuarios"} onClick={() => setTab("usuarios")}><Icon name="users" size={16} /> Usuarios <span>{users.length}</span></button>
@@ -861,10 +864,10 @@ function UsersView({ error, groups, loading, onCreate, onCreateGroup, onCreateTe
       </div>}
       {loading ? <LoadingState /> : tab === "usuarios" ? <article className="panel users-panel">
         <div className="toolbar users-toolbar">
-          <label className="table-search"><Icon name="search" size={18} /><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar nombre, correo o equipo" /></label>
+          <label className="table-search"><Icon name="search" size={18} /><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar nombre, correo o grupo" /></label>
           <div className="filter-row" aria-label="Filtrar usuarios por rol"><Icon name="filter" size={17} />{[["Todos", "Todos"], ["DESPACHADOR", "Despachadores"], ["SOPORTE", "Soporte"], ["SUPERVISOR", "Supervisores"], ["ADMIN", "Administración"]].map(([value, label]) => <button className={role === value ? "selected" : ""} key={value} type="button" onClick={() => setRole(value)}>{label}</button>)}</div>
         </div>
-        <div className="table-summary"><span><b>{filteredUsers.length}</b> usuarios encontrados</span><span>Bloqueo tras 5 intentos · Solo desbloquea vía correo</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Usuario</th><th>Rol</th><th>Grupo / equipo</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{filteredUsers.map((user) => <tr key={user.id}><td data-label="Usuario"><div className="managed-user"><div className={`avatar ${user.avatarClass}`}>{user.initials}</div><div><strong>{user.name}</strong><small>{user.email}</small></div></div></td><td data-label="Rol"><span className={`role-pill role-${user.role.toLowerCase()}`}>{user.roleLabel}</span></td><td data-label="Grupo / equipo"><div className="team-cell"><strong>{user.teamName}</strong><small>{user.groupName}</small></div></td><td data-label="Estado"><span className={`user-status ${user.is_locked ? "locked" : user.is_active ? "active" : "inactive"}`}><i /> {user.is_locked ? `Bloqueada (${user.failed_login_attempts})` : user.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action"><button type="button" onClick={() => onEdit(user)}>Editar</button><button className="reset-link" type="button" onClick={() => onResetPassword(user)}>Contraseña</button></td></tr>)}</tbody></table></div>{filteredUsers.length === 0 && <EmptyState />}
+        <div className="table-summary"><span><b>{filteredUsers.length}</b> usuarios encontrados</span><span>Bloqueo tras 5 intentos · Solo desbloquea vía correo</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Usuario</th><th>Rol</th><th>Grupo</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{filteredUsers.map((user) => <tr key={user.id}><td data-label="Usuario"><div className="managed-user"><div className={`avatar ${user.avatarClass}`}>{user.initials}</div><div><strong>{user.name}</strong><small>{user.email}</small></div></div></td><td data-label="Rol"><span className={`role-pill role-${user.role.toLowerCase()}`}>{user.roleLabel}</span></td><td data-label="Grupo"><div className="team-cell"><strong>{user.groupName}</strong></div></td><td data-label="Estado"><span className={`user-status ${user.is_locked ? "locked" : user.is_active ? "active" : "inactive"}`}><i /> {user.is_locked ? `Bloqueada (${user.failed_login_attempts})` : user.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action"><button type="button" onClick={() => onEdit(user)}>Editar</button><button className="reset-link" type="button" onClick={() => onResetPassword(user)}>Contraseña</button></td></tr>)}</tbody></table></div>{filteredUsers.length === 0 && <EmptyState />}
       </article> : tab === "equipos" ? <article className="panel users-panel"><div className="table-summary"><span><b>{teams.length}</b> equipos registrados</span><span>Agrupados por grupo · Código único</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Equipo</th><th>Grupo</th><th>Código</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{teams.map((team) => <tr key={team.id}><td data-label="Equipo"><strong>{team.name}</strong></td><td data-label="Grupo"><span className="team-label">{team.group_detail?.name || team.group?.name || "-"}</span></td><td data-label="Código"><span className="team-label">{team.code}</span></td><td data-label="Estado"><span className={`user-status ${team.is_active ? "active" : "inactive"}`}><i /> {team.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action"><button type="button" onClick={() => onEditTeam(team)}>Editar</button></td></tr>)}</tbody></table></div>{teams.length === 0 && <EmptyState />}</article> : <article className="panel users-panel"><div className="table-summary"><span><b>{groups.length}</b> grupos registrados</span><span>Área macro (Tigo, Contrata, BBI N-2, etc.)</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Grupo</th><th>Código</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{groups.map((group) => <tr key={group.id}><td data-label="Grupo"><strong>{group.name}</strong></td><td data-label="Código"><span className="team-label">{group.code}</span></td><td data-label="Estado"><span className={`user-status ${group.is_active ? "active" : "inactive"}`}><i /> {group.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action"><button type="button" onClick={() => onEditGroup(group)}>Editar</button></td></tr>)}</tbody></table></div>{groups.length === 0 && <EmptyState />}</article>}
     </>
   );
@@ -921,7 +924,7 @@ function UserFormModal({ onClose, onSave, teams, groups, user }) {
       return;
     }
     if (form.role !== "ADMIN" && form.role !== "SUPERVISOR" && form.teams.length === 0) {
-      setError("Selecciona al menos un equipo para despachador o soporte.");
+      setError("Selecciona al menos un grupo para despachador o soporte.");
       return;
     }
     setSubmitting(true);
@@ -937,14 +940,14 @@ function UserFormModal({ onClose, onSave, teams, groups, user }) {
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section className="ticket-modal user-modal" role="dialog" aria-modal="true" aria-labelledby="user-form-title" onMouseDown={(event) => event.stopPropagation()}>
-        <header className="modal-header"><div><p className="eyebrow">Administración de acceso</p><h2 id="user-form-title">{isNew ? "Crear usuario" : "Editar usuario"}</h2><p>{isNew ? "El acceso se asignará al guardar el perfil." : "Actualiza permisos, equipo o credenciales de forma segura."}</p></div><button className="icon-button" type="button" aria-label="Cerrar formulario" onClick={onClose}><Icon name="close" /></button></header>
+        <header className="modal-header"><div><p className="eyebrow">Administración de acceso</p><h2 id="user-form-title">{isNew ? "Crear usuario" : "Editar usuario"}</h2><p>{isNew ? "El acceso se asignará al guardar el perfil." : "Actualiza permisos, grupo o credenciales de forma segura."}</p></div><button className="icon-button" type="button" aria-label="Cerrar formulario" onClick={onClose}><Icon name="close" /></button></header>
         <form onSubmit={submit}>
           <div className="form-grid user-form-grid">
             <label className="field"><span>Nombres <b>*</b></span><input autoFocus required name="firstName" value={form.firstName} onChange={updateField} placeholder="Nombres" /></label>
             <label className="field"><span>Apellidos <b>*</b></span><input required name="lastName" value={form.lastName} onChange={updateField} placeholder="Apellidos" /></label>
             <label className="field field-wide"><span>Correo institucional <b>*</b></span><input required type="email" name="email" value={form.email} onChange={updateField} placeholder="nombre@empresa.com" /></label>
             <label className="field"><span>Rol <b>*</b></span><select name="role" value={form.role} onChange={updateField}><option value="DESPACHADOR">Despachador</option><option value="SOPORTE">Agente de soporte</option><option value="SUPERVISOR">Supervisor</option><option value="ADMIN">Administrador</option></select></label>
-            {form.role === "SUPERVISOR" ? <label className="field field-wide"><span>Grupos supervisados <b>*</b></span><div className="teams-checklist compact">{groups.map((g) => <label key={g.id} className="team-check"><input type="checkbox" checked={form.managedGroups.includes(String(g.id))} onChange={() => toggleGroup(g.id)} /><span>{g.name} <small>· {g.code}</small></span></label>)}{groups.length === 0 && <small>Sin grupos registrados</small>}</div></label> : <label className="field field-wide"><span>Equipos {(form.role !== "ADMIN") && <b>*</b>}</span><div className="teams-checklist grouped">{groups.map((g) => { const groupTeams = teams.filter((t) => String(t.group) === String(g.id) || String(t.group_detail?.id) === String(g.id)); if (!groupTeams.length) return null; const allSelected = groupTeams.every((t) => form.teams.includes(String(t.id))); const someSelected = groupTeams.some((t) => form.teams.includes(String(t.id))); return <div key={g.id} className="group-block"><label className="team-check group-head"><input type="checkbox" checked={allSelected} ref={(el) => { if (el) el.indeterminate = !allSelected && someSelected; }} onChange={() => toggleGroupTeams(g.id)} /><span>{g.name} <small>({groupTeams.length})</small></span><small>Seleccionar todo</small></label><div className="group-teams">{groupTeams.map((team) => <label key={team.id} className="team-check"><input type="checkbox" checked={form.teams.includes(String(team.id))} onChange={() => toggleTeam(team.id)} /><span>{team.name}</span></label>)}</div></div>; })}{teams.length === 0 && <small>Sin equipos registrados</small>}</div><small style={{ color: "var(--quiet)", fontSize: "10px" }}>Tip: con 1 Estación de Tigo ves las 14.</small></label>}
+            {form.role === "SUPERVISOR" ? <label className="field field-wide"><span>Grupos supervisados <b>*</b></span><div className="teams-checklist compact">{groups.map((g) => <label key={g.id} className="team-check"><input type="checkbox" checked={form.managedGroups.includes(String(g.id))} onChange={() => toggleGroup(g.id)} /><span>{g.name} <small>· {g.code}</small></span></label>)}{groups.length === 0 && <small>Sin grupos registrados</small>}</div></label> : <label className="field field-wide"><span>Grupos {(form.role !== "ADMIN") && <b>*</b>}</span><div className="teams-checklist compact">{groups.map((g) => { const groupTeams = teams.filter((t) => String(t.group) === String(g.id) || String(t.group_detail?.id) === String(g.id)); if (!groupTeams.length) return null; const allSelected = groupTeams.every((t) => form.teams.includes(String(t.id))); return <label key={g.id} className="team-check"><input type="checkbox" checked={allSelected} onChange={() => toggleGroupTeams(g.id)} /><span>{g.name} <small>· {g.code}</small></span></label>; })}{groups.length === 0 && <small>Sin grupos registrados</small>}</div></label>}
             <label className="field field-wide"><span>{isNew ? "Contraseña temporal" : "Nueva contraseña"} {isNew && <b>*</b>}</span><input required={isNew} minLength="8" name="password" type="password" value={form.password} onChange={updateField} placeholder={isNew ? "Mínimo 8 caracteres" : "Déjalo vacío para conservarla"} /></label>
           </div>
           <label className="active-user-toggle"><input checked={form.isActive} name="isActive" type="checkbox" onChange={updateField} /><span><i /></span><div><strong>Usuario activo</strong><small>Puede iniciar sesión y recibir asignaciones.</small></div></label>
@@ -996,7 +999,7 @@ function PanelHeading({ eyebrow, title, action }) {
 function TicketTable({ tickets, compact = false, currentUser, onNotify, onOpen, onResolve, onTake }) {
   return (
     <table className={`ticket-table ${compact ? "compact" : ""}`}>
-      <thead><tr><th>Ticket</th><th>Prioridad</th><th>Estado</th><th>Equipo</th><th>SLA restante</th>{!compact && <th aria-label="Acciones" />}</tr></thead>
+      <thead><tr><th>Ticket</th><th>Prioridad</th><th>Estado</th><th>Grupo</th><th>SLA restante</th>{!compact && <th aria-label="Acciones" />}</tr></thead>
       <tbody>
         {tickets.map((ticket) => (
           <tr className={onOpen ? "ticket-row-clickable" : ""} key={ticket.id} onClick={() => onOpen?.(ticket)}>
@@ -1177,7 +1180,7 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onReassi
                 {!showReject ? <button className="secondary-button" disabled={acting} type="button" onClick={() => setShowReject(true)}>Rechazar y devolver</button> : <div style={{ display: "grid", gap: "6px", marginTop: "8px", width: "100%" }}><textarea value={rejectComment} onChange={(e) => setRejectComment(e.target.value)} placeholder="Motivo del rechazo (obligatorio) — explica qué falta o por qué se devuelve" rows="3" style={{ width: "100%", border: "1px solid var(--line-strong)", borderRadius: "6px", padding: "8px", fontSize: "11px" }} /><div style={{ display: "flex", gap: "6px" }}><button className="secondary-button" disabled={acting || !rejectComment.trim()} type="button" onClick={async () => { setActing(true); setActionError(""); try { await onValidate(ticket, false, rejectComment); setShowReject(false); setRejectComment(""); } catch (e) { setActionError(e.message || "No se pudo rechazar."); } finally { setActing(false); } }}>Confirmar rechazo</button><button className="secondary-button" type="button" onClick={() => { setShowReject(false); setRejectComment(""); }}>Cancelar</button></div></div>}
               </>}
             </div>}
-            {canReassign && allowedTeams && <div className="detail-meta" style={{ marginTop: "14px" }}><span className="detail-label">Reasignar equipo</span><div style={{ display: "flex", gap: "6px", marginTop: "6px" }}><select value={reassignTeam} onChange={(e) => setReassignTeam(e.target.value)} style={{ flex: 1, height: "34px", border: "1px solid var(--line-strong)", borderRadius: "6px", padding: "0 8px", fontSize: "11px" }}><option value="">Seleccionar equipo</option>{allowedTeams.map((t) => <option key={t.id} value={t.id}>{t.group_detail?.name || t.group?.name} · {t.name}</option>)}</select><button className="secondary-button" disabled={acting || !reassignTeam} type="button" style={{ minHeight: "34px" }} onClick={async () => { setActing(true); setActionError(""); try { await onReassign(ticket, Number(reassignTeam)); setReassignTeam(""); } catch (e) { setActionError(e.message || "No se pudo reasignar."); } finally { setActing(false); } }}>Mover</button></div></div>}
+            {canReassign && allowedTeams && <div className="detail-meta" style={{ marginTop: "14px" }}><span className="detail-label">Reasignar grupo</span><div style={{ display: "flex", gap: "6px", marginTop: "6px" }}><select value={reassignTeam} onChange={(e) => setReassignTeam(e.target.value)} style={{ flex: 1, height: "34px", border: "1px solid var(--line-strong)", borderRadius: "6px", padding: "0 8px", fontSize: "11px" }}><option value="">Seleccionar grupo</option>{allowedTeams.map((t) => <option key={t.id} value={t.id}>{t.group_detail?.name || t.group?.name || t.name}</option>)}</select><button className="secondary-button" disabled={acting || !reassignTeam} type="button" style={{ minHeight: "34px" }} onClick={async () => { setActing(true); setActionError(""); try { await onReassign(ticket, Number(reassignTeam)); setReassignTeam(""); } catch (e) { setActionError(e.message || "No se pudo reasignar."); } finally { setActing(false); } }}>Mover</button></div></div>}
             {actionError && <p className="detail-action-error" role="alert"><Icon name="alert" size={15} /> {actionError}</p>}
           </aside>
         </div>}
@@ -1239,7 +1242,7 @@ function NewTicketModal({ onClose, onCreate, session }) {
       <section className="ticket-modal" role="dialog" aria-modal="true" aria-labelledby="new-ticket-title" onMouseDown={(event) => event.stopPropagation()}>
         <header className="modal-header"><div><p className="eyebrow">Nueva solicitud</p><h2 id="new-ticket-title">Crear ticket de soporte</h2><p>Tu grupo y equipo se asignarán automáticamente.</p></div><button className="icon-button" type="button" aria-label="Cerrar formulario" onClick={onClose}><Icon name="close" /></button></header>
         <form onSubmit={submit}>
-          <div className="auto-assignment"><Icon name="shield" size={19} /><div><span>Enrutamiento automático</span><strong>{session.group} · {session.team} · Soporte Despacho</strong></div></div>
+          <div className="auto-assignment"><Icon name="shield" size={19} /><div><span>Enrutamiento automático</span><strong>{session.groupsLabel || session.group} · Soporte Despacho</strong></div></div>
           <div className="form-grid">
             <label className="field field-wide"><span>Asunto <b>*</b></span><input autoFocus required name="title" value={form.title} onChange={updateField} placeholder="Describe el inconveniente de forma breve" /></label>
             <label className="field"><span>Tecnología <b>*</b></span><select name="category" value={form.category} onChange={updateField}><option value="FTTH">FTTH</option><option value="HFC">HFC</option><option value="DTH">DTH</option><option value="ADMINISTRATIVO">Administrativo</option></select></label>
@@ -1427,8 +1430,7 @@ function ProfileModal({ onClose, tickets, user }) {
         </div>
         <div className="profile-details">
           <div className="profile-row"><span>Usuario</span><span>{user.username}</span></div>
-          <div className="profile-row"><span>Grupo</span><span>{user.group}</span></div>
-          <div className="profile-row"><span>Equipo</span><span>{user.team}</span></div>
+          <div className="profile-row"><span>Grupos</span><span>{user.groupsLabel || user.group}</span></div>
           <div className="profile-row"><span>Estado</span><span>{user.is_locked ? "Bloqueada" : "Activa"}</span></div>
         </div>
         <div className="profile-stats">

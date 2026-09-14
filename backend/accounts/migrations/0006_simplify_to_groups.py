@@ -29,6 +29,7 @@ def noop(apps, schema_editor):
 class Migration(migrations.Migration):
     dependencies = [
         ('accounts', '0005_cleanup_legacy_contrata'),
+        ('tickets', '0001_initial'),
     ]
     operations = [
         migrations.RunPython(simplify, noop),
