@@ -605,7 +605,7 @@ function App() {
             {activeView === "Validaciones" && <ValidationsView canValidate={session.role !== "SOPORTE"} tickets={validationTickets} onOpen={openTicketDetail} onValidate={validateTicket} />}
             {activeView === "Mi equipo" && <TeamView currentUser={session} onNotify={notify} tickets={tickets} />}
             {activeView === "Informes" && <ReportsView tickets={tickets} />}
-            {activeView === "Usuarios" && ["ADMIN","SUPERVISOR"].includes(session.role) && <UsersView error={usersError} groups={groups} loading={usersLoading} onCreate={() => setUserModal("new")} onCreateGroup={() => setGroupModal("new")} onCreateTeam={() => setTeamModal("new")} onEdit={setUserModal} onEditGroup={setGroupModal} onEditTeam={setTeamModal} onResetPassword={setPasswordModal} onRetry={refreshUsers} teams={teams} users={users} />}
+            {activeView === "Usuarios" && ["ADMIN","SUPERVISOR"].includes(session.role) && <UsersView currentRole={session.role} error={usersError} groups={groups} loading={usersLoading} onCreate={() => setUserModal("new")} onCreateGroup={() => setGroupModal("new")} onCreateTeam={() => setTeamModal("new")} onEdit={setUserModal} onEditGroup={setGroupModal} onEditTeam={setTeamModal} onResetPassword={setPasswordModal} onRetry={refreshUsers} teams={teams} users={users} />}
           </>}
         </section>
       </main>
@@ -842,7 +842,7 @@ function ReportsView({ tickets }) {
   );
 }
 
-function UsersView({ error, groups, loading, onCreate, onCreateGroup, onCreateTeam, onEdit, onEditGroup, onEditTeam, onResetPassword, onRetry, teams, users }) {
+function UsersView({ error, groups, loading, onCreate, onCreateGroup, onCreateTeam, onEdit, onEditGroup, onEditTeam, onResetPassword, onRetry, teams, users, currentRole }) {
   const [query, setQuery] = useState("");
   const [role, setRole] = useState("Todos");
   const [tab, setTab] = useState("usuarios");
@@ -855,11 +855,11 @@ function UsersView({ error, groups, loading, onCreate, onCreateGroup, onCreateTe
     <>
       <PageHeader eyebrow="Administración" title="Usuarios y accesos" description="Gestiona personas, equipos y grupos. Los roles son asignables por administrador y las credenciales se restablecen desde aquí." action={tab === "usuarios" ? <button className="primary-button" type="button" onClick={onCreate}><Icon name="plus" size={18} /> Nuevo usuario</button> : tab === "equipos" ? <button className="primary-button" type="button" onClick={onCreateTeam}><Icon name="plus" size={18} /> Nuevo equipo</button> : <button className="primary-button" type="button" onClick={onCreateGroup}><Icon name="plus" size={18} /> Nuevo grupo</button>} />
       {error && <ApiConnectionError message={error} onRetry={onRetry} />}
-      <div className="admin-tabs" role="tablist">
+      {currentRole !== "SUPERVISOR" && <div className="admin-tabs" role="tablist">
         <button className={tab === "usuarios" ? "selected" : ""} type="button" role="tab" aria-selected={tab === "usuarios"} onClick={() => setTab("usuarios")}><Icon name="users" size={16} /> Usuarios <span>{users.length}</span></button>
         <button className={tab === "equipos" ? "selected" : ""} type="button" role="tab" aria-selected={tab === "equipos"} onClick={() => setTab("equipos")}><Icon name="folder" size={16} /> Equipos <span>{teams.length}</span></button>
         <button className={tab === "grupos" ? "selected" : ""} type="button" role="tab" aria-selected={tab === "grupos"} onClick={() => setTab("grupos")}><Icon name="shield" size={16} /> Grupos <span>{groups.length}</span></button>
-      </div>
+      </div>}
       {loading ? <LoadingState /> : tab === "usuarios" ? <article className="panel users-panel">
         <div className="toolbar users-toolbar">
           <label className="table-search"><Icon name="search" size={18} /><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar nombre, correo o equipo" /></label>
