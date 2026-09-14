@@ -10,11 +10,35 @@ from rest_framework.views import APIView
 from accounts.models import User
 from accounts.permissions import IsAdministrator
 
-from .models import Ticket
+from .models import RequestType, Ticket
 from .permissions import require_support_access, require_validation_access, visible_tickets_for
-from .serializers import ResolutionSerializer, TicketAttachmentSerializer, TicketCreateSerializer, TicketSerializer, ValidationSerializer
+from .serializers import RequestTypeSerializer, ResolutionSerializer, TicketAttachmentSerializer, TicketCreateSerializer, TicketSerializer, ValidationSerializer
 from .services import escalate_ticket, route_ticket, take_ticket, validate_ticket
 from .services import resolve_ticket as resolve_ticket_service
+
+
+class RequestTypeViewSet(viewsets.ModelViewSet):
+    queryset = RequestType.objects.all()
+    serializer_class = RequestTypeSerializer
+    http_method_names = ["get", "post", "patch", "head", "options"]
+
+    def get_permissions(self):
+        if self.action in ["list", "retrieve"]:
+            return [IsAuthenticated()]
+        return [IsAdministrator()]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        kind = self.request.query_params.get("kind")
+        service = self.request.query_params.get("service")
+        active = self.request.query_params.get("active")
+        if kind:
+            queryset = queryset.filter(kind=kind)
+        if service:
+            queryset = queryset.filter(service=service)
+        if active is not None and active != "":
+            queryset = queryset.filter(is_active=active.lower() in {"1", "true", "yes"})
+        return queryset
 
 
 class TicketViewSet(viewsets.ModelViewSet):
@@ -33,6 +57,11 @@ class TicketViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(status=status_value)
         if priority:
             queryset = queryset.filter(priority=priority)
+        identificador = self.request.query_params.get("identificador")
+        if identificador:
+            queryset = queryset.filter(identificador__iexact=identificador.strip())
+        if self.request.query_params.get("abierto") in {"1", "true", "yes"}:
+            queryset = queryset.exclude(status=Ticket.Status.CLOSED)
         if team and user.is_administrator:
             queryset = queryset.filter(assigned_team_id=team)
         if team and user.role == User.Role.SUPERVISOR:

@@ -7,8 +7,17 @@ from rest_framework import serializers
 from accounts.models import User
 from accounts.serializers import TeamSummarySerializer, UserSummarySerializer
 
-from .models import Ticket, TicketAttachment, TicketEvent
+from .models import RequestType, Ticket, TicketAttachment, TicketEvent
 from .services import create_ticket, record_event
+
+
+class RequestTypeSerializer(serializers.ModelSerializer):
+    kind_label = serializers.CharField(source="get_kind_display", read_only=True)
+    service_label = serializers.CharField(source="get_service_display", read_only=True)
+
+    class Meta:
+        model = RequestType
+        fields = ["id", "kind", "kind_label", "service", "service_label", "name", "is_active"]
 
 
 class TicketAttachmentSerializer(serializers.ModelSerializer):
@@ -130,6 +139,7 @@ class TicketSerializer(serializers.ModelSerializer):
     origin_team = TeamSummarySerializer(read_only=True)
     assigned_team = TeamSummarySerializer(read_only=True)
     assignee = UserSummarySerializer(read_only=True)
+    tipo_solicitud_detail = RequestTypeSerializer(source="tipo_solicitud", read_only=True)
     status_label = serializers.CharField(source="get_status_display", read_only=True)
     priority_label = serializers.CharField(source="get_priority_display", read_only=True)
     category_label = serializers.CharField(source="get_category_display", read_only=True)
@@ -144,6 +154,11 @@ class TicketSerializer(serializers.ModelSerializer):
             "reference",
             "title",
             "description",
+            "identificador",
+            "cliente_nombre",
+            "nodo",
+            "tipo_solicitud",
+            "tipo_solicitud_detail",
             "category",
             "category_label",
             "priority",
@@ -196,7 +211,7 @@ class TicketSerializer(serializers.ModelSerializer):
 class TicketCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Ticket
-        fields = ["title", "description", "category", "priority"]
+        fields = ["title", "description", "category", "priority", "identificador", "cliente_nombre", "nodo", "tipo_solicitud"]
 
     def validate(self, attrs):
         user = self.context["request"].user
@@ -204,6 +219,18 @@ class TicketCreateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Solo un despachador puede registrar tickets.")
         if not user.is_administrator and not user.teams.exists():
             raise serializers.ValidationError("Tu cuenta no tiene un equipo asignado.")
+        identificador = (attrs.get("identificador") or "").strip()
+        if not identificador:
+            raise serializers.ValidationError({"identificador": "Debes indicar el Contrato u OT."})
+        if not (attrs.get("cliente_nombre") or "").strip():
+            raise serializers.ValidationError({"cliente_nombre": "Debes indicar el nombre del cliente."})
+        if not (attrs.get("nodo") or "").strip():
+            raise serializers.ValidationError({"nodo": "Debes indicar el nodo."})
+        existing = Ticket.objects.filter(identificador__iexact=identificador).exclude(status=Ticket.Status.CLOSED).order_by("-created_at").first()
+        if existing:
+            raise serializers.ValidationError(
+                {"identificador": f"Ya existe {existing.reference} abierto con este identificador ({existing.get_status_display()}). Ábrelo y documéntalo ahí."}
+            )
         return attrs
 
     def create(self, validated_data):

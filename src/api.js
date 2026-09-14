@@ -216,3 +216,21 @@ export function validateTicket(ticketId, approved, comment = "") {
 export function reassignTicket(ticketId, teamId) {
   return request(`/tickets/${ticketId}/reassign/`, { method: "POST", body: { team_id: teamId } });
 }
+
+export function getRequestTypes(params = {}) {
+  const qs = new URLSearchParams(params).toString();
+  return request(`/request-types/${qs ? `?${qs}` : ""}`);
+}
+
+export function createRequestType(data) {
+  return request("/request-types/", { method: "POST", body: data });
+}
+
+export function updateRequestType(id, data) {
+  return request(`/request-types/${id}/`, { method: "PATCH", body: data });
+}
+
+export function checkOpenTicket(identificador) {
+  const qs = new URLSearchParams({ identificador, abierto: "1" }).toString();
+  return request(`/tickets/?${qs}`);
+}

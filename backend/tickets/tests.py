@@ -50,7 +50,7 @@ class TicketFlowTests(APITestCase):
         )
         self.support.teams.set([self.team, self.soporte_b])
 
-    def create_ticket_through_api(self):
+    def create_ticket_through_api(self, identificador="C-TEST-001"):
         self.client.force_authenticate(self.dispatcher)
         response = self.client.post(
             "/api/tickets/",
@@ -59,6 +59,9 @@ class TicketFlowTests(APITestCase):
                 "description": "La ONT permanece sin señal después de la activación.",
                 "category": Ticket.Category.FTTH,
                 "priority": Ticket.Priority.HIGH,
+                "identificador": identificador,
+                "cliente_nombre": "Cliente Prueba",
+                "nodo": "NODO-1",
             },
             format="json",
         )

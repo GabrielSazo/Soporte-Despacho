@@ -5,8 +5,10 @@ import {
   createTicket as createTicketRequest,
   createUser as createUserRequest,
   getCurrentUser,
+  createRequestType,
   getDashboard,
   getGroups,
+  getRequestTypes,
   getTicket,
   getTeams,
   getTickets,
@@ -20,7 +22,9 @@ import {
   signIn,
   signOut,
   takeTicket as takeTicketRequest,
+  checkOpenTicket,
   updateGroup as updateGroupRequest,
+  updateRequestType,
   updateTeam as updateTeamRequest,
   updateUser as updateUserRequest,
   uploadAttachment,
@@ -163,6 +167,10 @@ function mapTicket(ticket) {
     statusCode: ticket.status,
     team: ticket.assigned_team?.group?.name || ticket.assigned_team?.name || "Sin asignar",
     teamId: ticket.assigned_team?.id || null,
+    identificador: ticket.identificador || "",
+    cliente: ticket.cliente_nombre || "",
+    nodo: ticket.nodo || "",
+    tipoSolicitud: ticket.tipo_solicitud_detail?.name || "",
     requester: ticket.creator?.name || "Sin asignar",
     creatorId: ticket.creator?.id || null,
     assigneeId: ticket.assignee?.id || null,
@@ -207,6 +215,8 @@ function App() {
   const [userModal, setUserModal] = useState(null);
   const [teamModal, setTeamModal] = useState(null);
   const [groupModal, setGroupModal] = useState(null);
+  const [requestTypeModal, setRequestTypeModal] = useState(null);
+  const [requestTypes, setRequestTypes] = useState([]);
   const [passwordModal, setPasswordModal] = useState(null);
   const [showProfile, setShowProfile] = useState(false);
   const [query, setQuery] = useState("");
@@ -327,15 +337,25 @@ function App() {
     setUsersLoading(true);
     setUsersError("");
     try {
-      const [userPayload, teamPayload, groupPayload] = await Promise.all([getUsers(), getTeams(), getGroups()]);
+      const [userPayload, teamPayload, groupPayload, rtPayload] = await Promise.all([getUsers(), getTeams(), getGroups(), getRequestTypes().catch(() => [])]);
       setUsers((userPayload.results || userPayload).map(mapManagedUser));
       setTeams(teamPayload.results || teamPayload);
       setGroups(groupPayload.results || groupPayload);
+      setRequestTypes(rtPayload.results || rtPayload || []);
     } catch (error) {
       setUsersError(error.message || "No fue posible cargar los usuarios.");
     } finally {
       setUsersLoading(false);
     }
+  }
+
+  async function saveRequestType(form, existing) {
+    const payload = { kind: form.kind, service: form.service, name: form.name.trim(), is_active: form.isActive };
+    if (existing) await updateRequestType(existing.id, payload);
+    else await createRequestType(payload);
+    setRequestTypeModal(null);
+    await refreshUsers();
+    notify(existing ? "Tipo de solicitud actualizado." : "Tipo de solicitud creado.");
   }
 
   async function startSession({ email, password }) {
@@ -389,6 +409,10 @@ function App() {
       description: form.description,
       category: form.category,
       priority: form.priority,
+      identificador: form.identificador,
+      cliente_nombre: form.cliente_nombre || form.cliente,
+      nodo: form.nodo,
+      tipo_solicitud: form.tipo_solicitud,
     });
     if (form.attachment) {
       const files = Array.isArray(form.attachment) ? form.attachment : [form.attachment];
@@ -503,7 +527,7 @@ function App() {
   const criticalTickets = tickets.filter((ticket) => ticket.priorityCode === "CRITICA").length;
   const statusMap = { "Todos": null, "Míos": null, "Trabajables": null, "Abierto": "ABIERTO", "Asignado": "ASIGNADO", "En proceso": "EN_PROCESO", "Validación": "VALIDACION" };
   const filteredTickets = tickets.filter((ticket) => {
-    const searchable = `${ticket.id} ${ticket.title} ${ticket.team} ${ticket.requester}`.toLowerCase();
+    const searchable = `${ticket.id} ${ticket.title} ${ticket.team} ${ticket.requester} ${ticket.identificador} ${ticket.cliente} ${ticket.nodo} ${ticket.tipoSolicitud}`.toLowerCase();
     if (!searchable.includes(query.toLowerCase())) return false;
     if (filter === "Míos") return ticket.assigneeId === session?.id || ticket.creatorId === session?.id;
     if (filter === "Trabajables") return ["ABIERTO", "ASIGNADO"].includes(ticket.statusCode) && ticket.assigneeId !== session?.id;
@@ -624,16 +648,17 @@ function App() {
             {activeView === "Validaciones" && <ValidationsView canValidate={session.role !== "SOPORTE"} tickets={validationTickets} onOpen={openTicketDetail} onValidate={validateTicket} />}
             {activeView === "Mi grupo" && <TeamView currentUser={session} onNotify={notify} tickets={tickets} users={users} />}
             {activeView === "Informes" && <ReportsView tickets={tickets} />}
-            {activeView === "Usuarios" && ["ADMIN","SUPERVISOR"].includes(session.role) && <UsersView currentRole={session.role} error={usersError} groups={groups} loading={usersLoading} onCreate={() => setUserModal("new")} onCreateGroup={() => setGroupModal("new")} onCreateTeam={() => setTeamModal("new")} onEdit={setUserModal} onEditGroup={setGroupModal} onEditTeam={setTeamModal} onResetPassword={setPasswordModal} onRetry={refreshUsers} teams={teams} users={users} />}
+            {activeView === "Usuarios" && ["ADMIN","SUPERVISOR"].includes(session.role) && <UsersView currentRole={session.role} error={usersError} groups={groups} loading={usersLoading} onCreate={() => setUserModal("new")} onCreateGroup={() => setGroupModal("new")} onCreateTeam={() => setTeamModal("new")} onCreateRequestType={() => setRequestTypeModal("new")} onEdit={setUserModal} onEditGroup={setGroupModal} onEditTeam={setTeamModal} onEditRequestType={setRequestTypeModal} onResetPassword={setPasswordModal} onRetry={refreshUsers} requestTypes={requestTypes} teams={teams} users={users} />}
           </>}
         </section>
       </main>
-      {newTicketOpen && canCreateTickets && <NewTicketModal onClose={() => setNewTicketOpen(false)} onCreate={createTicket} session={session} />}
+      {newTicketOpen && canCreateTickets && <NewTicketModal onClose={() => setNewTicketOpen(false)} onCreate={createTicket} onOpenTicket={async (id) => { setNewTicketOpen(false); const t = tickets.find((x) => x.apiId === id); if (t) openTicketDetail(t); }} session={session} />}
       {ticketToResolve && <ResolveTicketModal onClose={() => setTicketToResolve(null)} onResolve={resolveTicket} ticket={ticketToResolve} />}
       {ticketDetail && <TicketDetailModal currentUser={session} isLoading={isDetailLoading} onAttach={attachToTicket} onClose={() => setTicketDetail(null)} onReassign={reassignTicket} onResolve={(ticket) => { setTicketDetail(null); setTicketToResolve(ticket); }} onTake={async (ticket) => { const updated = await takeTicket(ticket); const detail = await getTicket(ticket.apiId); setTicketDetail(mapTicket(detail)); }} onValidate={async (ticket, accepted, comment) => { await validateTicket(ticket, accepted, comment); setTicketDetail(null); }} teams={teams} ticket={ticketDetail} />}
       {userModal && <UserFormModal onClose={() => setUserModal(null)} onSave={saveUser} teams={teams} groups={groups} user={userModal === "new" ? null : userModal} />}
       {teamModal && <TeamFormModal groups={groups} onClose={() => setTeamModal(null)} onSave={saveTeam} team={teamModal === "new" ? null : teamModal} />}
       {groupModal && <GroupFormModal onClose={() => setGroupModal(null)} onSave={saveGroup} group={groupModal === "new" ? null : groupModal} />}
+      {requestTypeModal && <RequestTypeFormModal onClose={() => setRequestTypeModal(null)} onSave={saveRequestType} requestType={requestTypeModal === "new" ? null : requestTypeModal} />}
       {passwordModal && <PasswordResetModal onClose={() => setPasswordModal(null)} onSave={resetUserPassword} user={passwordModal} />}
       {showProfile && <ProfileModal onClose={() => setShowProfile(false)} tickets={tickets} user={session} />}
       {toast && <Toast message={toast} onClose={() => setToast("")} />}
@@ -866,7 +891,7 @@ function ReportsView({ tickets }) {
   );
 }
 
-function UsersView({ error, groups, loading, onCreate, onCreateGroup, onCreateTeam, onEdit, onEditGroup, onEditTeam, onResetPassword, onRetry, teams, users, currentRole }) {
+function UsersView({ error, groups, loading, onCreate, onCreateGroup, onCreateTeam, onCreateRequestType, onEdit, onEditGroup, onEditTeam, onEditRequestType, onResetPassword, onRetry, requestTypes, teams, users, currentRole }) {
   const [query, setQuery] = useState("");
   const [role, setRole] = useState("Todos");
   const [tab, setTab] = useState("usuarios");
@@ -877,11 +902,12 @@ function UsersView({ error, groups, loading, onCreate, onCreateGroup, onCreateTe
 
   return (
     <>
-      <PageHeader eyebrow="Administración" title="Usuarios y accesos" description="Gestiona personas y grupos. Los roles son asignables por administrador y las credenciales se restablecen desde aquí." action={tab === "usuarios" ? <button className="primary-button" type="button" onClick={onCreate}><Icon name="plus" size={18} /> Nuevo usuario</button> : <button className="primary-button" type="button" onClick={onCreateGroup}><Icon name="plus" size={18} /> Nuevo grupo</button>} />
+      <PageHeader eyebrow="Administración" title="Usuarios y accesos" description="Gestiona personas y grupos. Los roles son asignables por administrador y las credenciales se restablecen desde aquí." action={tab === "usuarios" ? <button className="primary-button" type="button" onClick={onCreate}><Icon name="plus" size={18} /> Nuevo usuario</button> : tab === "tipos" ? <button className="primary-button" type="button" onClick={onCreateRequestType}><Icon name="plus" size={18} /> Nuevo tipo</button> : <button className="primary-button" type="button" onClick={onCreateGroup}><Icon name="plus" size={18} /> Nuevo grupo</button>} />
       {error && <ApiConnectionError message={error} onRetry={onRetry} />}
       {currentRole !== "SUPERVISOR" && <div className="admin-tabs" role="tablist">
         <button className={tab === "usuarios" ? "selected" : ""} type="button" role="tab" aria-selected={tab === "usuarios"} onClick={() => setTab("usuarios")}><Icon name="users" size={16} /> Usuarios <span>{users.length}</span></button>
         <button className={tab === "grupos" ? "selected" : ""} type="button" role="tab" aria-selected={tab === "grupos"} onClick={() => setTab("grupos")}><Icon name="shield" size={16} /> Grupos <span>{groups.length}</span></button>
+        <button className={tab === "tipos" ? "selected" : ""} type="button" role="tab" aria-selected={tab === "tipos"} onClick={() => setTab("tipos")}><Icon name="ticket" size={16} /> Tipos <span>{(requestTypes || []).length}</span></button>
       </div>}
       {loading ? <LoadingState /> : tab === "usuarios" ? <article className="panel users-panel">
         <div className="toolbar users-toolbar">
@@ -889,7 +915,7 @@ function UsersView({ error, groups, loading, onCreate, onCreateGroup, onCreateTe
           <div className="filter-row" aria-label="Filtrar usuarios por rol"><Icon name="filter" size={17} />{[["Todos", "Todos"], ["DESPACHADOR", "Despachadores"], ["SOPORTE", "Soporte"], ["SUPERVISOR", "Supervisores"], ["ADMIN", "Administración"]].map(([value, label]) => <button className={role === value ? "selected" : ""} key={value} type="button" onClick={() => setRole(value)}>{label}</button>)}</div>
         </div>
         <div className="table-summary"><span><b>{filteredUsers.length}</b> usuarios encontrados</span><span>Bloqueo tras 5 intentos · Solo desbloquea vía correo</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Usuario</th><th>Rol</th><th>Grupo</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{filteredUsers.map((user) => <tr key={user.id}><td data-label="Usuario"><div className="managed-user"><div className={`avatar ${user.avatarClass}`}>{user.initials}</div><div><strong>{user.name}</strong><small>{user.email}</small></div></div></td><td data-label="Rol"><span className={`role-pill role-${user.role.toLowerCase()}`}>{user.roleLabel}</span></td><td data-label="Grupo"><div className="team-cell"><strong>{user.groupName}</strong></div></td><td data-label="Estado"><span className={`user-status ${user.is_locked ? "locked" : user.is_active ? "active" : "inactive"}`}><i /> {user.is_locked ? `Bloqueada (${user.failed_login_attempts})` : user.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action">{currentRole === "SUPERVISOR" && user.role === "ADMIN" ? <small style={{ color: "var(--quiet)" }}>Solo admin</small> : <><button type="button" onClick={() => onEdit(user)}>Editar</button><button className="reset-link" type="button" onClick={() => onResetPassword(user)}>Contraseña</button></>}</td></tr>)}</tbody></table></div>{filteredUsers.length === 0 && <EmptyState />}
-      </article> : tab === "equipos" ? <article className="panel users-panel"><div className="table-summary"><span><b>{teams.length}</b> equipos registrados</span><span>Agrupados por grupo · Código único</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Equipo</th><th>Grupo</th><th>Código</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{teams.map((team) => <tr key={team.id}><td data-label="Equipo"><strong>{team.name}</strong></td><td data-label="Grupo"><span className="team-label">{team.group_detail?.name || team.group?.name || "-"}</span></td><td data-label="Código"><span className="team-label">{team.code}</span></td><td data-label="Estado"><span className={`user-status ${team.is_active ? "active" : "inactive"}`}><i /> {team.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action"><button type="button" onClick={() => onEditTeam(team)}>Editar</button></td></tr>)}</tbody></table></div>{teams.length === 0 && <EmptyState />}</article> : <article className="panel users-panel"><div className="table-summary"><span><b>{groups.length}</b> grupos registrados</span><span>Área macro (Tigo, Contrata, BBI N-2, etc.)</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Grupo</th><th>Código</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{groups.map((group) => <tr key={group.id}><td data-label="Grupo"><strong>{group.name}</strong></td><td data-label="Código"><span className="team-label">{group.code}</span></td><td data-label="Estado"><span className={`user-status ${group.is_active ? "active" : "inactive"}`}><i /> {group.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action"><button type="button" onClick={() => onEditGroup(group)}>Editar</button></td></tr>)}</tbody></table></div>{groups.length === 0 && <EmptyState />}</article>}
+      </article> : tab === "equipos" ? <article className="panel users-panel"><div className="table-summary"><span><b>{teams.length}</b> equipos registrados</span><span>Agrupados por grupo · Código único</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Equipo</th><th>Grupo</th><th>Código</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{teams.map((team) => <tr key={team.id}><td data-label="Equipo"><strong>{team.name}</strong></td><td data-label="Grupo"><span className="team-label">{team.group_detail?.name || team.group?.name || "-"}</span></td><td data-label="Código"><span className="team-label">{team.code}</span></td><td data-label="Estado"><span className={`user-status ${team.is_active ? "active" : "inactive"}`}><i /> {team.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action"><button type="button" onClick={() => onEditTeam(team)}>Editar</button></td></tr>)}</tbody></table></div>{teams.length === 0 && <EmptyState />}</article> : tab === "tipos" ? <article className="panel users-panel"><div className="table-summary"><span><b>{(requestTypes || []).length}</b> tipos registrados</span><span>Solicitud → Servicio → Tipo</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Tipo</th><th>Solicitud</th><th>Servicio</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{(requestTypes || []).map((rt) => <tr key={rt.id}><td data-label="Tipo"><strong>{rt.name}</strong></td><td data-label="Solicitud"><span className="team-label">{rt.kind_label}</span></td><td data-label="Servicio"><span className="team-label">{rt.service}</span></td><td data-label="Estado"><span className={`user-status ${rt.is_active ? "active" : "inactive"}`}><i /> {rt.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action"><button type="button" onClick={() => onEditRequestType(rt)}>Editar</button></td></tr>)}</tbody></table></div>{(requestTypes || []).length === 0 && <EmptyState />}</article> : <article className="panel users-panel"><div className="table-summary"><span><b>{groups.length}</b> grupos registrados</span><span>Área macro (Tigo, Contrata, BBI N-2, etc.)</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Grupo</th><th>Código</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{groups.map((group) => <tr key={group.id}><td data-label="Grupo"><strong>{group.name}</strong></td><td data-label="Código"><span className="team-label">{group.code}</span></td><td data-label="Estado"><span className={`user-status ${group.is_active ? "active" : "inactive"}`}><i /> {group.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action"><button type="button" onClick={() => onEditGroup(group)}>Editar</button></td></tr>)}</tbody></table></div>{groups.length === 0 && <EmptyState />}</article>}
     </>
   );
 }
@@ -1000,6 +1026,16 @@ function GroupFormModal({ group, onClose, onSave }) {
   return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="ticket-modal user-modal" role="dialog" aria-modal="true" aria-labelledby="group-form-title" onMouseDown={(e) => e.stopPropagation()}><header className="modal-header"><div><p className="eyebrow">Segmentación organizacional</p><h2 id="group-form-title">{isNew ? "Nuevo grupo" : "Editar grupo"}</h2><p>El grupo es el área macro (Tigo, Contrata, BBI N-2).</p></div><button className="icon-button" type="button" aria-label="Cerrar" onClick={onClose}><Icon name="close" /></button></header><form onSubmit={submit}><div className="form-grid user-form-grid"><label className="field"><span>Nombre <b>*</b></span><input autoFocus required name="name" value={form.name} onChange={updateField} placeholder="Tigo" /></label><label className="field"><span>Código <b>*</b></span><input required name="code" value={form.code} onChange={updateField} placeholder="tigo" /></label></div><label className="active-user-toggle"><input checked={form.isActive} name="isActive" type="checkbox" onChange={updateField} /><span><i /></span><div><strong>Grupo activo</strong><small>Visible para asignación.</small></div></label>{error && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}<footer className="modal-actions"><button className="secondary-button" disabled={submitting} type="button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={submitting} type="submit"><Icon name="check" size={18} /> {submitting ? "Guardando..." : isNew ? "Crear grupo" : "Guardar cambios"}</button></footer></form></section></div>;
 }
 
+function RequestTypeFormModal({ onClose, onSave, requestType }) {
+  const isNew = !requestType;
+  const [form, setForm] = useState({ kind: requestType?.kind || "CLIENTE", service: requestType?.service || "HFC", name: requestType?.name || "", isActive: requestType?.is_active ?? true });
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  function updateField(e) { const { name, value, type, checked } = e.target; setForm((c) => ({ ...c, [name]: type === "checkbox" ? checked : value })); }
+  async function submit(e) { e.preventDefault(); if (!form.name.trim()) { setError("Completa el nombre del tipo."); return; } setSubmitting(true); setError(""); try { await onSave(form, requestType); } catch (err) { setError(err.message || "No fue posible guardar el tipo."); setSubmitting(false); } }
+  return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="ticket-modal user-modal" role="dialog" aria-modal="true" aria-labelledby="rt-form-title" onMouseDown={(e) => e.stopPropagation()}><header className="modal-header"><div><p className="eyebrow">Catálogo de solicitudes</p><h2 id="rt-form-title">{isNew ? "Nuevo tipo" : "Editar tipo"}</h2><p>Define a qué solicitud y servicio aplica.</p></div><button className="icon-button" type="button" aria-label="Cerrar" onClick={onClose}><Icon name="close" /></button></header><form onSubmit={submit}><div className="form-grid user-form-grid"><label className="field"><span>Tipo de solicitud <b>*</b></span><select name="kind" value={form.kind} onChange={updateField}><option value="CLIENTE">Solicitud de Soporte Cliente</option><option value="TECNICO">Soporte Al Tecnico</option></select></label><label className="field"><span>Servicio <b>*</b></span><select name="service" value={form.service} onChange={updateField}><option value="HFC">HFC</option><option value="FTTH">FTTH</option><option value="WTTX">WTTX</option><option value="DTH">DTH</option></select></label><label className="field field-wide"><span>Nombre <b>*</b></span><input autoFocus required name="name" value={form.name} onChange={updateField} placeholder="ONT sin VLAN" /></label></div><label className="active-user-toggle"><input checked={form.isActive} name="isActive" type="checkbox" onChange={updateField} /><span><i /></span><div><strong>Tipo activo</strong><small>Visible en el formulario.</small></div></label>{error && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}<footer className="modal-actions"><button className="secondary-button" disabled={submitting} type="button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={submitting} type="submit"><Icon name="check" size={18} /> {submitting ? "Guardando..." : isNew ? "Crear tipo" : "Guardar cambios"}</button></footer></form></section></div>;
+}
+
 function PasswordResetModal({ onClose, onSave, user }) {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -1024,7 +1060,7 @@ function TicketTable({ tickets, compact = false, currentUser, onNotify, onOpen, 
       <tbody>
         {tickets.map((ticket) => (
           <tr className={onOpen ? "ticket-row-clickable" : ""} key={ticket.id} onClick={() => onOpen?.(ticket)}>
-            <td data-label="Ticket"><div className="ticket-title"><div className="avatar ticket-avatar">{ticket.avatar}</div><div><span>{ticket.id}</span><strong>{ticket.title}</strong><small>{ticket.category} · {ticket.created}</small></div></div></td>
+            <td data-label="Ticket"><div className="ticket-title"><div className="avatar ticket-avatar">{ticket.avatar}</div><div><span>{ticket.id}{ticket.identificador ? ` · ${ticket.identificador}` : ""}</span><strong>{ticket.title}</strong><small>{ticket.category}{ticket.tipoSolicitud ? ` · ${ticket.tipoSolicitud}` : ""} · {ticket.created}</small></div></div></td>
             <td data-label="Prioridad"><span className={`priority-pill ${priorityClass[ticket.priority]}`}>{ticket.priority}</span></td>
             <td data-label="Estado"><span className={`status-pill ${statusClass[ticket.status]}`}>{ticket.status}</span></td>
             <td data-label="Equipo"><span className="team-label">{ticket.team}</span></td>
@@ -1183,6 +1219,7 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onReassi
         </header>
         {isLoading ? <div className="detail-loading"><span className="loading-mark"><i /><i /><i /></span><p>Cargando historial del ticket...</p></div> : <div className="ticket-detail-content">
           <div className="detail-main">
+            <section className="detail-section"><div className="detail-section-heading"><span className="detail-label">Datos de la solicitud</span><span>{ticket.identificador}</span></div><div className="profile-details" style={{ padding: 0, marginTop: "10px" }}>{ticket.identificador && <div className="profile-row"><span>Contrato / OT</span><span>{ticket.identificador}</span></div>}{ticket.cliente && <div className="profile-row"><span>Cliente</span><span>{ticket.cliente}</span></div>}{ticket.nodo && <div className="profile-row"><span>Nodo</span><span>{ticket.nodo}</span></div>}{ticket.tipoSolicitud && <div className="profile-row"><span>Tipo</span><span>{ticket.tipoSolicitud}</span></div>}</div></section>
             <section className="detail-section"><span className="detail-label">Descripción reportada</span><p className="detail-description">{ticket.description || "Sin descripción adicional."}</p></section>
             {ticket.resolutionNotes && <section className="detail-section solution-detail"><span className="detail-label"><Icon name="checkCircle" size={15} /> Solución registrada</span><p>{ticket.resolutionNotes}</p></section>}
             <section className="detail-section"><div className="detail-section-heading"><span className="detail-label">Evidencia adjunta</span><span>{ticket.attachments.length}/5</span></div>{ticket.attachments.length ? <div className="attachment-list">{ticket.attachments.map((attachment) => <a href={attachment.url} key={attachment.id} rel="noreferrer" target="_blank"><Icon name="folder" size={18} /><span><strong>{attachment.original_name}</strong><small>{Math.max(1, Math.round(attachment.size / 1024))} KB · {formatDateTime(attachment.created_at)}</small></span><Icon name="arrowRight" size={15} /></a>)}</div> : <p className="detail-empty">No hay evidencia adjunta.</p>}{canAttach && <form className="detail-attach-form" onSubmit={submitAttach}><label className={`upload-box small ${attachError ? "has-error" : ""}`}><input type="file" accept=".jpg,.jpeg,.png" multiple onChange={handleAttach} /><Icon name="upload" size={16} /><span>{Array.isArray(attachFile) ? `${attachFile.length} imágenes` : attachFile ? attachFile.name : "Adjuntar JPG/PNG (máx. 5 MB, hasta 5)"}</span></label><button className="secondary-button" disabled={uploading || !attachFile} type="submit">{uploading ? "Subiendo..." : "Adjuntar"}</button></form>}{attachError && <p className="form-submit-error" role="alert"><Icon name="alert" size={14} /> {attachError}</p>}</section>
@@ -1210,16 +1247,51 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onReassi
   );
 }
 
-function NewTicketModal({ onClose, onCreate, session }) {
-  const [form, setForm] = useState({ title: "", category: "FTTH", priority: "MEDIA", description: "" });
+function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
+  const [form, setForm] = useState({ kind: "", service: "", tipoId: "", identificador: "", cliente: "", nodo: "", title: "", priority: "MEDIA", description: "" });
+  const [catalog, setCatalog] = useState([]);
   const [attachment, setAttachment] = useState(null);
   const [attachmentError, setAttachmentError] = useState("");
   const [submitError, setSubmitError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [duplicate, setDuplicate] = useState(null);
+  const [checking, setChecking] = useState(false);
+
+  useEffect(() => {
+    getRequestTypes({ active: "1" }).then((payload) => setCatalog(payload.results || payload)).catch(() => setCatalog([]));
+  }, []);
+
+  const services = [...new Set(catalog.filter((t) => !form.kind || t.kind === form.kind).map((t) => t.service))];
+  const options = catalog.filter((t) => (!form.kind || t.kind === form.kind) && (!form.service || t.service === form.service));
 
   function updateField(event) {
     const { name, value } = event.target;
-    setForm((currentForm) => ({ ...currentForm, [name]: value }));
+    setForm((currentForm) => {
+      const next = { ...currentForm, [name]: value };
+      if (name === "kind") { next.service = ""; next.tipoId = ""; }
+      if (name === "service") { next.tipoId = ""; }
+      if (name === "tipoId") {
+        const sel = options.find((o) => String(o.id) === String(value));
+        if (sel) next.title = sel.name;
+      }
+      return next;
+    });
+    if (name === "identificador") setDuplicate(null);
+  }
+
+  async function checkDuplicate() {
+    const value = form.identificador.trim();
+    if (!value) return;
+    setChecking(true);
+    try {
+      const payload = await checkOpenTicket(value);
+      const results = payload.results || payload;
+      setDuplicate(results.length ? results[0] : null);
+    } catch {
+      setDuplicate(null);
+    } finally {
+      setChecking(false);
+    }
   }
 
   function handleAttachment(event) {
@@ -1251,25 +1323,44 @@ function NewTicketModal({ onClose, onCreate, session }) {
     setSubmitting(true);
     setSubmitError("");
     try {
-      await onCreate({ ...form, attachment });
+      await onCreate({
+        title: form.title,
+        description: form.description,
+        category: form.service,
+        priority: form.priority,
+        identificador: form.identificador.trim(),
+        cliente_nombre: form.cliente.trim(),
+        nodo: form.nodo.trim(),
+        tipo_solicitud: form.tipoId ? Number(form.tipoId) : null,
+        attachment,
+      });
     } catch (error) {
       setSubmitError(error.message || "No fue posible crear el ticket.");
       setSubmitting(false);
     }
   }
 
+  const idLabel = form.kind === "CLIENTE" ? "Contrato" : form.kind === "TECNICO" ? "OT" : "Contrato / OT";
+  const canFillDetails = Boolean(form.kind && form.service && form.tipoId);
+
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section className="ticket-modal" role="dialog" aria-modal="true" aria-labelledby="new-ticket-title" onMouseDown={(event) => event.stopPropagation()}>
-        <header className="modal-header"><div><p className="eyebrow">Nueva solicitud</p><h2 id="new-ticket-title">Crear ticket de soporte</h2><p>Tu grupo y equipo se asignarán automáticamente.</p></div><button className="icon-button" type="button" aria-label="Cerrar formulario" onClick={onClose}><Icon name="close" /></button></header>
+        <header className="modal-header"><div><p className="eyebrow">Nueva solicitud</p><h2 id="new-ticket-title">Crear ticket de soporte</h2><p>Elige el tipo de solicitud y completa los campos.</p></div><button className="icon-button" type="button" aria-label="Cerrar formulario" onClick={onClose}><Icon name="close" /></button></header>
         <form onSubmit={submit}>
           <div className="auto-assignment"><Icon name="shield" size={19} /><div><span>Enrutamiento automático</span><strong>{session.groupsLabel || session.group} · Soporte Despacho</strong></div></div>
           <div className="form-grid">
-            <label className="field field-wide"><span>Asunto <b>*</b></span><input autoFocus required name="title" value={form.title} onChange={updateField} placeholder="Describe el inconveniente de forma breve" /></label>
-            <label className="field"><span>Tecnología <b>*</b></span><select name="category" value={form.category} onChange={updateField}><option value="FTTH">FTTH</option><option value="HFC">HFC</option><option value="DTH">DTH</option><option value="ADMINISTRATIVO">Administrativo</option></select></label>
+            <label className="field"><span>Tipo de solicitud <b>*</b></span><select required name="kind" value={form.kind} onChange={updateField}><option value="">Seleccionar</option><option value="CLIENTE">Solicitud de Soporte Cliente</option><option value="TECNICO">Soporte Al Tecnico</option></select></label>
+            <label className="field"><span>Tipo de servicio <b>*</b></span><select required name="service" value={form.service} onChange={updateField} disabled={!form.kind}><option value="">Seleccionar</option>{services.map((s) => <option key={s} value={s}>{s}</option>)}</select></label>
+            <label className="field field-wide"><span>Solicitud específica <b>*</b></span><select required name="tipoId" value={form.tipoId} onChange={updateField} disabled={!form.service}><option value="">Seleccionar</option>{options.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select></label>
+            <label className="field"><span>{idLabel} <b>*</b></span><input required name="identificador" value={form.identificador} onChange={updateField} onBlur={checkDuplicate} disabled={!canFillDetails} placeholder={form.kind === "TECNICO" ? "OT" : "Contrato"} /></label>
             <label className="field"><span>Prioridad <b>*</b></span><select name="priority" value={form.priority} onChange={updateField}><option value="CRITICA">Crítica</option><option value="ALTA">Alta</option><option value="MEDIA">Media</option><option value="BAJA">Baja</option></select></label>
-            <label className="field field-wide"><span>Detalle del caso <b>*</b></span><textarea required name="description" value={form.description} onChange={updateField} rows="4" placeholder="Incluye síntomas, número de orden, ubicación o pasos ya realizados." /></label>
+            <label className="field"><span>Nombre Cliente <b>*</b></span><input required name="cliente" value={form.cliente} onChange={updateField} disabled={!canFillDetails} placeholder="Nombre del cliente" /></label>
+            <label className="field"><span>Nodo <b>*</b></span><input required name="nodo" value={form.nodo} onChange={updateField} disabled={!canFillDetails} placeholder="Nodo" /></label>
+            <label className="field field-wide"><span>Comentarios <b>*</b></span><textarea required name="description" value={form.description} onChange={updateField} disabled={!canFillDetails} rows="4" placeholder="Detalle del caso, síntomas, ubicación o pasos ya realizados." /></label>
           </div>
+          {checking && <p className="form-info" role="status">Verificando {idLabel}...</p>}
+          {duplicate && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> Ya existe {duplicate.reference} abierto con este {idLabel} ({duplicate.status_label}). <button type="button" className="text-button" onClick={() => onOpenTicket && onOpenTicket(duplicate.id)}>Ver ticket y documentarlo ahí</button></p>}
           <div className="attachment-section"><div><span>Adjuntar evidencia</span><small>JPG o PNG, máximo 5 MB, hasta 5 imágenes</small></div><label className={`upload-box ${attachmentError ? "has-error" : ""}`}><input type="file" accept=".jpg,.jpeg,.png" multiple onChange={handleAttachment} /><Icon name="upload" size={20} /><span>{Array.isArray(attachment) ? `${attachment.length} imágenes seleccionadas` : attachment?.name || "Seleccionar archivos"}</span></label>{attachmentError && <p className="field-error">{attachmentError}</p>}</div>
           {submitError && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> {submitError}</p>}
           <footer className="modal-actions"><button className="secondary-button" disabled={submitting} type="button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={submitting} type="submit"><Icon name="ticket" size={18} /> {submitting ? "Enviando..." : "Enviar a soporte"}</button></footer>
