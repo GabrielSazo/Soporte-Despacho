@@ -228,7 +228,7 @@ function App() {
   useEffect(() => {
     if (!session) return;
     if (session.role === "SOPORTE") setFilter("Trabajables");
-    else if (session.role === "DESPACHADOR") setFilter("Míos");
+    else if (session.role === "DESPACHADOR") { setFilter("Míos"); setActiveView("Tickets"); }
     else setFilter("Todos");
     if (typeof window !== "undefined" && window.location.pathname === "/login") {
       window.history.replaceState(null, "", "/");
@@ -549,7 +549,9 @@ function App() {
     return !statusMap[filter] || ticket.statusCode === statusMap[filter];
   });
   const canCreateTickets = session && ["DESPACHADOR", "ADMIN", "SUPERVISOR"].includes(session.role);
-  const visibleNavigation = session && ["ADMIN", "SUPERVISOR"].includes(session.role) ? [...navigation, { label: "Usuarios", icon: "users" }] : navigation;
+  const visibleNavigation = session?.role === "DESPACHADOR"
+    ? navigation.filter((item) => ["Tickets", "Validaciones"].includes(item.label))
+    : session && ["ADMIN", "SUPERVISOR"].includes(session.role) ? [...navigation, { label: "Usuarios", icon: "users" }] : navigation;
   const myTickets = tickets.filter((t) => t.creatorId === session?.id);
   const myValidation = tickets.filter((t) => t.statusCode === "VALIDACION" && t.creatorId === session?.id);
   const trabajables = tickets.filter((t) => ["ABIERTO", "ASIGNADO"].includes(t.statusCode) && !t.assigneeId);

@@ -57,11 +57,11 @@ class Ticket(models.Model):
         CLOSED = "CERRADO", "Cerrado"
         ESCALATED = "ESCALADO", "Escalado"
 
-    SLA_HOURS = {
-        Priority.CRITICAL: 1,
-        Priority.HIGH: 4,
-        Priority.MEDIUM: 8,
-        Priority.LOW: 24,
+    SLA_MINUTES = {
+        Priority.CRITICAL: 5,
+        Priority.HIGH: 8,
+        Priority.MEDIUM: 10,
+        Priority.LOW: 20,
     }
 
     creator = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="created_tickets")
@@ -112,7 +112,7 @@ class Ticket(models.Model):
 
     @property
     def sla_duration(self):
-        return timedelta(hours=self.SLA_HOURS[self.priority])
+        return timedelta(minutes=self.SLA_MINUTES[self.priority])
 
     @property
     def sla_state(self):
@@ -133,7 +133,7 @@ class Ticket(models.Model):
 
     def save(self, *args, **kwargs):
         if not self.sla_due_at:
-            self.sla_due_at = timezone.now() + timedelta(hours=self.SLA_HOURS[self.priority])
+            self.sla_due_at = timezone.now() + timedelta(minutes=self.SLA_MINUTES[self.priority])
         super().save(*args, **kwargs)
 
 
