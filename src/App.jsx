@@ -211,7 +211,11 @@ function App() {
   const [showProfile, setShowProfile] = useState(false);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("Todos");
+  const [lado, setLado] = useState("Todos");
   const [toast, setToast] = useState("");
+
+const SOPORTE_A_GROUPS = ["BBI N-2", "celtech", "cellus", "nexel"];
+const SOPORTE_B_GROUPS = ["Tigo"];
 
   useEffect(() => {
     if (!session) return;
@@ -504,6 +508,8 @@ function App() {
   const filteredTickets = tickets.filter((ticket) => {
     const searchable = `${ticket.id} ${ticket.title} ${ticket.team} ${ticket.requester}`.toLowerCase();
     if (!searchable.includes(query.toLowerCase())) return false;
+    if (lado === "Soporte A" && !SOPORTE_A_GROUPS.includes(ticket.team)) return false;
+    if (lado === "Soporte B" && !SOPORTE_B_GROUPS.includes(ticket.team)) return false;
     if (filter === "Míos") return ticket.assigneeId === session?.id || ticket.creatorId === session?.id;
     if (filter === "Trabajables") return ["ABIERTO", "ASIGNADO"].includes(ticket.statusCode) && ticket.assigneeId !== session?.id;
     return !statusMap[filter] || ticket.statusCode === statusMap[filter];
@@ -619,7 +625,7 @@ function App() {
           {loadError && <ApiConnectionError message={loadError} onRetry={() => refreshWorkspace()} />}
           {isLoading ? <LoadingState /> : <>
             {activeView === "Resumen" && <Dashboard canCreate={canCreateTickets} criticalTickets={criticalTickets} dashboard={dashboard} onCreate={() => setNewTicketOpen(true)} onOpen={openTicketDetail} onShowTickets={() => setActiveView("Tickets")} tickets={tickets} validationTickets={validationTickets} />}
-            {activeView === "Tickets" && <TicketsView canCreate={canCreateTickets} currentUser={session} filter={filter} filteredTickets={filteredTickets} onCreate={() => setNewTicketOpen(true)} onFilterChange={setFilter} onNotify={notify} onOpen={openTicketDetail} onResolve={setTicketToResolve} onTake={takeTicket} query={query} setQuery={setQuery} />}
+            {activeView === "Tickets" && <TicketsView canCreate={canCreateTickets} currentUser={session} filter={filter} filteredTickets={filteredTickets} lado={lado} onCreate={() => setNewTicketOpen(true)} onFilterChange={setFilter} onLadoChange={setLado} onNotify={notify} onOpen={openTicketDetail} onResolve={setTicketToResolve} onTake={takeTicket} query={query} setQuery={setQuery} />}
             {activeView === "Validaciones" && <ValidationsView canValidate={session.role !== "SOPORTE"} tickets={validationTickets} onOpen={openTicketDetail} onValidate={validateTicket} />}
             {activeView === "Mi equipo" && <TeamView currentUser={session} onNotify={notify} tickets={tickets} />}
             {activeView === "Informes" && <ReportsView tickets={tickets} />}
@@ -741,8 +747,9 @@ function Dashboard({ canCreate, criticalTickets, dashboard, onCreate, onOpen, on
   );
 }
 
-function TicketsView({ canCreate, currentUser, filter, filteredTickets, onCreate, onFilterChange, onNotify, onOpen, onResolve, onTake, query, setQuery }) {
+function TicketsView({ canCreate, currentUser, filter, filteredTickets, lado, onCreate, onFilterChange, onLadoChange, onNotify, onOpen, onResolve, onTake, query, setQuery }) {
   const filters = currentUser?.role === "SOPORTE" ? ["Trabajables", "Míos", "Asignado", "En proceso", "Validación", "Todos"] : currentUser?.role === "DESPACHADOR" ? ["Míos", "Asignado", "En proceso", "Validación", "Todos"] : ["Todos", "Abierto", "Asignado", "En proceso", "Validación"];
+  const lados = ["Todos", "Soporte A", "Soporte B"];
 
   return (
     <>
@@ -764,6 +771,15 @@ function TicketsView({ canCreate, currentUser, filter, filteredTickets, onCreate
               <button className={filter === item ? "selected" : ""} key={item} type="button" onClick={() => onFilterChange(item)}>{item}</button>
             ))}
           </div>
+        </div>
+        <div className="toolbar" style={{ borderTop: "1px solid var(--line)", paddingTop: "12px" }}>
+          <div className="filter-row" aria-label="Filtrar por lado de soporte">
+            <Icon name="users" size={17} />
+            {lados.map((item) => (
+              <button className={lado === item ? "selected" : ""} key={item} type="button" onClick={() => onLadoChange(item)}>{item}</button>
+            ))}
+          </div>
+          <small style={{ color: "var(--quiet)", fontSize: "10px" }}>A: BBI N-2 + contratistas · B: Tigo</small>
         </div>
         <div className="table-summary"><span><b>{filteredTickets.length}</b> tickets encontrados</span><button type="button" onClick={() => onNotify("Los filtros se actualizarán automáticamente con la API.")}>Ordenar: prioridad <Icon name="chevronDown" size={15} /></button></div>
         <div className="ticket-table-wrap"><TicketTable currentUser={currentUser} onNotify={onNotify} onOpen={onOpen} onResolve={onResolve} onTake={onTake} tickets={filteredTickets} /></div>
