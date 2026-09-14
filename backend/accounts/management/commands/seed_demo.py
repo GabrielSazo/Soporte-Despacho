@@ -17,13 +17,7 @@ class Command(BaseCommand):
         cellus, _ = WorkGroup.objects.get_or_create(name="cellus", defaults={"code": "cellus"})
         nexel, _ = WorkGroup.objects.get_or_create(name="nexel", defaults={"code": "nexel"})
 
-        estaciones = []
-        for i in range(1, 15):
-            team, _ = Team.objects.get_or_create(group=tigo, name=f"Estacion {i}", defaults={"code": f"estacion{i}"})
-            estaciones.append(team)
-        estacion1 = estaciones[0]
-        estacion2 = estaciones[1] if len(estaciones) > 1 else estacion1
-
+        tigo_team, _ = Team.objects.get_or_create(group=tigo, name="Tigo", defaults={"code": "tigo"})
         soporte_n2, _ = Team.objects.get_or_create(group=bbi, name="Soporte-N2", defaults={"code": "reclamos"})
         Team.objects.get_or_create(group=celtech, name="Celtech", defaults={"code": "celtech"})
         Team.objects.get_or_create(group=cellus, name="Cellus", defaults={"code": "cellus"})
@@ -34,21 +28,21 @@ class Command(BaseCommand):
             "Andrea",
             "Morales",
             User.Role.DISPATCHER,
-            [estacion1, estacion2],
+            [tigo_team],
         )
         support = self.upsert_user(
             "soporte@sestel.local",
             "Mario",
             "Ramírez",
             User.Role.SUPPORT,
-            [estacion1, estacion2],
+            [tigo_team],
         )
         self.upsert_user(
             "admin@sestel.local",
             "Carla",
             "Alvarado",
             User.Role.ADMIN,
-            [estacion1, estacion2],
+            [tigo_team],
             is_staff=True,
         )
         supervisor = self.upsert_user(

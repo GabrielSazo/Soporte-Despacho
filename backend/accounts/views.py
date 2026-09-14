@@ -68,12 +68,28 @@ class EmailTokenObtainPairView(TokenObtainPairView):
     serializer_class = EmailTokenObtainPairSerializer
 
 
-class CurrentUserView(generics.RetrieveAPIView):
+class CurrentUserView(generics.RetrieveUpdateAPIView):
     permission_classes = [IsAuthenticated]
     serializer_class = CurrentUserSerializer
 
     def get_object(self):
         return self.request.user
+
+    def get_serializer_class(self):
+        if self.request.method in ["PATCH", "PUT"]:
+            return UserSerializer
+        return CurrentUserSerializer
+
+    def perform_update(self, serializer):
+        # Solo permite cambiar teams/managed_groups propios
+        allowed = {"teams", "managed_groups"}
+        data = {k: v for k, v in serializer.validated_data.items() if k in allowed}
+        # Actualizar solo esos campos
+        user = self.get_object()
+        if "teams" in data:
+            user.teams.set(data["teams"])
+        if "managed_groups" in data:
+            user.managed_groups.set(data["managed_groups"])
 
 
 class LogoutView(APIView):

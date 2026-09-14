@@ -136,6 +136,13 @@ export function getCurrentUser() {
   return request("/auth/me/");
 }
 
+export function updateMyTeams(teams, managedGroups) {
+  const body = {};
+  if (teams) body.teams = teams;
+  if (managedGroups) body.managed_groups = managedGroups;
+  return request("/auth/me/", { method: "PATCH", body });
+}
+
 export function getTickets() {
   return request("/tickets/");
 }
