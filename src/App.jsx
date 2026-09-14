@@ -1256,6 +1256,22 @@ function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
   const [submitting, setSubmitting] = useState(false);
   const [duplicate, setDuplicate] = useState(null);
   const [checking, setChecking] = useState(false);
+  const [idError, setIdError] = useState("");
+  const [clientError, setClientError] = useState("");
+
+  function validateIdentificador(value) {
+    if (!value.trim()) { setIdError(""); return false; }
+    if (!/^[0-9]+$/.test(value.trim())) { setIdError("Contrato / OT solo admite números."); return false; }
+    setIdError("");
+    return true;
+  }
+
+  function validateCliente(value) {
+    if (!value.trim()) { setClientError(""); return false; }
+    if (!/^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9\s.\-,&()']+$/.test(value.trim())) { setClientError("Solo letras, números, espacios y . , - & ( )."); return false; }
+    setClientError("");
+    return true;
+  }
 
   useEffect(() => {
     getRequestTypes({ active: "1" }).then((payload) => setCatalog(payload.results || payload)).catch(() => setCatalog([]));
@@ -1281,7 +1297,7 @@ function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
 
   async function checkDuplicate() {
     const value = form.identificador.trim();
-    if (!value) return;
+    if (!value || !validateIdentificador(value)) return;
     setChecking(true);
     try {
       const payload = await checkOpenTicket(value);
@@ -1320,16 +1336,14 @@ function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
 
   async function submit(event) {
     event.preventDefault();
+    const idOk = validateIdentificador(form.identificador);
+    const clientOk = validateCliente(form.cliente);
+    if (!idOk || !clientOk) {
+      setSubmitError("Revisa los campos marcados en rojo.");
+      return;
+    }
     const idValue = form.identificador.trim();
     const clientValue = form.cliente.trim();
-    if (!/^[0-9]+$/.test(idValue)) {
-      setSubmitError("Contrato / OT solo admite números.");
-      return;
-    }
-    if (!/^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9\s.\-,&()']+$/.test(clientValue)) {
-      setSubmitError("Nombre inválido: solo letras, números, espacios y . , - & ( ).");
-      return;
-    }
     setSubmitting(true);
     setSubmitError("");
     try {
@@ -1363,9 +1377,9 @@ function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
             <label className="field"><span>Tipo de solicitud <b>*</b></span><select required name="kind" value={form.kind} onChange={updateField}><option value="">Seleccionar</option><option value="CLIENTE">Solicitud de Soporte Cliente</option><option value="TECNICO">Soporte Al Tecnico</option></select></label>
             <label className="field"><span>Tipo de servicio <b>*</b></span><select required name="service" value={form.service} onChange={updateField} disabled={!form.kind}><option value="">Seleccionar</option>{services.map((s) => <option key={s} value={s}>{s}</option>)}</select></label>
             <label className="field field-wide"><span>Solicitud específica <b>*</b></span><select required name="tipoId" value={form.tipoId} onChange={updateField} disabled={!form.service}><option value="">Seleccionar</option>{options.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select></label>
-            <label className="field"><span>{idLabel} <b>*</b></span><input required name="identificador" inputMode="numeric" value={form.identificador} onChange={updateField} onBlur={checkDuplicate} disabled={!canFillDetails} placeholder={form.kind === "TECNICO" ? "Solo números" : "Solo números"} /></label>
+            <label className="field"><span>{idLabel} <b>*</b></span><input required name="identificador" inputMode="numeric" value={form.identificador} onChange={updateField} onBlur={(e) => { validateIdentificador(e.target.value); checkDuplicate(); }} disabled={!canFillDetails} placeholder={form.kind === "TECNICO" ? "Solo números" : "Solo números"} />{idError && <small className="field-error">{idError}</small>}</label>
             <label className="field"><span>Prioridad</span><input disabled value="Media (automática)" /></label>
-            <label className="field"><span>Nombre Cliente <b>*</b></span><input required name="cliente" value={form.cliente} onChange={updateField} disabled={!canFillDetails} placeholder="Nombre del cliente" /></label>
+            <label className="field"><span>Nombre Cliente <b>*</b></span><input required name="cliente" value={form.cliente} onChange={updateField} onBlur={(e) => validateCliente(e.target.value)} disabled={!canFillDetails} placeholder="Nombre del cliente" />{clientError && <small className="field-error">{clientError}</small>}</label>
             <label className="field"><span>Nodo <b>*</b></span><input required name="nodo" value={form.nodo} onChange={updateField} disabled={!canFillDetails} placeholder="Nodo" /></label>
             <label className="field field-wide"><span>Comentarios <b>*</b></span><textarea required name="description" value={form.description} onChange={updateField} disabled={!canFillDetails} rows="4" placeholder="Detalle del caso, síntomas, ubicación o pasos ya realizados." /></label>
           </div>
