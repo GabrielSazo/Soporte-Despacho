@@ -1248,7 +1248,7 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onReassi
 }
 
 function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
-  const [form, setForm] = useState({ kind: "", service: "", tipoId: "", identificador: "", cliente: "", nodo: "", title: "", priority: "MEDIA", description: "" });
+  const [form, setForm] = useState({ kind: "", service: "", tipoId: "", identificador: "", cliente: "", nodo: "", title: "", description: "" });
   const [catalog, setCatalog] = useState([]);
   const [attachment, setAttachment] = useState(null);
   const [attachmentError, setAttachmentError] = useState("");
@@ -1320,6 +1320,16 @@ function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
 
   async function submit(event) {
     event.preventDefault();
+    const idValue = form.identificador.trim();
+    const clientValue = form.cliente.trim();
+    if (!/^[0-9]+$/.test(idValue)) {
+      setSubmitError("Contrato / OT solo admite números.");
+      return;
+    }
+    if (!/^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9\s.\-,&()']+$/.test(clientValue)) {
+      setSubmitError("Nombre inválido: solo letras, números, espacios y . , - & ( ).");
+      return;
+    }
     setSubmitting(true);
     setSubmitError("");
     try {
@@ -1327,9 +1337,9 @@ function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
         title: form.title,
         description: form.description,
         category: form.service,
-        priority: form.priority,
-        identificador: form.identificador.trim(),
-        cliente_nombre: form.cliente.trim(),
+        priority: "MEDIA",
+        identificador: idValue,
+        cliente_nombre: clientValue,
         nodo: form.nodo.trim(),
         tipo_solicitud: form.tipoId ? Number(form.tipoId) : null,
         attachment,
@@ -1353,8 +1363,8 @@ function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
             <label className="field"><span>Tipo de solicitud <b>*</b></span><select required name="kind" value={form.kind} onChange={updateField}><option value="">Seleccionar</option><option value="CLIENTE">Solicitud de Soporte Cliente</option><option value="TECNICO">Soporte Al Tecnico</option></select></label>
             <label className="field"><span>Tipo de servicio <b>*</b></span><select required name="service" value={form.service} onChange={updateField} disabled={!form.kind}><option value="">Seleccionar</option>{services.map((s) => <option key={s} value={s}>{s}</option>)}</select></label>
             <label className="field field-wide"><span>Solicitud específica <b>*</b></span><select required name="tipoId" value={form.tipoId} onChange={updateField} disabled={!form.service}><option value="">Seleccionar</option>{options.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select></label>
-            <label className="field"><span>{idLabel} <b>*</b></span><input required name="identificador" value={form.identificador} onChange={updateField} onBlur={checkDuplicate} disabled={!canFillDetails} placeholder={form.kind === "TECNICO" ? "OT" : "Contrato"} /></label>
-            <label className="field"><span>Prioridad <b>*</b></span><select name="priority" value={form.priority} onChange={updateField}><option value="CRITICA">Crítica</option><option value="ALTA">Alta</option><option value="MEDIA">Media</option><option value="BAJA">Baja</option></select></label>
+            <label className="field"><span>{idLabel} <b>*</b></span><input required name="identificador" inputMode="numeric" value={form.identificador} onChange={updateField} onBlur={checkDuplicate} disabled={!canFillDetails} placeholder={form.kind === "TECNICO" ? "Solo números" : "Solo números"} /></label>
+            <label className="field"><span>Prioridad</span><input disabled value="Media (automática)" /></label>
             <label className="field"><span>Nombre Cliente <b>*</b></span><input required name="cliente" value={form.cliente} onChange={updateField} disabled={!canFillDetails} placeholder="Nombre del cliente" /></label>
             <label className="field"><span>Nodo <b>*</b></span><input required name="nodo" value={form.nodo} onChange={updateField} disabled={!canFillDetails} placeholder="Nodo" /></label>
             <label className="field field-wide"><span>Comentarios <b>*</b></span><textarea required name="description" value={form.description} onChange={updateField} disabled={!canFillDetails} rows="4" placeholder="Detalle del caso, síntomas, ubicación o pasos ya realizados." /></label>

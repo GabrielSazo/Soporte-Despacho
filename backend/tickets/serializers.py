@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from django.conf import settings
@@ -222,8 +223,15 @@ class TicketCreateSerializer(serializers.ModelSerializer):
         identificador = (attrs.get("identificador") or "").strip()
         if not identificador:
             raise serializers.ValidationError({"identificador": "Debes indicar el Contrato u OT."})
-        if not (attrs.get("cliente_nombre") or "").strip():
+        if not re.fullmatch(r"[0-9]+", identificador):
+            raise serializers.ValidationError({"identificador": "Contrato / OT solo admite números."})
+        cliente = (attrs.get("cliente_nombre") or "").strip()
+        if not cliente:
             raise serializers.ValidationError({"cliente_nombre": "Debes indicar el nombre del cliente."})
+        if not re.fullmatch(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9\s.\-,&()']+", cliente):
+            raise serializers.ValidationError({"cliente_nombre": "Nombre inválido: solo letras, números, espacios y . , - & ( )."})
+        attrs["identificador"] = identificador
+        attrs["cliente_nombre"] = cliente
         if not (attrs.get("nodo") or "").strip():
             raise serializers.ValidationError({"nodo": "Debes indicar el nodo."})
         existing = Ticket.objects.filter(identificador__iexact=identificador).exclude(status=Ticket.Status.CLOSED).order_by("-created_at").first()

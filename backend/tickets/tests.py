@@ -50,7 +50,7 @@ class TicketFlowTests(APITestCase):
         )
         self.support.teams.set([self.team, self.soporte_b])
 
-    def create_ticket_through_api(self, identificador="C-TEST-001"):
+    def create_ticket_through_api(self, identificador="10001"):
         self.client.force_authenticate(self.dispatcher)
         response = self.client.post(
             "/api/tickets/",
