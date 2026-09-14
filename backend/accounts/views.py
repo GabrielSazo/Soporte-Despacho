@@ -220,6 +220,9 @@ class UserViewSet(viewsets.ModelViewSet):
         if user.is_supervisor:
             codes = user.group_codes
             return qs.filter(teams__group__code__in=codes).distinct() | qs.filter(managed_groups__code__in=codes).distinct() | qs.filter(pk=user.pk).distinct()
+        codes = user.group_codes
+        if codes:
+            return qs.filter(teams__group__code__in=codes).distinct() | qs.filter(pk=user.pk).distinct()
         return qs.filter(pk=user.pk)
 
     def perform_update(self, serializer):

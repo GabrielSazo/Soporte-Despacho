@@ -50,9 +50,9 @@ class AuthenticationTests(APITestCase):
     def test_only_administrators_can_manage_users(self):
         self.client.force_authenticate(self.user)
         denied = self.client.get(reverse("user-list"))
-        # Dispatcher can list but only sees self
+        # Dispatcher can list same-group users (includes self)
         self.assertEqual(denied.status_code, 200)
-        self.assertEqual(denied.data["count"], 1)
+        self.assertTrue(any(u["id"] == self.user.id for u in denied.data["results"]))
 
         # Dispatcher cannot create
         forbidden = self.client.post(

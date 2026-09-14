@@ -295,6 +295,7 @@ function App() {
 
   useEffect(() => {
     if (session && ["ADMIN", "SUPERVISOR"].includes(session?.role) && activeView === "Usuarios") refreshUsers();
+    if (session && activeView === "Mi grupo") refreshUsers();
   }, [activeView, session?.role]);
 
 
@@ -621,7 +622,7 @@ function App() {
             {activeView === "Resumen" && <Dashboard canCreate={canCreateTickets} criticalTickets={criticalTickets} dashboard={dashboard} onCreate={() => setNewTicketOpen(true)} onOpen={openTicketDetail} onShowTickets={() => setActiveView("Tickets")} tickets={tickets} validationTickets={validationTickets} />}
             {activeView === "Tickets" && <TicketsView canCreate={canCreateTickets} currentUser={session} filter={filter} filteredTickets={filteredTickets} onCreate={() => setNewTicketOpen(true)} onFilterChange={setFilter} onNotify={notify} onOpen={openTicketDetail} onResolve={setTicketToResolve} onTake={takeTicket} query={query} setQuery={setQuery} />}
             {activeView === "Validaciones" && <ValidationsView canValidate={session.role !== "SOPORTE"} tickets={validationTickets} onOpen={openTicketDetail} onValidate={validateTicket} />}
-            {activeView === "Mi equipo" && <TeamView currentUser={session} onNotify={notify} tickets={tickets} />}
+            {activeView === "Mi grupo" && <TeamView currentUser={session} onNotify={notify} tickets={tickets} users={users} />}
             {activeView === "Informes" && <ReportsView tickets={tickets} />}
             {activeView === "Usuarios" && ["ADMIN","SUPERVISOR"].includes(session.role) && <UsersView currentRole={session.role} error={usersError} groups={groups} loading={usersLoading} onCreate={() => setUserModal("new")} onCreateGroup={() => setGroupModal("new")} onCreateTeam={() => setTeamModal("new")} onEdit={setUserModal} onEditGroup={setGroupModal} onEditTeam={setTeamModal} onResetPassword={setPasswordModal} onRetry={refreshUsers} teams={teams} users={users} />}
           </>}
@@ -801,9 +802,14 @@ function ValidationsView({ canValidate, tickets, onOpen, onValidate }) {
   );
 }
 
-function TeamView({ currentUser, onNotify, tickets }) {
+function TeamView({ currentUser, onNotify, tickets, users }) {
   const peopleByName = new Map();
-  if (currentUser.role === "SOPORTE") {
+  const memberUsers = (users || []).filter((u) => u.is_active && !u.is_locked);
+  if (memberUsers.length) {
+    memberUsers.forEach((u) => {
+      peopleByName.set(u.name, { initials: u.initials, name: u.name, role: u.roleLabel, load: 0, status: u.name === currentUser.name ? "En línea" : "En atención", className: u.avatarClass });
+    });
+  } else if (currentUser.role === "SOPORTE") {
     peopleByName.set(currentUser.name, { initials: currentUser.initials, name: currentUser.name, role: currentUser.roleLabel, load: 0, status: "En línea", className: currentUser.avatarClass });
   }
   tickets.forEach((ticket) => {
