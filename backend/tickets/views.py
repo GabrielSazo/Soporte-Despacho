@@ -335,10 +335,10 @@ class ReportsExportView(APIView):
                     minutes = 0
                 previous = event.created_at
                 writer.writerow(base + [
-                    event.event_label,
+                    event.get_event_type_display(),
                     timezone.localtime(event.created_at).strftime("%d/%m/%Y %H:%M"),
                     minutes,
-                    event.to_status_label or event.from_status_label or "",
+                    event.get_to_status_display() or event.get_from_status_display() or "",
                     event.actor.display_name if event.actor_id else "Sistema",
                     (event.comment or "")[:500],
                     aht if aht is not None else "",
