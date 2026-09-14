@@ -48,7 +48,7 @@ def require_support_access(user, ticket):
         if ticket_group in group_codes:
             return
         raise PermissionDenied("No tienes acceso operativo a este ticket.")
-    if user.role == User.Role.DESPACHADOR:
+    if user.role == User.Role.DISPATCHER:
         if ticket_group in group_codes or origin_group in group_codes:
             return
         raise PermissionDenied("Solo puedes reasignar tickets de tu grupo.")

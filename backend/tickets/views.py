@@ -116,6 +116,27 @@ class TicketViewSet(viewsets.ModelViewSet):
         return Response(TicketSerializer(ticket, context={"request": request}).data)
 
     @action(detail=True, methods=["post"])
+    def release(self, request, pk=None):
+        from .models import TicketEvent
+        from .services import broadcast_ticket_update, record_event
+
+        ticket = self.get_object()
+        require_support_access(request.user, ticket)
+        if ticket.status not in {Ticket.Status.ASSIGNED, Ticket.Status.IN_PROGRESS}:
+            raise ValidationError("Solo se pueden liberar tickets asignados o en proceso.")
+        me = request.user
+        if not (me.is_administrator or ticket.assignee_id == me.id or (me.role == User.Role.SUPERVISOR and ticket.assigned_team.group.code in me.group_codes)):
+            raise PermissionDenied("Solo el asignado, un supervisor del grupo o un administrador puede liberar este ticket.")
+        previous = ticket.assignee.display_name if ticket.assignee_id else "Sin asignar"
+        ticket.assignee = None
+        ticket.assigned_at = None
+        ticket.status = Ticket.Status.OPEN
+        ticket.save(update_fields=["assignee", "assigned_at", "status", "updated_at"])
+        record_event(ticket, TicketEvent.EventType.RELEASED, actor=me, from_status=previous, to_status=ticket.status, comment=f"Liberado a bandeja por {me.display_name}.")
+        broadcast_ticket_update(ticket.id, "released")
+        return Response(TicketSerializer(ticket, context={"request": request}).data)
+
+    @action(detail=True, methods=["post"])
     def resolve(self, request, pk=None):
         ticket = self.get_object()
         require_support_access(request.user, ticket)
@@ -154,7 +175,7 @@ class TicketViewSet(viewsets.ModelViewSet):
         if not group_code or not new_assignee.teams.filter(group__code=group_code).exists():
             raise PermissionDenied("Solo puedes reasignar a personas del mismo grupo del ticket.")
         # Despachador/Supervisor solo dentro de su grupo (soporte ya validado por require_support_access)
-        if request.user.role in {User.Role.DESPACHADOR, User.Role.SUPERVISOR} and group_code not in request.user.group_codes:
+        if request.user.role in {User.Role.DISPATCHER, User.Role.SUPERVISOR} and group_code not in request.user.group_codes:
             raise PermissionDenied("Solo puedes reasignar dentro de tu grupo.")
         from django.utils import timezone as tz
         from .services import record_event
@@ -190,7 +211,7 @@ class TicketViewSet(viewsets.ModelViewSet):
         can_attach = request.user.is_administrator or ticket.creator_id == request.user.id
         can_attach = can_attach or (request.user.role == User.Role.SUPPORT and ticket.assigned_team.group.code in request.user.group_codes)
         can_attach = can_attach or (request.user.role == User.Role.SUPERVISOR and ticket.assigned_team.group.code in request.user.group_codes)
-        can_attach = can_attach or (request.user.role == User.Role.DESPACHADOR and ticket.origin_team.group.code in request.user.group_codes)
+        can_attach = can_attach or (request.user.role == User.Role.DISPATCHER and ticket.origin_team.group.code in request.user.group_codes)
         if ticket.attachments.count() >= 5:
             raise ValidationError("Máximo 5 imágenes por ticket.")
         if not can_attach:

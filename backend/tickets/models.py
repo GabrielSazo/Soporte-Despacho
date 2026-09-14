@@ -169,6 +169,7 @@ class TicketEvent(models.Model):
         ESCALATED = "ESCALADO", "Escalado por SLA"
         AUTO_CLOSED = "AUTO_CERRADO", "Cerrado automáticamente"
         ATTACHMENT = "ADJUNTO", "Evidencia adjunta"
+        RELEASED = "LIBERADO", "Liberado a bandeja"
 
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="events")
     actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="ticket_events")

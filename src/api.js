@@ -205,6 +205,10 @@ export function takeTicket(ticketId) {
   return request(`/tickets/${ticketId}/take/`, { method: "POST" });
 }
 
+export function releaseTicket(ticketId) {
+  return request(`/tickets/${ticketId}/release/`, { method: "POST" });
+}
+
 export function resolveTicket(ticketId, resolutionNotes) {
   return request(`/tickets/${ticketId}/resolve/`, { method: "POST", body: { resolution_notes: resolutionNotes } });
 }
