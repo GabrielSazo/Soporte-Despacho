@@ -557,7 +557,27 @@ function App() {
   const myTickets = tickets.filter((t) => t.creatorId === session?.id);
   const myValidation = tickets.filter((t) => t.statusCode === "VALIDACION" && t.creatorId === session?.id);
   const trabajables = tickets.filter((t) => ["ABIERTO", "ASIGNADO"].includes(t.statusCode) && !t.assigneeId);
-  const notifications = session?.role === "DESPACHADOR"
+  const [seenNotifs, setSeenNotifs] = useState(() => {
+    try {
+      return JSON.parse(sessionStorage.getItem(`sestel-seen-${session?.id}`) || "{}");
+    } catch {
+      return {};
+    }
+  });
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(`sestel-seen-${session?.id}`, JSON.stringify(seenNotifs));
+    } catch {}
+  }, [seenNotifs, session?.id]);
+  function markSeen(key) {
+    setSeenNotifs((s) => (s[key] ? s : { ...s, [key]: true }));
+  }
+  function markAllSeen() {
+    const all = {};
+    notifications.forEach((n) => { all[n.key] = true; });
+    setSeenNotifs((s) => ({ ...s, ...all }));
+  }
+  const notifications = (session?.role === "DESPACHADOR"
     ? [
         ...myValidation.slice(0, 3).map((t) => ({ key: `val-${t.id}`, type: "warning", title: `Validación pendiente: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
         ...myTickets.filter((t) => t.slaTone === "danger").slice(0, 3).map((t) => ({ key: `sla-${t.id}`, type: "danger", title: `SLA vencido: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
@@ -566,7 +586,9 @@ function App() {
         ...trabajables.slice(0, 3).map((t) => ({ key: `new-${t.id}`, type: "info", title: `Nuevo en bandeja: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
         ...trabajables.filter((t) => t.slaTone === "danger").slice(0, 2).map((t) => ({ key: `sla-${t.id}`, type: "danger", title: `SLA vencido: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
         ...myValidation.slice(0, 2).map((t) => ({ key: `val-${t.id}`, type: "warning", title: `Validación pendiente: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
-      ].slice(0, 5);
+      ].slice(0, 5)
+  ).map((n) => ({ ...n, seen: Boolean(seenNotifs[n.key]) }));
+  const unseenCount = notifications.filter((n) => !n.seen).length;
 
   if (typeof window !== "undefined" && window.location.pathname === "/reset-password") {
     return <PasswordResetPage brand={brand} theme={theme} onToggleTheme={() => setTheme((currentTheme) => (currentTheme === "light" ? "dark" : "light"))} />;
@@ -617,21 +639,21 @@ function App() {
           <div className="topbar-actions">
             <button className="icon-button theme-button" type="button" aria-label={theme === "light" ? "Activar tema oscuro" : "Activar tema claro"} aria-pressed={theme === "dark"} onClick={() => setTheme((currentTheme) => (currentTheme === "light" ? "dark" : "light"))} title={theme === "light" ? "Cambiar a modo oscuro" : "Cambiar a modo claro"}><Icon name={theme === "light" ? "moon" : "sun"} size={19} /></button>
             <div className="notification-wrapper">
-              <button className={`icon-button notification-button ${notifications.length ? "has-notifications" : ""}`} type="button" aria-label={`Notificaciones ${notifications.length ? `(${notifications.length} nuevas)` : ""}`} aria-expanded={showNotifications} onClick={() => { setShowNotifications((v) => !v); setShowUserMenu(false); if (!showNotifications) refreshWorkspace(true); }}><Icon name="bell" size={20} />{notifications.length > 0 && <span />}</button>
+              <button className={`icon-button notification-button ${unseenCount ? "has-notifications" : ""}`} type="button" aria-label={`Notificaciones ${unseenCount ? `(${unseenCount} nuevas)` : ""}`} aria-expanded={showNotifications} onClick={() => { setShowNotifications((v) => !v); setShowUserMenu(false); if (!showNotifications) refreshWorkspace(true); }}><Icon name="bell" size={20} />{unseenCount > 0 && <span />}</button>
               {showNotifications && (
                 <>
                   <button className="dropdown-overlay" type="button" aria-label="Cerrar notificaciones" onClick={() => setShowNotifications(false)} />
                   <div className="notification-dropdown" role="region" aria-label="Notificaciones">
-                    <div className="notification-header"><strong>Notificaciones</strong><span>{notifications.length}</span></div>
+                    <div className="notification-header"><strong>Notificaciones</strong><span>{unseenCount} nuevas</span></div>
                     <div className="notification-list">
                       {notifications.length ? notifications.map((n) => (
-                        <button key={n.key} type="button" className="notification-item" onClick={() => { setShowNotifications(false); openTicketDetail(n.ticket); }}>
+                        <button key={n.key} type="button" className="notification-item" style={n.seen ? { opacity: 0.6 } : undefined} onClick={() => { markSeen(n.key); setShowNotifications(false); openTicketDetail(n.ticket); }}>
                           <span className={`notification-icon ${n.type}`}><Icon name={n.type === "danger" ? "alert" : n.type === "warning" ? "clock" : "ticket"} size={16} /></span>
-                          <span className="notification-content"><strong>{n.title}</strong><p>{n.desc}</p><small>{n.time} · {n.ticket.team}</small></span>
+                          <span className="notification-content"><strong>{n.seen ? "" : "● "}{n.title}</strong><p>{n.desc}</p><small>{n.time} · {n.ticket.team}</small></span>
                         </button>
                       )) : <div className="notification-empty"><Icon name="checkCircle" size={24} /><p>Todo al día</p><small>No hay alertas pendientes</small></div>}
                     </div>
-                    <div className="notification-footer"><button type="button" className="text-button" onClick={() => { setShowNotifications(false); refreshWorkspace(); }}>Actualizar</button></div>
+                    <div className="notification-footer"><button type="button" className="text-button" onClick={() => markAllSeen()}>Marcar leídas</button><button type="button" className="text-button" onClick={() => { setShowNotifications(false); refreshWorkspace(); }}>Actualizar</button></div>
                   </div>
                 </>
               )}
