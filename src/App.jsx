@@ -230,6 +230,9 @@ function App() {
     if (session.role === "SOPORTE") setFilter("Trabajables");
     else if (session.role === "DESPACHADOR") setFilter("Míos");
     else setFilter("Todos");
+    if (typeof window !== "undefined" && window.location.pathname === "/login") {
+      window.history.replaceState(null, "", "/");
+    }
   }, [session?.id]);
 
   useEffect(() => {
