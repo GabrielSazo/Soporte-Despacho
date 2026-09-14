@@ -40,10 +40,9 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
         return file
 
     def get_url(self, attachment):
-        request = self.context.get("request")
         if not attachment.file:
             return None
-        return request.build_absolute_uri(attachment.file.url) if request else attachment.file.url
+        return attachment.file.url
 
     def create(self, validated_data):
         file = validated_data.pop("file")

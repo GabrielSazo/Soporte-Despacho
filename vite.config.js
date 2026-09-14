@@ -15,6 +15,10 @@ export default defineConfig({
         ws: true,
         changeOrigin: true,
       },
+      '/media': {
+        target: 'http://api:8000',
+        changeOrigin: true,
+      },
     },
   },
 });
