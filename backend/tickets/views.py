@@ -141,25 +141,33 @@ class TicketViewSet(viewsets.ModelViewSet):
     def reassign(self, request, pk=None):
         ticket = self.get_object()
         require_support_access(request.user, ticket)
-        team_id = request.data.get("team_id") or request.data.get("team")
-        if not team_id:
-            raise ValidationError({"team": "Debes indicar el equipo destino."})
-        from accounts.models import Team
+        if ticket.status == Ticket.Status.CLOSED:
+            raise ValidationError("No se puede reasignar un ticket cerrado.")
+        user_id = request.data.get("user_id") or request.data.get("assignee")
+        if not user_id:
+            raise ValidationError({"user": "Debes indicar la persona destino."})
         try:
-            new_team = Team.objects.get(pk=team_id)
-        except Team.DoesNotExist:
-            raise ValidationError({"team": "Equipo no existe."})
-        if request.user.role in {User.Role.DESPACHADOR, User.Role.SUPERVISOR} and new_team.group.code not in request.user.group_codes:
+            new_assignee = User.objects.get(pk=user_id, is_active=True)
+        except User.DoesNotExist:
+            raise ValidationError({"user": "Persona no existe o está inactiva."})
+        group_code = ticket.assigned_team.group.code if ticket.assigned_team_id else None
+        if not group_code or not new_assignee.teams.filter(group__code=group_code).exists():
+            raise PermissionDenied("Solo puedes reasignar a personas del mismo grupo del ticket.")
+        # Despachador/Supervisor solo dentro de su grupo (soporte ya validado por require_support_access)
+        if request.user.role in {User.Role.DESPACHADOR, User.Role.SUPERVISOR} and group_code not in request.user.group_codes:
             raise PermissionDenied("Solo puedes reasignar dentro de tu grupo.")
+        from django.utils import timezone as tz
         from .services import record_event
         from .models import TicketEvent
-        previous_team = ticket.assigned_team
+        previous_assignee = ticket.assignee.display_name if ticket.assignee_id else "Sin asignar"
+        new_team = new_assignee.teams.filter(group__code=group_code).first() or ticket.assigned_team
         ticket.assigned_team = new_team
-        ticket.assignee = None
-        ticket.assigned_at = None
-        ticket.status = Ticket.Status.OPEN
+        ticket.assignee = new_assignee
+        ticket.assigned_at = tz.now()
+        if ticket.status == Ticket.Status.OPEN:
+            ticket.status = Ticket.Status.ASSIGNED
         ticket.save(update_fields=["assigned_team", "assignee", "assigned_at", "status", "updated_at"])
-        record_event(ticket, TicketEvent.EventType.ASSIGNED, actor=request.user, from_status=previous_team.name if previous_team else "", to_status=new_team.name, comment=f"Reasignado de {previous_team} a {new_team}.")
+        record_event(ticket, TicketEvent.EventType.ASSIGNED, actor=request.user, from_status=previous_assignee, to_status=new_assignee.display_name, comment=f"Reasignado a {new_assignee.display_name}.")
         try:
             from channels.layers import get_channel_layer
             from asgiref.sync import async_to_sync
