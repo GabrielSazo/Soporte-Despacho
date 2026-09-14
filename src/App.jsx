@@ -762,7 +762,7 @@ function ValidationsView({ canValidate, tickets, onOpen, onValidate }) {
       <PageHeader
         eyebrow="Cierre con validación cruzada"
         title="Pendientes de confirmar"
-        description="Solo el despachador que creó la solicitud puede aprobar o rechazar la solución propuesta."
+        description=""
       />
       <section className="validation-grid">
         {!canValidate ? <EmptyValidation /> : null}
@@ -777,7 +777,6 @@ function ValidationsView({ canValidate, tickets, onOpen, onValidate }) {
           </article>
         )) : null}
         {canValidate && tickets.length === 0 ? <EmptyValidation /> : null}
-        <aside className="validation-side-note"><Icon name="shield" size={21} /><strong>Tu validación cierra el ciclo</strong><p>Al aprobar, el ticket quedará cerrado. Si rechazas, volverá a Soporte en estado En proceso.</p></aside>
       </section>
     </>
   );
