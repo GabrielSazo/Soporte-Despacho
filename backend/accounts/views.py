@@ -16,7 +16,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 
 from .models import Team, User, WorkGroup
-from .permissions import IsAdministrator
+from .permissions import IsAdministrator, IsAdminOrSupervisor
 from .serializers import CurrentUserSerializer, TeamSerializer, UserSerializer, WorkGroupSerializer
 
 password_reset_token_generator = PasswordResetTokenGenerator()
@@ -208,6 +208,8 @@ class UserViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         if self.action in ["list", "retrieve"]:
             return [IsAuthenticated()]
+        if self.action in ["partial_update", "update"]:
+            return [IsAdminOrSupervisor()]
         return [IsAdministrator()]
 
     def get_queryset(self):
@@ -222,6 +224,28 @@ class UserViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         target = serializer.instance
-        if target.pk == self.request.user.pk and serializer.validated_data.get("is_active") is False:
+        requester = self.request.user
+        if target.pk == requester.pk and serializer.validated_data.get("is_active") is False:
             raise ValidationError({"is_active": "No puedes desactivar tu propia cuenta."})
+        if not requester.is_administrator:
+            # Supervisor solo puede tocar usuarios de sus grupos y nunca cuentas ADMIN
+            if target.role == User.Role.ADMIN or target.is_superuser:
+                raise ValidationError({"detail": "Solo un administrador puede modificar cuentas de administración."})
+            target_codes = set(target.teams.values_list("group__code", flat=True)) | set(
+                target.managed_groups.values_list("code", flat=True)
+            )
+            if not (set(requester.group_codes) & target_codes) and target.pk != requester.pk:
+                raise ValidationError({"detail": "Solo puedes modificar usuarios de tus grupos."})
+            new_role = serializer.validated_data.get("role")
+            if new_role == User.Role.ADMIN:
+                raise ValidationError({"role": "Solo un administrador puede asignar el rol ADMIN."})
+            new_teams = serializer.validated_data.get("teams")
+            if new_teams is not None:
+                allowed = set(requester.group_codes)
+                for team in new_teams:
+                    if team.group.code not in allowed:
+                        raise ValidationError({"teams": f"Solo puedes asignar grupos que supervisas ({team.group.name})."})
+            new_mgroups = serializer.validated_data.get("managed_groups")
+            if new_mgroups is not None and new_mgroups:
+                raise ValidationError({"managed_groups": "Solo un administrador puede asignar grupos supervisados."})
         serializer.save()
