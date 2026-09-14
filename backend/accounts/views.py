@@ -186,10 +186,24 @@ class PublicPasswordResetView(PasswordResetRequestView):
 
 
 class UserViewSet(viewsets.ModelViewSet):
-    queryset = User.objects.prefetch_related("teams__group").all()
+    queryset = User.objects.prefetch_related("teams__group", "managed_groups").all()
     serializer_class = UserSerializer
-    permission_classes = [IsAdministrator]
     http_method_names = ["get", "post", "patch", "head", "options"]
+
+    def get_permissions(self):
+        if self.action in ["list", "retrieve"]:
+            return [IsAuthenticated()]
+        return [IsAdministrator()]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if user.is_administrator:
+            return qs
+        if user.is_supervisor:
+            codes = user.group_codes
+            return qs.filter(teams__group__code__in=codes).distinct() | qs.filter(managed_groups__code__in=codes).distinct() | qs.filter(pk=user.pk).distinct()
+        return qs.filter(pk=user.pk)
 
     def perform_update(self, serializer):
         target = serializer.instance
