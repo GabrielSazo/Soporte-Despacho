@@ -58,16 +58,44 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
         )
         record_event(ticket, TicketEvent.EventType.ATTACHMENT, actor=request.user, comment=file.name)
         try:
-            from PIL import Image, ImageEnhance
+            from PIL import Image, ImageEnhance, ImageOps, ImageStat
             import pytesseract, re
             img0 = Image.open(attachment.file.path)
-            # OCR top (SSID/PASSWORD) with clean psm6
-            img = img0.convert("L")
-            w, h = img.size
-            img = img.resize((w * 2, h * 2), Image.LANCZOS)
-            img = ImageEnhance.Contrast(img).enhance(1.6)
-            cfg = "--oem 3 --psm 6 -c preserve_interword_spaces=1"
-            text_top = pytesseract.image_to_string(img, lang="eng", config=cfg).strip()
+            gray = img0.convert("L")
+            # Si el fondo es oscuro (capturas), invertir para texto claro sobre blanco
+            try:
+                mean_brightness = ImageStat.Stat(gray).mean[0]
+            except Exception:
+                mean_brightness = 200
+            base = ImageOps.invert(gray) if mean_brightness < 110 else gray
+
+            def run_ocr(image, config, scale=2):
+                w, h = image.size
+                img = image.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+                img = ImageEnhance.Contrast(img).enhance(1.6)
+                img = ImageEnhance.Sharpness(img).enhance(1.5)
+                return pytesseract.image_to_string(img, lang="spa+eng", config=config).strip()
+
+            candidates = []
+            try:
+                candidates.append(run_ocr(base, "--oem 3 --psm 6 -c preserve_interword_spaces=1", scale=2))
+            except Exception:
+                pass
+            try:
+                candidates.append(run_ocr(base, "--oem 3 --psm 3", scale=2))
+            except Exception:
+                pass
+            try:
+                candidates.append(run_ocr(gray, "--oem 3 --psm 11", scale=3))
+            except Exception:
+                pass
+
+            def meaningful(text):
+                lines = [l.strip() for l in (text or "").splitlines() if len(re.findall(r"[A-Za-z0-9]", l)) >= 3]
+                return "\n".join(lines).strip()
+
+            scored = [(len(t), t) for t in (meaningful(c) for c in candidates) if t]
+            text_top = max(scored)[1] if scored else ""
             # Extract SSID/PASSWORD lines via regex, ignore noise
             lines = []
             for line in text_top.splitlines():
