@@ -1,4 +1,4 @@
-from django.db.models import Count, Q
+from django.db.models import Count, F, Q
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -220,6 +220,130 @@ class TicketViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         attachment = serializer.save()
         return Response(TicketAttachmentSerializer(attachment, context={"request": request}).data, status=status.HTTP_201_CREATED)
+
+
+def _filter_reports(request, queryset):
+    group = request.query_params.get("group")
+    service = request.query_params.get("service")
+    tipo = request.query_params.get("tipo")
+    status_value = request.query_params.get("status")
+    date_from = request.query_params.get("from")
+    date_to = request.query_params.get("to")
+    if group:
+        queryset = queryset.filter(assigned_team__group__code=group)
+    if service:
+        queryset = queryset.filter(category=service)
+    if tipo:
+        queryset = queryset.filter(tipo_solicitud_id=tipo)
+    if status_value:
+        queryset = queryset.filter(status=status_value)
+    if date_from:
+        queryset = queryset.filter(created_at__date__gte=date_from)
+    if date_to:
+        queryset = queryset.filter(created_at__date__lte=date_to)
+    return queryset
+
+
+def _ticket_aht_minutes(ticket):
+    if ticket.resolved_at and ticket.assigned_at:
+        return round((ticket.resolved_at - ticket.assigned_at).total_seconds() / 60, 1)
+    return None
+
+
+class ReportsSummaryView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from datetime import timedelta
+        from django.db.models.functions import TruncDate
+
+        tickets = _filter_reports(request, visible_tickets_for(request.user))
+        entrantes = tickets.count()
+        resueltos = tickets.filter(resolved_at__isnull=False).count()
+        cerrados = tickets.filter(status=Ticket.Status.CLOSED)
+        en_proceso = tickets.exclude(status__in=[Ticket.Status.CLOSED]).count()
+        vencidos = sum(1 for t in tickets.exclude(status=Ticket.Status.CLOSED) if t.sla_state == "VENCIDO")
+        ahts = [_ticket_aht_minutes(t) for t in tickets.filter(resolved_at__isnull=False, assigned_at__isnull=False)]
+        aht = round(sum(ahts) / len(ahts), 1) if ahts else None
+        sla_ok = cerrados.filter(closed_at__lte=F("sla_due_at")).count()
+        pct_sla = round(sla_ok / cerrados.count() * 100, 1) if cerrados.count() else None
+
+        today = timezone.now().date()
+        start = today - timedelta(days=13)
+        date_from = request.query_params.get("from") or start.isoformat()
+        date_to = request.query_params.get("to") or today.isoformat()
+        daily_qs = tickets.filter(created_at__date__gte=date_from, created_at__date__lte=date_to)
+        daily = list(daily_qs.annotate(day=TruncDate("created_at")).values("day").annotate(total=Count("id")).order_by("day"))
+        daily = [{"date": d["day"].isoformat(), "total": d["total"]} for d in daily]
+        by_service = list(tickets.values("category").annotate(total=Count("id")).order_by("-total"))
+        by_group = list(tickets.values("assigned_team__group__name").annotate(total=Count("id")).order_by("-total"))
+        return Response({
+            "kpis": {
+                "entrantes": entrantes,
+                "resueltos": resueltos,
+                "aht_minutos": aht,
+                "pct_sla": pct_sla,
+                "en_proceso": en_proceso,
+                "vencidos": vencidos,
+            },
+            "daily": daily,
+            "by_service": [{"service": r["category"], "total": r["total"]} for r in by_service],
+            "by_group": [{"group": r["assigned_team__group__name"], "total": r["total"]} for r in by_group],
+            "from": date_from,
+            "to": date_to,
+        })
+
+
+class ReportsExportView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        import csv
+        from django.http import HttpResponse
+
+        tickets = _filter_reports(request, visible_tickets_for(request.user)).select_related(
+            "creator", "origin_team__group", "assigned_team__group", "assignee", "tipo_solicitud"
+        ).prefetch_related("events__actor").order_by("created_at", "id")
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="reporte_actividades.csv"'
+        writer = csv.writer(response, delimiter=";")
+        writer.writerow([
+            "Ticket", "Identificador", "Cliente", "Nodo", "Usuario solicitante", "Proceso",
+            "Area solicitante", "Tipo de solicitud", "Servicio", "Prioridad", "Estado ticket",
+            "Actividad", "Fecha actividad", "Minutos desde anterior", "Estado actividad",
+            "Participante actividad", "Comentario actividad", "AHT ticket (min)",
+        ])
+        for ticket in tickets:
+            aht = _ticket_aht_minutes(ticket)
+            base = [
+                ticket.reference, ticket.identificador, ticket.cliente_nombre, ticket.nodo,
+                ticket.creator.display_name if ticket.creator_id else "",
+                "Soporte Despacho",
+                ticket.origin_team.group.name if ticket.origin_team_id else "",
+                ticket.tipo_solicitud.name if ticket.tipo_solicitud_id else "",
+                ticket.category, ticket.get_priority_display(), ticket.get_status_display(),
+            ]
+            events = list(ticket.events.order_by("created_at", "id"))
+            if not events:
+                writer.writerow(base + ["", "", "", "", "", "", aht if aht is not None else ""])
+                continue
+            previous = None
+            for event in events:
+                if previous:
+                    minutes = round((event.created_at - previous).total_seconds() / 60, 2)
+                else:
+                    minutes = 0
+                previous = event.created_at
+                writer.writerow(base + [
+                    event.event_label,
+                    timezone.localtime(event.created_at).strftime("%d/%m/%Y %H:%M"),
+                    minutes,
+                    event.to_status_label or event.from_status_label or "",
+                    event.actor.display_name if event.actor_id else "Sistema",
+                    (event.comment or "")[:500],
+                    aht if aht is not None else "",
+                ])
+        return response
 
 
 class DashboardView(APIView):

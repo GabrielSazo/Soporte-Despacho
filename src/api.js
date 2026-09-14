@@ -238,3 +238,29 @@ export function checkOpenTicket(identificador) {
   const qs = new URLSearchParams({ identificador, abierto: "1" }).toString();
   return request(`/tickets/?${qs}`);
 }
+
+export function getReportsSummary(params = {}) {
+  const cleaned = Object.fromEntries(Object.entries(params).filter(([, v]) => v));
+  const qs = new URLSearchParams(cleaned).toString();
+  return request(`/reports/summary/${qs ? `?${qs}` : ""}`);
+}
+
+export async function downloadReportsCsv(params = {}) {
+  const cleaned = Object.fromEntries(Object.entries(params).filter(([, v]) => v));
+  const qs = new URLSearchParams(cleaned).toString();
+  const base = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
+  const token = sessionStorage.getItem("sestel-access-token");
+  const response = await fetch(`${base}/reports/export/${qs ? `?${qs}` : ""}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!response.ok) throw new Error("No fue posible descargar el reporte.");
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "reporte_actividades.csv";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}

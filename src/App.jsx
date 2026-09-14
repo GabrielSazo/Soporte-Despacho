@@ -8,7 +8,9 @@ import {
   createRequestType,
   getDashboard,
   getGroups,
+  getReportsSummary,
   getRequestTypes,
+  downloadReportsCsv,
   getTicket,
   getTeams,
   getTickets,
@@ -663,7 +665,7 @@ function App() {
             {activeView === "Tickets" && <TicketsView canCreate={canCreateTickets} currentUser={session} filter={filter} filteredTickets={filteredTickets} onCreate={() => setNewTicketOpen(true)} onFilterChange={setFilter} onNotify={notify} onOpen={openTicketDetail} onResolve={setTicketToResolve} onTake={takeTicket} query={query} setQuery={setQuery} />}
             {activeView === "Validaciones" && <ValidationsView canValidate={session.role !== "SOPORTE"} tickets={validationTickets} onOpen={openTicketDetail} onValidate={validateTicket} />}
             {activeView === "Mi grupo" && <TeamView currentUser={session} onNotify={notify} tickets={tickets} users={users} />}
-            {activeView === "Informes" && <ReportsView tickets={tickets} />}
+            {activeView === "Informes" && <ReportsView groups={groups} onNotify={notify} />}
             {activeView === "Usuarios" && ["ADMIN","SUPERVISOR"].includes(session.role) && <UsersView currentRole={session.role} error={usersError} groups={groups} loading={usersLoading} onCreate={() => setUserModal("new")} onCreateGroup={() => setGroupModal("new")} onCreateTeam={() => setTeamModal("new")} onCreateRequestType={() => setRequestTypeModal("new")} onEdit={setUserModal} onEditGroup={setGroupModal} onEditTeam={setTeamModal} onEditRequestType={setRequestTypeModal} onResetPassword={setPasswordModal} onRetry={refreshUsers} requestTypes={requestTypes} teams={teams} users={users} />}
           </>}
         </section>
@@ -878,30 +880,78 @@ function TeamView({ currentUser, onNotify, tickets, users }) {
   );
 }
 
-function ReportsView({ tickets }) {
-  const total = tickets.length;
-  const closed = tickets.filter((ticket) => ticket.statusCode === "CERRADO").length;
-  const withinSla = tickets.filter((ticket) => ticket.slaTone === "safe").length;
-  const byCategory = ["FTTH", "HFC", "DTH"].map((category) => ({
-    category,
-    total: tickets.filter((ticket) => ticket.category === category).length,
-  }));
-  const percentage = (value) => (total ? Math.round((value / total) * 100) : 0);
-  const ftth = percentage(byCategory[0].total);
-  const hfc = percentage(byCategory[1].total);
-  const dth = percentage(byCategory[2].total);
-  const donutStyle = { background: `conic-gradient(#4c8c69 0 ${ftth}%, #6387be ${ftth}% ${ftth + hfc}%, #d59b47 ${ftth + hfc}% 100%)` };
+function ReportsView({ groups, onNotify }) {
+  const [filters, setFilters] = useState({ group: "", service: "", from: "", to: "" });
+  const [summary, setSummary] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+
+  async function load() {
+    setLoading(true);
+    try {
+      const params = {};
+      if (filters.group) params.group = filters.group;
+      if (filters.service) params.service = filters.service;
+      if (filters.from) params.from = filters.from;
+      if (filters.to) params.to = filters.to;
+      setSummary(await getReportsSummary(params));
+    } catch (e) {
+      onNotify && onNotify(e.message || "No se pudo cargar el reporte.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { load(); }, []);
+
+  async function download() {
+    setDownloading(true);
+    try {
+      await downloadReportsCsv({ group: filters.group, service: filters.service, from: filters.from, to: filters.to });
+      onNotify && onNotify("Reporte descargado.");
+    } catch (e) {
+      onNotify && onNotify(e.message || "No se pudo descargar.");
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  function update(name, value) {
+    setFilters((f) => ({ ...f, [name]: value }));
+  }
+
+  const kpis = summary?.kpis || {};
+  const daily = summary?.daily || [];
+  const maxDaily = Math.max(1, ...daily.map((d) => d.total));
+  const fmt = (v, suffix = "") => (v === null || v === undefined ? "—" : `${v}${suffix}`);
+
   return (
     <>
-      <PageHeader eyebrow="Indicadores operativos" title="El turno en cifras" description="Vista consolidada para identificar capacidad, cumplimiento y oportunidades de mejora." action={<div className="date-picker"><Icon name="calendar" size={18} /> Hoy, 22 de agosto <Icon name="chevronDown" size={15} /></div>} />
-      <section className="report-highlights">
-        <article><span>Tickets visibles</span><strong>{total}</strong><p><b>Según tu perfil</b> y restricciones de grupo</p></article>
-        <article><span>Tickets cerrados</span><strong>{closed}</strong><p><b>{percentage(closed)}%</b> de los tickets visibles</p></article>
-        <article><span>Cumplimiento SLA</span><strong>{percentage(withinSla)}<small>%</small></strong><p><b>Meta: 90%</b> del turno</p></article>
+      <PageHeader eyebrow="Indicadores operativos" title="El turno en cifras" description="Filtra por grupo, servicio y fecha. AHT = tiempo promedio de atención (tomado → resuelto)." action={<button className="primary-button" type="button" disabled={downloading} onClick={download}><Icon name="upload" size={18} /> {downloading ? "Descargando..." : "Descargar CSV"}</button>} />
+      <article className="panel" style={{ padding: "16px 20px", marginBottom: "17px" }}>
+        <div className="form-grid" style={{ marginTop: 0 }}>
+          <label className="field"><span>Grupo</span><select value={filters.group} onChange={(e) => update("group", e.target.value)}><option value="">Todos</option>{(groups || []).map((g) => <option key={g.id} value={g.code}>{g.name}</option>)}</select></label>
+          <label className="field"><span>Tipo servicio</span><select value={filters.service} onChange={(e) => update("service", e.target.value)}><option value="">Todos</option><option value="HFC">HFC</option><option value="FTTH">FTTH</option><option value="WTTX">WTTX</option><option value="DTH">DTH</option></select></label>
+          <label className="field"><span>Desde</span><input type="date" value={filters.from} onChange={(e) => update("from", e.target.value)} /></label>
+          <label className="field"><span>Hasta</span><input type="date" value={filters.to} onChange={(e) => update("to", e.target.value)} /></label>
+        </div>
+        <footer className="modal-actions" style={{ margin: "12px 0 0", padding: 0, border: 0 }}><button className="primary-button" type="button" disabled={loading} onClick={load}>{loading ? "Cargando..." : "Aplicar filtros"}</button></footer>
+      </article>
+      <section className="report-highlights" style={{ gridTemplateColumns: "repeat(6, minmax(0, 1fr))" }}>
+        <article><span>Entrantes</span><strong>{fmt(kpis.entrantes)}</strong></article>
+        <article><span>Resueltos</span><strong>{fmt(kpis.resueltos)}</strong></article>
+        <article><span>AHT minutos</span><strong>{fmt(kpis.aht_minutos)}</strong><p>Tomado → resuelto</p></article>
+        <article><span>% SLA cumplido</span><strong>{fmt(kpis.pct_sla, "%")}</strong><p><b>Meta: 90%</b></p></article>
+        <article><span>En proceso</span><strong>{fmt(kpis.en_proceso)}</strong></article>
+        <article><span>Vencidos</span><strong>{fmt(kpis.vencidos)}</strong></article>
       </section>
-      <section className="reports-grid">
-        <article className="panel channel-panel"><PanelHeading eyebrow="Por tecnología" title="Origen de los tickets" /><div className="donut-layout"><div className="donut" style={donutStyle}><span>{total}<small>total</small></span></div><div className="donut-legend"><span><i className="ftth" /> FTTH <b>{ftth}%</b></span><span><i className="hfc" /> HFC <b>{hfc}%</b></span><span><i className="dth" /> DTH <b>{dth}%</b></span></div></div></article>
-        <article className="panel performance-panel"><PanelHeading eyebrow="Distribución" title="Participación por tecnología" /><div className="performance-bars"><ReportBar label="FTTH" value={ftth} /><ReportBar label="HFC" value={hfc} /><ReportBar label="DTH" value={dth} /></div></article>
+      <section className="reports-grid" style={{ gridTemplateColumns: "1fr" }}>
+        <article className="panel channel-panel"><PanelHeading eyebrow="Por día" title="Tráfico entrante" />
+          <div style={{ display: "flex", alignItems: "flex-end", gap: "6px", padding: "10px 24px 24px", minHeight: "160px" }}>
+            {daily.length === 0 && <p className="detail-empty">Sin datos en el rango.</p>}
+            {daily.map((d) => <div key={d.date} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }} title={`${d.date}: ${d.total}`}><span style={{ fontSize: "10px", fontWeight: 700 }}>{d.total}</span><div style={{ width: "100%", height: `${Math.max(4, Math.round((d.total / maxDaily) * 110))}px`, background: "var(--accent)", borderRadius: "4px 4px 0 0" }} /><small style={{ fontSize: "8px", color: "var(--quiet)" }}>{d.date.slice(5)}</small></div>)}
+          </div>
+        </article>
       </section>
     </>
   );
