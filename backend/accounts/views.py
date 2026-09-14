@@ -156,15 +156,14 @@ class PasswordResetConfirmView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        email = (request.data.get("email") or "").strip().lower()
         uid = request.data.get("uid") or ""
         token = request.data.get("token") or ""
         new_password = request.data.get("new_password") or request.data.get("password") or ""
-        if not email or not token or not uid or not new_password:
-            raise ValidationError({"detail": "Debes indicar correo, token y nueva contraseña."})
+        if not token or not uid or not new_password:
+            raise ValidationError({"detail": "Debes indicar token y nueva contraseña."})
         try:
             pk = force_str(urlsafe_base64_decode(uid))
-            user = User.objects.get(pk=pk, email__iexact=email)
+            user = User.objects.get(pk=pk)
         except Exception:
             raise ValidationError({"token": "El enlace no es válido."})
         if not password_reset_token_generator.check_token(user, token):

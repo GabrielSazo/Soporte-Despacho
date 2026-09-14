@@ -1362,12 +1362,12 @@ function PasswordResetPage({ brand, theme, onToggleTheme }) {
     e.preventDefault();
     setError("");
     setSuccess("");
-    if (!email.trim() || !uid.trim() || !token.trim()) { setError("El enlace debe contener uid y token. Solicita un nuevo correo si es necesario."); return; }
+    if (!uid.trim() || !token.trim()) { setError("El enlace debe contener uid y token. Solicita un nuevo correo si es necesario."); return; }
     if (newPassword.length < 8) { setError("La nueva contraseña debe tener al menos 8 caracteres."); return; }
     if (newPassword !== confirm) { setError("Las contraseñas no coinciden."); return; }
     setSubmitting(true);
     try {
-      await confirmPasswordReset({ email: email.trim().toLowerCase(), uid: uid.trim(), token: token.trim(), newPassword });
+      await confirmPasswordReset({ email: "", uid: uid.trim(), token: token.trim(), newPassword });
       setSuccess("Clave restablecida correctamente. Ya puedes iniciar sesión.");
     } catch (err) {
       setError(err.message || "No fue posible restablecer la clave.");
@@ -1400,8 +1400,7 @@ function PasswordResetPage({ brand, theme, onToggleTheme }) {
           <form className="login-card" onSubmit={submit}>
             <p className="eyebrow">Restablecer</p>
             <h2>Nueva contraseña</h2>
-            <p className="login-copy">Ingresa el correo y define tu nueva clave. El enlace es válido por 1 hora y de un solo uso.</p>
-            <label className="login-field"><span>Correo institucional</span><input autoComplete="email" required type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="nombre@empresa.com" /></label>
+            <p className="login-copy">Define tu nueva clave. El enlace es válido por 1 hora y de un solo uso.</p>
             <input type="hidden" value={uid} />
             <input type="hidden" value={token} />
             <label className="login-field"><span>Nueva contraseña</span><input required minLength="8" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Mínimo 8 caracteres" /></label>
