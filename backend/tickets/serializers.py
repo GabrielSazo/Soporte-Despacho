@@ -69,12 +69,26 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
                 mean_brightness = 200
             base = ImageOps.invert(gray) if mean_brightness < 110 else gray
 
-            def run_ocr(image, config, scale=2):
+            def prep(image, scale=3):
                 w, h = image.size
                 img = image.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
-                img = ImageEnhance.Contrast(img).enhance(1.6)
-                img = ImageEnhance.Sharpness(img).enhance(1.5)
+                img = ImageOps.autocontrast(img, cutoff=1)
+                img = ImageEnhance.Sharpness(img).enhance(2.0)
+                img.info["dpi"] = (300, 300)
+                return img
+
+            def run_ocr(image, config, scale=3):
+                img = prep(image, scale)
                 return pytesseract.image_to_string(img, lang="spa+eng", config=config).strip()
+
+            def mean_conf(image):
+                try:
+                    img = prep(image, 3)
+                    data = pytesseract.image_to_data(img, lang="spa+eng", config="--oem 3 --psm 6", output_type=pytesseract.Output.DICT)
+                    confs = [int(c) for c in data.get("conf", []) if str(c).strip() not in ("", "-1")]
+                    return sum(confs) / len(confs) if confs else 0
+                except Exception:
+                    return 0
 
             candidates = []
             try:
@@ -96,6 +110,9 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
 
             scored = [(len(t), t) for t in (meaningful(c) for c in candidates) if t]
             text_top = max(scored)[1] if scored else ""
+            # Si la confianza es muy baja, no publicar basura
+            if text_top and mean_conf(base) < 40:
+                text_top = ""
             # Extract SSID/PASSWORD lines via regex, ignore noise
             lines = []
             for line in text_top.splitlines():
