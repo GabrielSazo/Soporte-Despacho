@@ -23,6 +23,9 @@ class TicketFlowTests(APITestCase):
         self.addCleanup(lambda: shutil.rmtree(self.media_root, ignore_errors=True))
         group, _ = WorkGroup.objects.get_or_create(name="Tigo", defaults={"code": "tigo"})
         self.team, _ = Team.objects.get_or_create(group=group, name="FTTH Norte", defaults={"code": "ftth-norte"})
+        self.soporte_b, _ = Team.objects.get_or_create(
+            group=WorkGroup.objects.get(code="soporte-b"), name="Soporte B", defaults={"code": "soporte-b"}
+        )
         self.dispatcher = User.objects.create_user(
             username="despacho@sestel.local",
             email="despacho@sestel.local",
@@ -45,7 +48,7 @@ class TicketFlowTests(APITestCase):
             password="Sestel2026!",
             role=User.Role.SUPPORT,
         )
-        self.support.teams.set([self.team])
+        self.support.teams.set([self.team, self.soporte_b])
 
     def create_ticket_through_api(self):
         self.client.force_authenticate(self.dispatcher)

@@ -65,16 +65,34 @@ def route_ticket(ticket, actor=None):
     return ticket
 
 
+ORIGIN_TO_SUPPORT = {
+    "bbi-n2": "soporte-a",
+    "celtech": "soporte-a",
+    "cellus": "soporte-a",
+    "nexel": "soporte-a",
+    "tigo": "soporte-b",
+}
+
+
 @transaction.atomic
 def create_ticket(*, creator, **data):
     if not creator.teams.exists():
         raise ValueError("El usuario no tiene un equipo asignado.")
 
     first_team = creator.teams.first()
+    assigned_team = first_team
+    try:
+        from accounts.models import Team as SupportTeam
+
+        support_code = ORIGIN_TO_SUPPORT.get(first_team.group.code if first_team.group_id else None)
+        if support_code:
+            assigned_team = SupportTeam.objects.get(code=support_code)
+    except Exception:
+        assigned_team = first_team
     ticket = Ticket.objects.create(
         creator=creator,
         origin_team=first_team,
-        assigned_team=first_team,
+        assigned_team=assigned_team,
         **data,
     )
     record_event(ticket, TicketEvent.EventType.CREATED, actor=creator, to_status=ticket.status)

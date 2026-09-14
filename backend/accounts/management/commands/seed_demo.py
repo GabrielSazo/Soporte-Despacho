@@ -16,6 +16,10 @@ class Command(BaseCommand):
         celtech, _ = WorkGroup.objects.get_or_create(name="celtech", defaults={"code": "celtech"})
         cellus, _ = WorkGroup.objects.get_or_create(name="cellus", defaults={"code": "cellus"})
         nexel, _ = WorkGroup.objects.get_or_create(name="nexel", defaults={"code": "nexel"})
+        soporte_a, _ = WorkGroup.objects.get_or_create(name="Soporte A", defaults={"code": "soporte-a"})
+        soporte_b, _ = WorkGroup.objects.get_or_create(name="Soporte B", defaults={"code": "soporte-b"})
+        Team.objects.get_or_create(group=soporte_a, name="Soporte A", defaults={"code": "soporte-a"})
+        Team.objects.get_or_create(group=soporte_b, name="Soporte B", defaults={"code": "soporte-b"})
 
         tigo_team, _ = Team.objects.get_or_create(group=tigo, name="Tigo", defaults={"code": "tigo"})
         soporte_n2, _ = Team.objects.get_or_create(group=bbi, name="Soporte-N2", defaults={"code": "reclamos"})
@@ -30,12 +34,13 @@ class Command(BaseCommand):
             User.Role.DISPATCHER,
             [tigo_team],
         )
+        support_teams = list(Team.objects.filter(code__in=["soporte-a", "soporte-b"]))
         support = self.upsert_user(
             "soporte@sestel.local",
             "Mario",
             "Ramírez",
             User.Role.SUPPORT,
-            [tigo_team],
+            support_teams or [tigo_team],
         )
         self.upsert_user(
             "admin@sestel.local",
@@ -51,7 +56,7 @@ class Command(BaseCommand):
             "González",
             User.Role.SUPERVISOR,
             [],
-            managed_groups=[tigo],
+            managed_groups=[soporte_a, soporte_b],
         )
 
         if not Ticket.objects.exists():
