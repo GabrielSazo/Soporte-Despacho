@@ -1625,12 +1625,11 @@ function ProfileModal({ onClose, tickets, user }) {
           <div className="profile-row"><span>Grupos</span><span>{user.groupsLabel || user.group}</span></div>
           <div className="profile-row"><span>Estado</span><span>{user.is_locked ? "Bloqueada" : "Activa"}</span></div>
         </div>
-        <div className="profile-stats">
+        <div className="profile-stats" style={{ paddingBottom: "20px" }}>
           <div className="profile-stat"><strong>{created}</strong><span>Creados</span></div>
           <div className="profile-stat"><strong>{assigned}</strong><span>Asignados</span></div>
           <div className="profile-stat"><strong>{active}</strong><span>Activos</span></div>
         </div>
-        <footer className="modal-actions" style={{ marginTop: "16px" }}><button className="secondary-button" type="button" onClick={onClose}>Cerrar</button></footer>
       </section>
     </div>
   );
