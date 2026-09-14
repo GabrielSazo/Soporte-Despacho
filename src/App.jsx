@@ -4,12 +4,14 @@ import {
   createTeam as createTeamRequest,
   createTicket as createTicketRequest,
   createUser as createUserRequest,
+  getCurrentUser,
   getDashboard,
   getGroups,
   getTicket,
   getTeams,
   getTickets,
   getUsers,
+  updateMyTeams,
   confirmPasswordReset,
   hasActiveSession,
   requestPasswordReset,
@@ -539,13 +541,13 @@ function App() {
           <button className="icon-button sidebar-close" type="button" aria-label="Cerrar menú" onClick={() => setSidebarOpen(false)}><Icon name="close" /></button>
         </div>
         <div className="context-card"><span className="context-dot" /><div><span>Grupo actual</span><strong>{session.team}</strong></div><Icon name="chevronDown" size={16} /></div>
-        {session.role === "SOPORTE" && <div style={{ margin: "0 4px 16px", padding: "10px", background: "rgba(255,255,255,0.06)", borderRadius: "8px" }}><span style={{ fontSize: "10px", fontWeight: 700, color: "var(--sidebar-muted)", textTransform: "uppercase" }}>Mis grupos</span><div style={{ display: "grid", gap: "6px", marginTop: "8px" }}>{groups.map((g) => { const checked = session.teams?.some((t) => t.group?.id === g.id) || session.groups?.some((sg) => sg.id === g.id); return <label key={g.id} style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "11px", color: "var(--sidebar-text)" }}><input type="checkbox" checked={checked} onChange={async () => { const teamIds = teams.filter((t) => t.group === g.id || t.group_detail?.id === g.id).map((t) => t.id); const currentTeamIds = session.teams?.map((t) => t.id) || []; const hasAll = teamIds.every((id) => currentTeamIds.includes(id)); const newTeamIds = hasAll ? currentTeamIds.filter((id) => !teamIds.includes(id)) : [...new Set([...currentTeamIds, ...teamIds])]; try { const updated = await updateMyTeams(newTeamIds, null); setSession(mapUser(updated)); notify(hasAll ? `Ya no atiendes ${g.name}` : `Ahora atiendes ${g.name}`); refreshWorkspace(true); } catch (e) { notify(e.message || "No se pudo actualizar"); } }} />{g.name}</label>; })}</div></div>}
+        {session.role === "SOPORTE" && <div style={{ margin: "0 4px 16px", padding: "10px", background: "rgba(255,255,255,0.06)", borderRadius: "8px" }}><span style={{ fontSize: "10px", fontWeight: 700, color: "var(--sidebar-muted)", textTransform: "uppercase" }}>Mis grupos</span><div style={{ display: "grid", gap: "6px", marginTop: "8px" }}>{groups.map((g) => { const checked = session.teams?.some((t) => t.group?.id === g.id) || session.groups?.some((sg) => sg.id === g.id); return <label key={g.id} style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "11px", color: "var(--sidebar-text)" }}><input type="checkbox" checked={checked} onChange={async () => { const teamIds = teams.filter((t) => t.group === g.id || t.group_detail?.id === g.id).map((t) => t.id); const currentTeamIds = (session.teams || []).map((t) => t.id).filter(Boolean); const hasAll = teamIds.length > 0 && teamIds.every((id) => currentTeamIds.includes(id)); const newTeamIds = hasAll ? currentTeamIds.filter((id) => !teamIds.includes(id)) : [...new Set([...currentTeamIds, ...teamIds])]; if (!newTeamIds.length) { notify("Debes atender al menos un grupo."); return; } try { await updateMyTeams(newTeamIds, null); const fresh = await getCurrentUser(); const mapped = mapUser(fresh); setSession(mapped); sessionStorage.setItem("sestel-user", JSON.stringify(mapped)); notify(hasAll ? `Ya no atiendes ${g.name}` : `Ahora atiendes ${g.name}`); refreshWorkspace(true); } catch (e) { notify(e.message || "No se pudo actualizar"); } }} />{g.name}</label>; })}</div></div>}
         <nav className="main-nav">
           <p className="nav-caption">Operación</p>
           {visibleNavigation.map((item) => <button className={`nav-item ${activeView === item.label ? "active" : ""}`} key={item.label} onClick={() => changeView(item.label)} type="button"><Icon name={item.icon} size={19} /><span>{item.label}</span>{item.badge && <b>{item.label === "Tickets" ? openTickets : session.role !== "SOPORTE" ? validationTickets.length : 0}</b>}</button>)}
         </nav>
         <div className="sidebar-bottom">
-          <button className="nav-item" type="button" onClick={() => ["ADMIN","SUPERVISOR"].includes(session.role) ? changeView("Usuarios") : notify("La gestión de usuarios está disponible para administración.")}><Icon name="settings" size={19} /><span>{["ADMIN","SUPERVISOR"].includes(session.role) ? "Gestionar usuarios" : "Configuración"}</span></button>
+          <button className="nav-item" type="button" onClick={() => ["ADMIN","SUPERVISOR"].includes(session.role) ? changeView("Usuarios") : setShowProfile(true)}><Icon name="settings" size={19} /><span>{["ADMIN","SUPERVISOR"].includes(session.role) ? "Gestionar usuarios" : "Mi perfil"}</span></button>
           <button className="nav-item logout-item" type="button" onClick={endSession}><Icon name="logout" size={19} /><span>Cerrar sesión</span></button>
           <div className="user-card"><div className={`avatar ${session.avatarClass}`}>{session.initials}</div><div><strong>{session.name}</strong><span>{session.roleLabel}</span></div><Icon name="dots" size={18} /></div>
         </div>
