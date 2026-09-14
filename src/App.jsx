@@ -857,7 +857,6 @@ function UsersView({ error, groups, loading, onCreate, onCreateGroup, onCreateTe
       {error && <ApiConnectionError message={error} onRetry={onRetry} />}
       {currentRole !== "SUPERVISOR" && <div className="admin-tabs" role="tablist">
         <button className={tab === "usuarios" ? "selected" : ""} type="button" role="tab" aria-selected={tab === "usuarios"} onClick={() => setTab("usuarios")}><Icon name="users" size={16} /> Usuarios <span>{users.length}</span></button>
-        <button className={tab === "equipos" ? "selected" : ""} type="button" role="tab" aria-selected={tab === "equipos"} onClick={() => setTab("equipos")}><Icon name="folder" size={16} /> Equipos <span>{teams.length}</span></button>
         <button className={tab === "grupos" ? "selected" : ""} type="button" role="tab" aria-selected={tab === "grupos"} onClick={() => setTab("grupos")}><Icon name="shield" size={16} /> Grupos <span>{groups.length}</span></button>
       </div>}
       {loading ? <LoadingState /> : tab === "usuarios" ? <article className="panel users-panel">
