@@ -1177,8 +1177,7 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onReassi
     }
   }
 
-  function handleAttach(event) {
-    const files = Array.from(event.target.files || []);
+  function pickAttachFiles(files) {
     if (!files.length) return;
     if (ticket.attachments.length + files.length > 5) {
       setAttachError(`Máximo 5 imágenes por ticket (ya tienes ${ticket.attachments.length}).`);
@@ -1199,6 +1198,17 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onReassi
     }
     setAttachError("");
     setAttachFile(files.length === 1 ? files[0] : files);
+  }
+
+  function handleAttach(event) {
+    pickAttachFiles(Array.from(event.target.files || []));
+  }
+
+  function handleAttachPaste(event) {
+    const files = Array.from(event.clipboardData?.files || []).filter((f) => f.type.startsWith("image/"));
+    if (!files.length) return;
+    event.preventDefault();
+    pickAttachFiles(files);
   }
 
   async function submitAttach(event) {
@@ -1233,7 +1243,7 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onReassi
             <section className="detail-section"><div className="detail-section-heading"><span className="detail-label">Datos de la solicitud</span><span>{ticket.identificador}</span></div><div className="profile-details" style={{ padding: 0, marginTop: "10px" }}>{ticket.identificador && <div className="profile-row"><span>Contrato / OT</span><span>{ticket.identificador}</span></div>}{ticket.cliente && <div className="profile-row"><span>Cliente</span><span>{ticket.cliente}</span></div>}{ticket.nodo && <div className="profile-row"><span>Nodo</span><span>{ticket.nodo}</span></div>}{ticket.tipoSolicitud && <div className="profile-row"><span>Tipo</span><span>{ticket.tipoSolicitud}</span></div>}</div></section>
             <section className="detail-section"><span className="detail-label">Descripción reportada</span><p className="detail-description">{ticket.description || "Sin descripción adicional."}</p></section>
             {ticket.resolutionNotes && <section className="detail-section solution-detail"><span className="detail-label"><Icon name="checkCircle" size={15} /> Solución registrada</span><p>{ticket.resolutionNotes}</p></section>}
-            <section className="detail-section"><div className="detail-section-heading"><span className="detail-label">Evidencia adjunta</span><span>{ticket.attachments.length}/5</span></div>{ticket.attachments.length ? <div className="attachment-list">{ticket.attachments.map((attachment) => <a href={attachment.url} key={attachment.id} rel="noreferrer" target="_blank"><Icon name="folder" size={18} /><span><strong>{attachment.original_name}</strong><small>{Math.max(1, Math.round(attachment.size / 1024))} KB · {formatDateTime(attachment.created_at)}</small></span><Icon name="arrowRight" size={15} /></a>)}</div> : <p className="detail-empty">No hay evidencia adjunta.</p>}{canAttach && <form className="detail-attach-form" onSubmit={submitAttach}><label className={`upload-box small ${attachError ? "has-error" : ""}`}><input type="file" accept=".jpg,.jpeg,.png" multiple onChange={handleAttach} /><Icon name="upload" size={16} /><span>{Array.isArray(attachFile) ? `${attachFile.length} imágenes` : attachFile ? attachFile.name : "Adjuntar JPG/PNG (máx. 5 MB, hasta 5)"}</span></label><button className="secondary-button" disabled={uploading || !attachFile} type="submit">{uploading ? "Subiendo..." : "Adjuntar"}</button></form>}{attachError && <p className="form-submit-error" role="alert"><Icon name="alert" size={14} /> {attachError}</p>}</section>
+            <section className="detail-section"><div className="detail-section-heading"><span className="detail-label">Evidencia adjunta</span><span>{ticket.attachments.length}/5</span></div>{ticket.attachments.length ? <div className="attachment-list">{ticket.attachments.map((attachment) => <a href={attachment.url} key={attachment.id} rel="noreferrer" target="_blank"><Icon name="folder" size={18} /><span><strong>{attachment.original_name}</strong><small>{Math.max(1, Math.round(attachment.size / 1024))} KB · {formatDateTime(attachment.created_at)}</small></span><Icon name="arrowRight" size={15} /></a>)}</div> : <p className="detail-empty">No hay evidencia adjunta.</p>}{canAttach && <form className="detail-attach-form" onSubmit={submitAttach} onPaste={handleAttachPaste}><label className={`upload-box small ${attachError ? "has-error" : ""}`}><input type="file" accept=".jpg,.jpeg,.png" multiple onChange={handleAttach} /><Icon name="upload" size={16} /><span>{Array.isArray(attachFile) ? `${attachFile.length} imágenes` : attachFile ? attachFile.name : "Adjuntar o pegar (Ctrl+V)"}</span></label><button className="secondary-button" disabled={uploading || !attachFile} type="submit">{uploading ? "Subiendo..." : "Adjuntar"}</button></form>}{attachError && <p className="form-submit-error" role="alert"><Icon name="alert" size={14} /> {attachError}</p>}</section>
             <section className="detail-section history-section"><div className="detail-section-heading"><span className="detail-label">Historial del ticket</span><span>{ticket.events.length}</span></div>{ticket.events.length ? <ol className="ticket-history">{ticket.events.map((event) => <li key={event.id}><span className="history-dot" /><div><strong>{event.event_label}</strong><p>{event.comment || `${event.actor?.name || "Sistema"} actualizó el ticket.`}</p><small>{event.actor?.name || "Sistema"} · {formatDateTime(event.created_at)}</small></div></li>)}</ol> : <p className="detail-empty">Aún no hay eventos registrados.</p>}</section>
           </div>
           <aside className="detail-sidebar">
@@ -1322,8 +1332,7 @@ function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
     }
   }
 
-  function handleAttachment(event) {
-    const files = Array.from(event.target.files || []);
+  function pickFiles(files) {
     if (!files.length) return;
     if (files.length > 5) {
       setAttachment(null);
@@ -1344,6 +1353,17 @@ function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
     }
     setAttachment(files.length === 1 ? files[0] : files);
     setAttachmentError("");
+  }
+
+  function handleAttachment(event) {
+    pickFiles(Array.from(event.target.files || []));
+  }
+
+  function handlePaste(event) {
+    const files = Array.from(event.clipboardData?.files || []).filter((f) => f.type.startsWith("image/"));
+    if (!files.length) return;
+    event.preventDefault();
+    pickFiles(files);
   }
 
   async function submit(event) {
@@ -1397,7 +1417,7 @@ function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
           </div>
           {checking && <p className="form-info" role="status">Verificando {idLabel}...</p>}
           {duplicate && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> Ya existe {duplicate.reference} abierto con este {idLabel} ({duplicate.status_label}). <button type="button" className="text-button" onClick={() => onOpenTicket && onOpenTicket(duplicate.id)}>Ver ticket y documentarlo ahí</button></p>}
-          <div className="attachment-section"><div><span>Adjuntar evidencia</span><small>JPG o PNG, máximo 5 MB, hasta 5 imágenes</small></div><label className={`upload-box ${attachmentError ? "has-error" : ""}`}><input type="file" accept=".jpg,.jpeg,.png" multiple onChange={handleAttachment} /><Icon name="upload" size={20} /><span>{Array.isArray(attachment) ? `${attachment.length} imágenes seleccionadas` : attachment?.name || "Seleccionar archivos"}</span></label>{attachmentError && <p className="field-error">{attachmentError}</p>}</div>
+          <div className="attachment-section" onPaste={handlePaste}><div><span>Adjuntar evidencia</span><small>JPG o PNG, máximo 5 MB, hasta 5 imágenes — o pega con Ctrl+V</small></div><label className={`upload-box ${attachmentError ? "has-error" : ""}`}><input type="file" accept=".jpg,.jpeg,.png" multiple onChange={handleAttachment} /><Icon name="upload" size={20} /><span>{Array.isArray(attachment) ? `${attachment.length} imágenes seleccionadas` : attachment?.name || "Seleccionar o pegar imagen"}</span></label>{attachmentError && <p className="field-error">{attachmentError}</p>}</div>
           {submitError && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> {submitError}</p>}
           <footer className="modal-actions"><button className="secondary-button" disabled={submitting} type="button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={submitting} type="submit"><Icon name="ticket" size={18} /> {submitting ? "Enviando..." : "Enviar a soporte"}</button></footer>
         </form>
