@@ -1177,27 +1177,26 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onReassi
     }
   }
 
-  function pickAttachFiles(files) {
+  function pickAttachFiles(files, append = false) {
     if (!files.length) return;
-    if (ticket.attachments.length + files.length > 5) {
+    const current = append ? (Array.isArray(attachFile) ? attachFile : attachFile ? [attachFile] : []) : [];
+    const combined = [...current, ...files];
+    if (ticket.attachments.length + combined.length > 5) {
       setAttachError(`Máximo 5 imágenes por ticket (ya tienes ${ticket.attachments.length}).`);
-      setAttachFile(null);
       return;
     }
     for (const f of files) {
       if (f.size > 5 * 1024 * 1024) {
         setAttachError(`"${f.name}" supera 5 MB.`);
-        setAttachFile(null);
         return;
       }
       if (!["image/jpeg", "image/jpg", "image/png"].includes(f.type) && !/\.jpe?g$|\.png$/i.test(f.name)) {
         setAttachError(`"${f.name}" no es JPG/PNG.`);
-        setAttachFile(null);
         return;
       }
     }
     setAttachError("");
-    setAttachFile(files.length === 1 ? files[0] : files);
+    setAttachFile(combined.length === 1 ? combined[0] : combined);
   }
 
   function handleAttach(event) {
@@ -1208,7 +1207,7 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onReassi
     const files = Array.from(event.clipboardData?.files || []).filter((f) => f.type.startsWith("image/"));
     if (!files.length) return;
     event.preventDefault();
-    pickAttachFiles(files);
+    pickAttachFiles(files, true);
   }
 
   async function submitAttach(event) {
@@ -1332,26 +1331,25 @@ function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
     }
   }
 
-  function pickFiles(files) {
+  function pickFiles(files, append = false) {
     if (!files.length) return;
-    if (files.length > 5) {
-      setAttachment(null);
-      setAttachmentError("Máximo 5 imágenes.");
+    const current = append ? (Array.isArray(attachment) ? attachment : attachment ? [attachment] : []) : [];
+    const combined = [...current, ...files];
+    if (combined.length > 5) {
+      setAttachmentError(`Máximo 5 imágenes (ya tienes ${current.length}).`);
       return;
     }
     for (const f of files) {
       if (f.size > 5 * 1024 * 1024) {
-        setAttachment(null);
         setAttachmentError(`"${f.name}" supera 5 MB.`);
         return;
       }
       if (!["image/jpeg", "image/jpg", "image/png"].includes(f.type) && !/\.jpe?g$|\.png$/i.test(f.name)) {
-        setAttachment(null);
         setAttachmentError(`"${f.name}" no es JPG/PNG.`);
         return;
       }
     }
-    setAttachment(files.length === 1 ? files[0] : files);
+    setAttachment(combined.length === 1 ? combined[0] : combined);
     setAttachmentError("");
   }
 
@@ -1363,7 +1361,7 @@ function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
     const files = Array.from(event.clipboardData?.files || []).filter((f) => f.type.startsWith("image/"));
     if (!files.length) return;
     event.preventDefault();
-    pickFiles(files);
+    pickFiles(files, true);
   }
 
   async function submit(event) {
