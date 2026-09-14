@@ -599,7 +599,6 @@ function App() {
         <div className="sidebar-bottom">
           <button className="nav-item" type="button" onClick={() => ["ADMIN","SUPERVISOR"].includes(session.role) ? changeView("Usuarios") : setShowProfile(true)}><Icon name="settings" size={19} /><span>{["ADMIN","SUPERVISOR"].includes(session.role) ? "Gestionar usuarios" : "Mi perfil"}</span></button>
           <button className="nav-item logout-item" type="button" onClick={endSession}><Icon name="logout" size={19} /><span>Cerrar sesión</span></button>
-          <div className="user-card"><div className={`avatar ${session.avatarClass}`}>{session.initials}</div><div><strong>{session.name}</strong><span>{session.roleLabel}</span></div><Icon name="dots" size={18} /></div>
         </div>
       </aside>
       {sidebarOpen && <button className="sidebar-overlay" type="button" aria-label="Cerrar menú" onClick={() => setSidebarOpen(false)} />}
