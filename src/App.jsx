@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   createGroup as createGroupRequest,
   createTeam as createTeamRequest,
@@ -597,6 +597,46 @@ function App() {
       ].slice(0, 5)
   ).map((n) => ({ ...n, seen: Boolean(seenNotifs[n.key]) }));
   const unseenCount = notifications.filter((n) => !n.seen).length;
+  const prevNotifKeys = useRef(null);
+  const [browserNotif, setBrowserNotif] = useState(typeof Notification !== "undefined" ? Notification.permission : "denied");
+
+  function playBeep() {
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      const ctx = new Ctx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = "sine";
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.12, ctx.currentTime);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.35);
+      setTimeout(() => ctx.close(), 500);
+    } catch {}
+  }
+
+  useEffect(() => {
+    const keys = new Set(notifications.map((n) => n.key));
+    if (prevNotifKeys.current === null || !session) {
+      prevNotifKeys.current = keys;
+      return;
+    }
+    const added = notifications.filter((n) => !prevNotifKeys.current.has(n.key));
+    prevNotifKeys.current = keys;
+    if (added.length) {
+      const first = added[0];
+      notify(`${first.title} — ${first.desc}`);
+      playBeep();
+      if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+        try {
+          new Notification(first.title, { body: `${first.desc} (${first.ticket.team})` });
+        } catch {}
+      }
+    }
+  }, [notifications]);
 
   if (typeof window !== "undefined" && window.location.pathname === "/reset-password") {
     return <PasswordResetPage brand={brand} theme={theme} onToggleTheme={() => setTheme((currentTheme) => (currentTheme === "light" ? "dark" : "light"))} />;
@@ -653,6 +693,7 @@ function App() {
                   <button className="dropdown-overlay" type="button" aria-label="Cerrar notificaciones" onClick={() => setShowNotifications(false)} />
                   <div className="notification-dropdown" role="region" aria-label="Notificaciones">
                     <div className="notification-header"><strong>Notificaciones</strong><span>{unseenCount} nuevas</span></div>
+                    {browserNotif === "default" && <div style={{ padding: "8px 16px", borderBottom: "1px solid var(--line)" }}><button type="button" className="text-button" onClick={async () => { try { const p = await Notification.requestPermission(); setBrowserNotif(p); } catch {} }}>Activar avisos del navegador</button></div>}
                     <div className="notification-list">
                       {notifications.length ? notifications.map((n) => (
                         <button key={n.key} type="button" className="notification-item" style={n.seen ? { opacity: 0.6 } : undefined} onClick={() => { markSeen(n.key); setShowNotifications(false); openTicketDetail(n.ticket); }}>
