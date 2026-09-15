@@ -274,6 +274,14 @@ function App() {
 
   useEffect(() => {
     if (!session) return;
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") refreshWorkspace(true);
+    }, 60000);
+    return () => clearInterval(timer);
+  }, [session?.id]);
+
+  useEffect(() => {
+    if (!session) return;
     const token = sessionStorage.getItem("sestel-access-token");
     if (!token) return;
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
