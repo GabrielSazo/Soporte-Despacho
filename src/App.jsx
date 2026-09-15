@@ -1485,7 +1485,10 @@ function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
       if (name === "service") { next.tipoId = ""; }
       if (name === "tipoId") {
         const sel = options.find((o) => String(o.id) === String(value));
-        if (sel) next.title = sel.name;
+        if (sel) {
+          const kindShort = next.kind === "TECNICO" ? "Técnico" : "Cliente";
+          next.title = `${kindShort} · ${next.service} · ${sel.name}`;
+        }
       }
       return next;
     });
@@ -1583,6 +1586,7 @@ function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
             <label className="field"><span>Tipo de solicitud <b>*</b></span><select required name="kind" value={form.kind} onChange={updateField}><option value="">Seleccionar</option><option value="CLIENTE">Solicitud de Soporte Cliente</option><option value="TECNICO">Soporte Al Tecnico</option></select></label>
             <label className="field"><span>Tipo de servicio <b>*</b></span><select required name="service" value={form.service} onChange={updateField} disabled={!form.kind}><option value="">Seleccionar</option>{services.map((s) => <option key={s} value={s}>{s}</option>)}</select></label>
             <label className="field field-wide"><span>Solicitud específica <b>*</b></span><select required name="tipoId" value={form.tipoId} onChange={updateField} disabled={!form.service}><option value="">Seleccionar</option>{options.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select></label>
+            <label className="field field-wide"><span>Asunto <b>*</b></span><input required name="title" value={form.title} onChange={updateField} placeholder="Se genera solo, puedes ajustarlo" /></label>
             <label className="field"><span>{idLabel} <b>*</b></span><input required name="identificador" inputMode="numeric" value={form.identificador} onChange={updateField} onBlur={(e) => { validateIdentificador(e.target.value); checkDuplicate(); }} disabled={!canFillDetails} placeholder={form.kind === "TECNICO" ? "Solo números" : "Solo números"} />{idError && <small className="field-error">{idError}</small>}</label>
             <label className="field"><span>Prioridad</span><input disabled value="Media (automática)" /></label>
             <label className="field"><span>Nombre Cliente <b>*</b></span><input required name="cliente" value={form.cliente} onChange={updateField} onBlur={(e) => validateCliente(e.target.value)} disabled={!canFillDetails} placeholder="Nombre del cliente" />{clientError && <small className="field-error">{clientError}</small>}</label>
