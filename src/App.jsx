@@ -554,7 +554,10 @@ function App() {
   const filteredTickets = tickets.filter((ticket) => {
     const searchable = `${ticket.id} ${ticket.title} ${ticket.team} ${ticket.requester} ${ticket.identificador} ${ticket.cliente} ${ticket.nodo} ${ticket.tipoSolicitud}`.toLowerCase();
     if (!searchable.includes(query.toLowerCase())) return false;
-    if (filter === "Míos") return ticket.assigneeId === session?.id || ticket.creatorId === session?.id;
+    if (filter === "Míos") {
+      if (session?.role === "SOPORTE") return ticket.assigneeId === session?.id && ["ASIGNADO", "EN_PROCESO"].includes(ticket.statusCode);
+      return ticket.assigneeId === session?.id || ticket.creatorId === session?.id;
+    }
     if (filter === "Trabajables") return ["ABIERTO", "ASIGNADO"].includes(ticket.statusCode) && ticket.assigneeId !== session?.id;
     return !statusMap[filter] || ticket.statusCode === statusMap[filter];
   });
@@ -934,6 +937,7 @@ function ValidationsView({ canValidate, tickets, onOpen, onValidate }) {
 }
 
 function TeamView({ currentUser, onNotify, tickets, users }) {
+  const [showRules, setShowRules] = useState(false);
   const peopleByName = new Map();
   const memberUsers = (users || []).filter((u) => u.is_active && !u.is_locked);
   if (memberUsers.length) {
@@ -952,7 +956,8 @@ function TeamView({ currentUser, onNotify, tickets, users }) {
   const people = [...peopleByName.values()];
   return (
     <>
-      <PageHeader eyebrow="Disponibilidad del grupo" title="Personas que respaldan tu operación" description="La carga se calcula a partir de los tickets visibles para tu perfil y grupo." action={<button className="secondary-button" type="button" onClick={() => onNotify("La asignación automática prioriza al agente que lleva más tiempo sin recibir un caso.")}><Icon name="users" size={18} /> Ver reglas de asignación</button>} />
+      <PageHeader eyebrow="Disponibilidad del grupo" title="Personas que respaldan tu operación" description="La carga se calcula a partir de los tickets visibles para tu perfil y grupo." action={<button className="secondary-button" type="button" onClick={() => setShowRules(true)}><Icon name="users" size={18} /> Ver reglas de asignación</button>} />
+      {showRules && <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowRules(false)}><section className="ticket-modal user-modal" role="dialog" aria-modal="true" aria-labelledby="rules-title" onMouseDown={(e) => e.stopPropagation()}><header className="modal-header"><div><p className="eyebrow">Cómo se asigna</p><h2 id="rules-title">Reglas de asignación</h2></div><button className="icon-button" type="button" aria-label="Cerrar" onClick={() => setShowRules(false)}><Icon name="close" /></button></header><div style={{ padding: "19px 25px 25px", display: "grid", gap: "10px", fontSize: "12px", lineHeight: 1.5 }}><p><b>Tigo</b> → <b>Soporte B</b> · <b>BBI N-2, celtech, cellus, nexel</b> → <b>Soporte A</b></p><p>Los tickets nuevos quedan <b>abiertos</b> en la bandeja del grupo: cualquiera que lo cubra puede tomarlo.</p><p>Al <b>rechazar</b> una solución o <b>liberar</b> un ticket, vuelve a la bandeja del grupo (sin asignar).</p><p><b>Reasignar</b> mueve el ticket a una persona del mismo grupo.</p></div></section></div>}
       <section className="team-grid">
         {people.length ? people.map((person) => (
           <article className="team-card" key={person.name}>
