@@ -588,12 +588,15 @@ function App() {
     notifications.forEach((n) => { all[n.key] = true; });
     setSeenNotifs((s) => ({ ...s, ...all }));
   }
+  const assignedToMe = tickets.filter((t) => t.assigneeId === session?.id && t.statusCode === "ASIGNADO");
   const notifications = (session?.role === "DESPACHADOR"
     ? [
         ...myValidation.slice(0, 3).map((t) => ({ key: `val-${t.id}`, type: "warning", title: `Validación pendiente: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
+        ...assignedToMe.slice(0, 2).map((t) => ({ key: `asg-${t.id}`, type: "info", title: `Asignado a ti: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
         ...myTickets.filter((t) => t.slaTone === "danger").slice(0, 3).map((t) => ({ key: `sla-${t.id}`, type: "danger", title: `SLA vencido: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
       ].slice(0, 5)
     : [
+        ...assignedToMe.slice(0, 2).map((t) => ({ key: `asg-${t.id}`, type: "info", title: `Asignado a ti: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
         ...trabajables.slice(0, 3).map((t) => ({ key: `new-${t.id}`, type: "info", title: `Nuevo en bandeja: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
         ...trabajables.filter((t) => t.slaTone === "danger").slice(0, 2).map((t) => ({ key: `sla-${t.id}`, type: "danger", title: `SLA vencido: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
         ...myValidation.slice(0, 2).map((t) => ({ key: `val-${t.id}`, type: "warning", title: `Validación pendiente: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
