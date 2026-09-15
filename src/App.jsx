@@ -597,6 +597,23 @@ function App() {
       ].slice(0, 5)
   ).map((n) => ({ ...n, seen: Boolean(seenNotifs[n.key]) }));
   const unseenCount = notifications.filter((n) => !n.seen).length;
+  const BASE_TITLE = "Soporte Despacho Tigo | Centro de control";
+  useEffect(() => {
+    if (!session || !unseenCount) {
+      document.title = BASE_TITLE;
+      return;
+    }
+    let on = true;
+    document.title = `(${unseenCount}) ¡Nueva alerta!`;
+    const timer = setInterval(() => {
+      on = !on;
+      document.title = on ? `(${unseenCount}) ¡Nueva alerta!` : BASE_TITLE;
+    }, 1500);
+    return () => {
+      clearInterval(timer);
+      document.title = BASE_TITLE;
+    };
+  }, [unseenCount, session?.id]);
   const prevNotifKeys = useRef(null);
   const [browserNotif, setBrowserNotif] = useState(typeof Notification !== "undefined" ? Notification.permission : "denied");
 
