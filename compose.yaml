@@ -67,6 +67,32 @@ services:
       redis:
         condition: service_started
 
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    command: celery -A config worker --loglevel=info --concurrency=2
+    environment:
+      DJANGO_DEBUG: "true"
+      DJANGO_SECRET_KEY: sestel-dev-secret-key-not-for-production
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,api
+      POSTGRES_DB: sestel_dev
+      POSTGRES_USER: sestel
+      POSTGRES_PASSWORD: sestel-dev-password
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      EMAIL_BACKEND: django.core.mail.backends.console.EmailBackend
+    volumes:
+      - ./backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
   frontend:
     image: node:20-alpine
     restart: unless-stopped

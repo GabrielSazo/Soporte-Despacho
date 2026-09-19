@@ -124,6 +124,34 @@ function formatDateTime(value) {
   return new Intl.DateTimeFormat("es-GT", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
+function compressImageFile(file, maxSide = 1600, quality = 0.82) {
+  return new Promise((resolve) => {
+    if (!file || !file.type || !file.type.startsWith("image/")) { resolve(file); return; }
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, maxSide / Math.max(img.width || 1, img.height || 1));
+      if (scale >= 1 && file.size <= 600 * 1024) { resolve(file); return; }
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => {
+          if (!blob) { resolve(file); return; }
+          const base = (file.name || "imagen").replace(/\.[^.]+$/, "");
+          resolve(new File([blob], `${base}.jpg`, { type: "image/jpeg" }));
+        }, "image/jpeg", quality);
+      } catch {
+        resolve(file);
+      }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+    img.src = url;
+  });
+}
+
 function mapUser(user) {
   const teams = user.teams || (user.team ? [user.team] : []);
   const firstTeam = teams[0];
@@ -1562,15 +1590,17 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onDeesca
     }
   }
 
-  function pickAttachFiles(files, append = false) {
+  async function pickAttachFiles(files, append = false) {
     if (!files.length) return;
     const current = append ? (Array.isArray(attachFile) ? attachFile : attachFile ? [attachFile] : []) : [];
-    const combined = [...current, ...files];
+    const processed = [];
+    for (const f of files) processed.push(await compressImageFile(f));
+    const combined = [...current, ...processed];
     if (ticket.attachments.length + combined.length > 5) {
       setAttachError(`Máximo 5 imágenes por ticket (ya tienes ${ticket.attachments.length}).`);
       return;
     }
-    for (const f of files) {
+    for (const f of processed) {
       if (f.size > 5 * 1024 * 1024) {
         setAttachError(`"${f.name}" supera 5 MB.`);
         return;
@@ -1628,7 +1658,7 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onDeesca
             <section className="detail-section"><span className="detail-label">Descripción reportada</span><p className="detail-description">{ticket.description || "Sin descripción adicional."}</p></section>
             {ticket.resolutionNotes && <section className="detail-section solution-detail"><span className="detail-label"><Icon name="checkCircle" size={15} /> Solución registrada</span><p>{ticket.resolutionNotes}</p></section>}
             {ticket.statusCode === "ESCALADO" && <section className="detail-section solution-detail"><span className="detail-label"><Icon name="upload" size={15} /> Escalado a {ticket.areaEscalada || "—"}{ticket.tiempoEscaladoMin != null ? ` · lleva ${formatDuracion(ticket.tiempoEscaladoMin)}` : ""}</span>{ticket.motivoEscalamiento && <p><b>Motivo (soporte):</b> {ticket.motivoEscalamiento}</p>}{ticket.instruccionesDespacho ? <p><b>Instrucciones para despacho:</b> {ticket.instruccionesDespacho}</p> : <p>Soporte aún no deja instrucciones para despacho.</p>}</section>}
-            <section className="detail-section"><div className="detail-section-heading"><span className="detail-label">Evidencia adjunta</span><span>{ticket.attachments.length}/5</span></div>{ticket.attachments.length ? <div className="attachment-list">{ticket.attachments.map((attachment) => <a href={attachment.url} key={attachment.id} rel="noreferrer" target="_blank"><img src={attachment.url} alt={attachment.original_name} style={{ width: "52px", height: "52px", objectFit: "cover", borderRadius: "6px", flex: "0 0 auto" }} onError={(e) => { e.target.style.display = "none"; }} /><span><strong>{attachment.original_name}</strong><small>{Math.max(1, Math.round(attachment.size / 1024))} KB · {formatDateTime(attachment.created_at)}</small></span><Icon name="arrowRight" size={15} /></a>)}</div> : <p className="detail-empty">No hay evidencia adjunta.</p>}{canAttach && <form className="detail-attach-form" onSubmit={submitAttach} onPaste={handleAttachPaste}><label className={`upload-box small ${attachError ? "has-error" : ""}`}><input type="file" accept=".jpg,.jpeg,.png" multiple onChange={handleAttach} /><Icon name="upload" size={16} /><span>{attachList.length ? `${attachList.length} ${attachList.length === 1 ? "imagen" : "imágenes"}` : "Adjuntar o pegar (Ctrl+V)"}</span></label><button className="secondary-button" disabled={uploading || !attachFile} type="submit">{uploading ? "Subiendo..." : "Adjuntar"}</button></form>}{attachList.length > 0 && <div className="attach-preview-grid">{attachList.map((f, i) => <div className="attach-preview" key={`${f.name}-${f.size}-${i}`}><img src={attachPreviews[i]} alt={f.name} /><span title={f.name}>{f.name}</span><button type="button" aria-label={`Quitar ${f.name}`} onClick={() => removeAttachFile(i)}>✕</button></div>)}</div>}{attachError && <p className="form-submit-error" role="alert"><Icon name="alert" size={14} /> {attachError}</p>}</section>
+            <section className="detail-section"><div className="detail-section-heading"><span className="detail-label">Evidencia adjunta</span><span>{ticket.attachments.length}/5</span></div>{ticket.attachments.length ? <div className="attachment-list">{ticket.attachments.map((attachment) => <a href={attachment.url} key={attachment.id} rel="noreferrer" target="_blank"><img src={attachment.url} alt={attachment.original_name} style={{ width: "52px", height: "52px", objectFit: "cover", borderRadius: "6px", flex: "0 0 auto" }} onError={(e) => { e.target.style.display = "none"; }} /><span><strong>{attachment.original_name}</strong><small>{Math.max(1, Math.round(attachment.size / 1024))} KB · {formatDateTime(attachment.created_at)}{["PENDIENTE", "PROCESANDO"].includes(attachment.ocr_estado) ? " · Procesando texto…" : attachment.ocr_estado === "FALLIDO" ? " · OCR no disponible" : ""}</small></span><Icon name="arrowRight" size={15} /></a>)}</div> : <p className="detail-empty">No hay evidencia adjunta.</p>}{canAttach && <form className="detail-attach-form" onSubmit={submitAttach} onPaste={handleAttachPaste}><label className={`upload-box small ${attachError ? "has-error" : ""}`}><input type="file" accept=".jpg,.jpeg,.png" multiple onChange={handleAttach} /><Icon name="upload" size={16} /><span>{attachList.length ? `${attachList.length} ${attachList.length === 1 ? "imagen" : "imágenes"}` : "Adjuntar o pegar (Ctrl+V)"}</span></label><button className="secondary-button" disabled={uploading || !attachFile} type="submit">{uploading ? "Subiendo..." : "Adjuntar"}</button></form>}{attachList.length > 0 && <div className="attach-preview-grid">{attachList.map((f, i) => <div className="attach-preview" key={`${f.name}-${f.size}-${i}`}><img src={attachPreviews[i]} alt={f.name} /><span title={f.name}>{f.name}</span><button type="button" aria-label={`Quitar ${f.name}`} onClick={() => removeAttachFile(i)}>✕</button></div>)}</div>}{attachError && <p className="form-submit-error" role="alert"><Icon name="alert" size={14} /> {attachError}</p>}</section>
             <section className="detail-section history-section"><div className="detail-section-heading"><span className="detail-label">Historial del ticket</span><span>{ticket.events.length}</span></div>{ticket.events.length ? <ol className="ticket-history">{ticket.events.map((event) => <li key={event.id}><span className="history-dot" /><div><strong>{event.event_label}</strong><p>{event.comment || `${event.actor?.name || "Sistema"} actualizó el ticket.`}</p><small>{event.actor?.name || "Sistema"} · {formatDateTime(event.created_at)}</small></div></li>)}</ol> : <p className="detail-empty">Aún no hay eventos registrados.</p>}</section>
           </div>
           <aside className="detail-sidebar">
@@ -1740,15 +1770,17 @@ function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
     }
   }
 
-  function pickFiles(files, append = false) {
+  async function pickFiles(files, append = false) {
     if (!files.length) return;
     const current = append ? (Array.isArray(attachment) ? attachment : attachment ? [attachment] : []) : [];
-    const combined = [...current, ...files];
+    const processed = [];
+    for (const f of files) processed.push(await compressImageFile(f));
+    const combined = [...current, ...processed];
     if (combined.length > 5) {
       setAttachmentError(`Máximo 5 imágenes (ya tienes ${current.length}).`);
       return;
     }
-    for (const f of files) {
+    for (const f of processed) {
       if (f.size > 5 * 1024 * 1024) {
         setAttachmentError(`"${f.name}" supera 5 MB.`);
         return;

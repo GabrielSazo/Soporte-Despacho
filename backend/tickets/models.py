@@ -157,12 +157,19 @@ class Ticket(models.Model):
 
 
 class TicketAttachment(models.Model):
+    class OcrStatus(models.TextChoices):
+        PENDING = "PENDIENTE", "Pendiente de OCR"
+        PROCESSING = "PROCESANDO", "Procesando texto"
+        DONE = "OK", "Texto extraído"
+        FAILED = "FALLIDO", "No se pudo extraer"
+
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="attachments")
     file = models.FileField(upload_to="ticket_attachments/%Y/%m/%d/")
     original_name = models.CharField(max_length=255)
     content_type = models.CharField(max_length=100)
     size = models.PositiveIntegerField()
     uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="ticket_attachments")
+    ocr_estado = models.CharField(max_length=12, choices=OcrStatus.choices, default=OcrStatus.PENDING)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
