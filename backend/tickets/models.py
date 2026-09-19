@@ -35,6 +35,19 @@ class RequestType(models.Model):
         return f"{self.get_kind_display()} - {self.service} - {self.name}"
 
 
+class EscalationArea(models.Model):
+    name = models.CharField(max_length=80, unique=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["name"]
+        verbose_name = "área de escalamiento"
+        verbose_name_plural = "áreas de escalamiento"
+
+    def __str__(self):
+        return self.name
+
+
 class Ticket(models.Model):
     class Category(models.TextChoices):
         FTTH = "FTTH", "FTTH"
@@ -76,7 +89,12 @@ class Ticket(models.Model):
     )
     title = models.CharField(max_length=180)
     description = models.TextField()
-    identificador = models.CharField(max_length=60, blank=True, default="")
+    contrato = models.CharField(max_length=60, blank=True, default="")
+    numero_ot = models.CharField(max_length=60, blank=True, default="")
+    area_escalada = models.ForeignKey(EscalationArea, on_delete=models.SET_NULL, null=True, blank=True, related_name="tickets")
+    motivo_escalamiento = models.TextField(blank=True, default="")
+    instrucciones_despacho = models.TextField(blank=True, default="")
+    estado_previo = models.CharField(max_length=20, choices=Status.choices, blank=True, default="")
     cliente_nombre = models.CharField(max_length=180, blank=True, default="")
     nodo = models.CharField(max_length=60, blank=True, default="")
     tipo_solicitud = models.ForeignKey(RequestType, on_delete=models.SET_NULL, null=True, blank=True, related_name="tickets")
@@ -100,7 +118,8 @@ class Ticket(models.Model):
             models.Index(fields=["assigned_team", "status"]),
             models.Index(fields=["creator", "status"]),
             models.Index(fields=["sla_due_at"]),
-            models.Index(fields=["identificador", "status"]),
+            models.Index(fields=["contrato", "status"]),
+            models.Index(fields=["numero_ot", "status"]),
         ]
 
     def __str__(self):
@@ -166,7 +185,9 @@ class TicketEvent(models.Model):
         RESOLVED = "RESUELTO", "Enviado a validación"
         APPROVED = "APROBADO", "Solución aprobada"
         REJECTED = "RECHAZADO", "Solución rechazada"
-        ESCALATED = "ESCALADO", "Escalado por SLA"
+        ESCALATED = "ESCALADO", "Escalado"
+        DEESCALATED = "DESESCALADO", "Vuelto de escalamiento"
+        INSTRUCTION = "INSTRUCCION", "Instrucciones de despacho"
         AUTO_CLOSED = "AUTO_CERRADO", "Cerrado automáticamente"
         ATTACHMENT = "ADJUNTO", "Evidencia adjunta"
         RELEASED = "LIBERADO", "Liberado a bandeja"

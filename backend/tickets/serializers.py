@@ -8,8 +8,14 @@ from rest_framework import serializers
 from accounts.models import User
 from accounts.serializers import TeamSummarySerializer, UserSummarySerializer
 
-from .models import RequestType, Ticket, TicketAttachment, TicketEvent
+from .models import EscalationArea, RequestType, Ticket, TicketAttachment, TicketEvent
 from .services import create_ticket, record_event
+
+
+class EscalationAreaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = EscalationArea
+        fields = ["id", "name", "is_active"]
 
 
 class RequestTypeSerializer(serializers.ModelSerializer):
@@ -189,6 +195,8 @@ class TicketSerializer(serializers.ModelSerializer):
     priority_label = serializers.CharField(source="get_priority_display", read_only=True)
     category_label = serializers.CharField(source="get_category_display", read_only=True)
     sla = serializers.SerializerMethodField()
+    area_escalada_detail = serializers.SerializerMethodField()
+    tiempo_escalado_minutos = serializers.SerializerMethodField()
     attachments = TicketAttachmentSerializer(many=True, read_only=True)
     events = TicketEventSerializer(many=True, read_only=True)
 
@@ -199,7 +207,14 @@ class TicketSerializer(serializers.ModelSerializer):
             "reference",
             "title",
             "description",
-            "identificador",
+            "contrato",
+            "numero_ot",
+            "area_escalada",
+            "area_escalada_detail",
+            "motivo_escalamiento",
+            "instrucciones_despacho",
+            "estado_previo",
+            "tiempo_escalado_minutos",
             "cliente_nombre",
             "nodo",
             "tipo_solicitud",
@@ -252,11 +267,20 @@ class TicketSerializer(serializers.ModelSerializer):
         remaining = max(0, int((ticket.sla_due_at - timezone.now()).total_seconds()))
         return {"state": ticket.sla_state, "remaining_seconds": remaining}
 
+    def get_area_escalada_detail(self, ticket):
+        area = ticket.area_escalada
+        return {"id": area.id, "name": area.name} if area else None
+
+    def get_tiempo_escalado_minutos(self, ticket):
+        if ticket.status == Ticket.Status.ESCALATED and ticket.escalated_at:
+            return round((timezone.now() - ticket.escalated_at).total_seconds() / 60, 1)
+        return None
+
 
 class TicketCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Ticket
-        fields = ["title", "description", "category", "priority", "identificador", "cliente_nombre", "nodo", "tipo_solicitud"]
+        fields = ["title", "description", "category", "priority", "contrato", "numero_ot", "cliente_nombre", "nodo", "tipo_solicitud"]
 
     def validate(self, attrs):
         user = self.context["request"].user
@@ -264,29 +288,57 @@ class TicketCreateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Solo un despachador puede registrar tickets.")
         if not user.is_administrator and not user.teams.exists():
             raise serializers.ValidationError("Tu cuenta no tiene un equipo asignado.")
-        identificador = (attrs.get("identificador") or "").strip()
-        if not identificador:
-            raise serializers.ValidationError({"identificador": "Debes indicar el Contrato u OT."})
-        if not re.fullmatch(r"[0-9]+", identificador):
-            raise serializers.ValidationError({"identificador": "Contrato / OT solo admite números."})
+        tipo = attrs.get("tipo_solicitud")
+        kind = tipo.kind if tipo else None
+        contrato = (attrs.get("contrato") or "").strip()
+        numero_ot = (attrs.get("numero_ot") or "").strip()
+        for valor, campo in ((contrato, "contrato"), (numero_ot, "numero_ot")):
+            if valor and not re.fullmatch(r"[0-9]+", valor):
+                raise serializers.ValidationError({campo: "Solo admite números."})
+        if kind == "CLIENTE" and not contrato:
+            raise serializers.ValidationError({"contrato": "Debes indicar el Contrato."})
+        if kind == "TECNICO" and not numero_ot:
+            raise serializers.ValidationError({"numero_ot": "Debes indicar la OT."})
+        if not contrato and not numero_ot:
+            raise serializers.ValidationError({"contrato": "Debes indicar el Contrato o la OT."})
         cliente = (attrs.get("cliente_nombre") or "").strip()
         if not cliente:
             raise serializers.ValidationError({"cliente_nombre": "Debes indicar el nombre del cliente."})
         if not re.fullmatch(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9\s.\-,&()']+", cliente):
             raise serializers.ValidationError({"cliente_nombre": "Nombre inválido: solo letras, números, espacios y . , - & ( )."})
-        attrs["identificador"] = identificador
+        attrs["contrato"] = contrato
+        attrs["numero_ot"] = numero_ot
         attrs["cliente_nombre"] = cliente
         if not (attrs.get("nodo") or "").strip():
             raise serializers.ValidationError({"nodo": "Debes indicar el nodo."})
-        existing = Ticket.objects.filter(identificador__iexact=identificador).exclude(status=Ticket.Status.CLOSED).order_by("-created_at").first()
-        if existing:
-            raise serializers.ValidationError(
-                {"identificador": f"Ya existe {existing.reference} abierto con este identificador ({existing.get_status_display()}). Ábrelo y documéntalo ahí."}
-            )
+        abiertos = Ticket.objects.exclude(status=Ticket.Status.CLOSED)
+        if contrato:
+            existing = abiertos.filter(contrato=contrato).order_by("-created_at").first()
+            if existing:
+                raise serializers.ValidationError(
+                    {"contrato": f"Ya existe {existing.reference} abierto con este contrato ({existing.get_status_display()}). Ábrelo y documéntalo ahí."}
+                )
+        if numero_ot:
+            existing = abiertos.filter(numero_ot=numero_ot).order_by("-created_at").first()
+            if existing:
+                raise serializers.ValidationError(
+                    {"numero_ot": f"Ya existe {existing.reference} abierto con esta OT ({existing.get_status_display()}). Ábrelo y documéntalo ahí."}
+                )
         return attrs
 
     def create(self, validated_data):
         return create_ticket(creator=self.context["request"].user, **validated_data)
+
+
+class EscalateSerializer(serializers.Serializer):
+    area_id = serializers.IntegerField(required=False, allow_null=True)
+    motivo = serializers.CharField(required=False, allow_blank=True, max_length=2000)
+    contrato = serializers.CharField(required=False, allow_blank=True, max_length=60)
+    numero_ot = serializers.CharField(required=False, allow_blank=True, max_length=60)
+
+
+class InstructSerializer(serializers.Serializer):
+    instrucciones = serializers.CharField(min_length=4, max_length=5000)
 
 
 class ResolutionSerializer(serializers.Serializer):

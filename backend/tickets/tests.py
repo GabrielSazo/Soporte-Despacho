@@ -50,7 +50,7 @@ class TicketFlowTests(APITestCase):
         )
         self.support.teams.set([self.team, self.soporte_b])
 
-    def create_ticket_through_api(self, identificador="10001"):
+    def create_ticket_through_api(self, contrato="10001", numero_ot=""):
         self.client.force_authenticate(self.dispatcher)
         response = self.client.post(
             "/api/tickets/",
@@ -59,7 +59,8 @@ class TicketFlowTests(APITestCase):
                 "description": "La ONT permanece sin señal después de la activación.",
                 "category": Ticket.Category.FTTH,
                 "priority": Ticket.Priority.HIGH,
-                "identificador": identificador,
+                "contrato": contrato,
+                "numero_ot": numero_ot,
                 "cliente_nombre": "Cliente Prueba",
                 "nodo": "NODO-1",
             },
@@ -153,3 +154,54 @@ class TicketFlowTests(APITestCase):
 
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data["original_name"], "evidence.png")
+
+    def test_duplicate_contrato_or_ot_is_rejected(self):
+        self.create_ticket_through_api(contrato="20001")
+        self.client.force_authenticate(self.dispatcher)
+        response = self.client.post(
+            "/api/tickets/",
+            {
+                "title": "Duplicado",
+                "description": "Mismo contrato.",
+                "category": Ticket.Category.FTTH,
+                "priority": Ticket.Priority.MEDIUM,
+                "contrato": "20001",
+                "cliente_nombre": "Cliente Prueba",
+                "nodo": "NODO-1",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("contrato", response.data)
+
+    def test_support_can_escalate_complete_and_return(self):
+        from .models import EscalationArea
+
+        area, _ = EscalationArea.objects.get_or_create(name="NOC")
+        ticket = self.create_ticket_through_api(contrato="", numero_ot="30001")
+        self.client.force_authenticate(self.support)
+        self.client.post(f"/api/tickets/{ticket.id}/take/")
+        esc = self.client.post(
+            f"/api/tickets/{ticket.id}/escalar/",
+            {"area_id": area.id, "motivo": "Falla de planta externa.", "contrato": "40001"},
+            format="json",
+        )
+        self.assertEqual(esc.status_code, 200)
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.status, Ticket.Status.ESCALATED)
+        self.assertEqual(ticket.contrato, "40001")
+        self.assertEqual(ticket.estado_previo, Ticket.Status.IN_PROGRESS)
+
+        self.client.force_authenticate(self.dispatcher)
+        ins = self.client.post(
+            f"/api/tickets/{ticket.id}/instruir/",
+            {"instrucciones": "Retirar al técnico y confirmar ventana."},
+            format="json",
+        )
+        self.assertEqual(ins.status_code, 200)
+
+        self.client.force_authenticate(self.support)
+        des = self.client.post(f"/api/tickets/{ticket.id}/desescalar/")
+        self.assertEqual(des.status_code, 200)
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.status, Ticket.Status.IN_PROGRESS)

@@ -147,14 +147,45 @@ def validate_ticket(ticket, actor, approved, comment=""):
 
 
 @transaction.atomic
-def escalate_ticket(ticket, comment=""):
+def escalate_ticket(ticket, actor=None, area=None, motivo="", contrato="", numero_ot=""):
     if ticket.status in {Ticket.Status.CLOSED, Ticket.Status.ESCALATED}:
         return ticket
     previous_status = ticket.status
+    if contrato:
+        ticket.contrato = contrato
+    if numero_ot:
+        ticket.numero_ot = numero_ot
+    ticket.estado_previo = previous_status
+    ticket.area_escalada = area
+    ticket.motivo_escalamiento = motivo
     ticket.status = Ticket.Status.ESCALATED
     ticket.escalated_at = timezone.now()
-    ticket.save(update_fields=["status", "escalated_at", "updated_at"])
-    record_event(ticket, TicketEvent.EventType.ESCALATED, from_status=previous_status, to_status=ticket.status, comment=comment)
+    ticket.save(update_fields=["contrato", "numero_ot", "estado_previo", "area_escalada", "motivo_escalamiento", "status", "escalated_at", "updated_at"])
+    area_nombre = area.name if area else "automático"
+    record_event(ticket, TicketEvent.EventType.ESCALATED, actor=actor, from_status=previous_status, to_status=ticket.status, comment=f"Escalado a {area_nombre}: {motivo}".strip())
+    broadcast_ticket_update(ticket.id, "escalated")
+    return ticket
+
+
+@transaction.atomic
+def deescalate_ticket(ticket, actor=None):
+    if ticket.status != Ticket.Status.ESCALATED:
+        return ticket
+    previous_status = ticket.status
+    ticket.status = ticket.estado_previo or Ticket.Status.OPEN
+    ticket.estado_previo = ""
+    ticket.save(update_fields=["status", "estado_previo", "updated_at"])
+    record_event(ticket, TicketEvent.EventType.DEESCALATED, actor=actor, from_status=previous_status, to_status=ticket.status, comment="Vuelto de escalamiento. Continúa el flujo.")
+    broadcast_ticket_update(ticket.id, "deescalated")
+    return ticket
+
+
+@transaction.atomic
+def instruct_ticket(ticket, actor, instrucciones):
+    ticket.instrucciones_despacho = instrucciones
+    ticket.save(update_fields=["instrucciones_despacho", "updated_at"])
+    record_event(ticket, TicketEvent.EventType.INSTRUCTION, actor=actor, comment=instrucciones)
+    broadcast_ticket_update(ticket.id, "instructed")
     return ticket
 
 

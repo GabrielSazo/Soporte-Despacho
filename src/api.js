@@ -234,9 +234,37 @@ export function updateRequestType(id, data) {
   return request(`/request-types/${id}/`, { method: "PATCH", body: data });
 }
 
-export function checkOpenTicket(identificador) {
-  const qs = new URLSearchParams({ identificador, abierto: "1" }).toString();
+export function checkOpenTicket({ identificador = "", contrato = "", numero_ot = "" } = {}) {
+  const params = { abierto: "1" };
+  if (identificador) params.identificador = identificador;
+  if (contrato) params.contrato = contrato;
+  if (numero_ot) params.numero_ot = numero_ot;
+  const qs = new URLSearchParams(params).toString();
   return request(`/tickets/?${qs}`);
+}
+
+export function escalateTicket(ticketId, { area_id, motivo, contrato = "", numero_ot = "" }) {
+  return request(`/tickets/${ticketId}/escalar/`, { method: "POST", body: { area_id, motivo, contrato, numero_ot } });
+}
+
+export function deescalateTicket(ticketId) {
+  return request(`/tickets/${ticketId}/desescalar/`, { method: "POST" });
+}
+
+export function instructTicket(ticketId, instrucciones) {
+  return request(`/tickets/${ticketId}/instruir/`, { method: "POST", body: { instrucciones } });
+}
+
+export function getEscalationAreas() {
+  return request("/escalation-areas/");
+}
+
+export function createEscalationArea(data) {
+  return request("/escalation-areas/", { method: "POST", body: data });
+}
+
+export function updateEscalationArea(id, data) {
+  return request(`/escalation-areas/${id}/`, { method: "PATCH", body: data });
 }
 
 export function getReportsSummary(params = {}) {
