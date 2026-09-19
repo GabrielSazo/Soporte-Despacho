@@ -323,7 +323,15 @@ function App() {
         try {
           const data = JSON.parse(event.data);
           if (data.type === "ticket_update" || data.type === "connected") {
-            if (data.type === "ticket_update") refreshWorkspace(true);
+            if (data.type === "ticket_update") {
+              refreshWorkspace(true);
+              const openId = ticketDetailRef.current?.apiId;
+              if (openId && data.ticket_id === openId) {
+                getTicket(openId).then((detail) => {
+                  if (ticketDetailRef.current?.apiId === openId) setTicketDetail(mapTicket(detail));
+                }).catch(() => undefined);
+              }
+            }
           }
         } catch {
           if (event.data === "pong") return;
@@ -693,6 +701,8 @@ function App() {
     };
   }, [unseenCount, session?.id]);
   const prevNotifKeys = useRef(null);
+  const ticketDetailRef = useRef(null);
+  useEffect(() => { ticketDetailRef.current = ticketDetail; }, [ticketDetail]);
   const [browserNotif, setBrowserNotif] = useState(typeof Notification !== "undefined" ? Notification.permission : "denied");
 
   function playBeep() {
@@ -1054,6 +1064,7 @@ function EscalationsView({ canEscalate, tickets, onOpen, onDeescalate }) {
 function EscalateModal({ areas, onClose, onEscalate, ticket }) {
   const [areaId, setAreaId] = useState(ticket.areaEscaladaId ? String(ticket.areaEscaladaId) : "");
   const [motivo, setMotivo] = useState("");
+  const [instrucciones, setInstrucciones] = useState("");
   const [contrato, setContrato] = useState(ticket.contrato || "");
   const [numeroOt, setNumeroOt] = useState(ticket.numeroOt || "");
   const [error, setError] = useState("");
@@ -1068,7 +1079,7 @@ function EscalateModal({ areas, onClose, onEscalate, ticket }) {
     setSubmitting(true);
     setError("");
     try {
-      await onEscalate(ticket, { area_id: Number(areaId), motivo: motivo.trim(), contrato: contrato.trim(), numero_ot: numeroOt.trim() });
+      await onEscalate(ticket, { area_id: Number(areaId), motivo: motivo.trim(), contrato: contrato.trim(), numero_ot: numeroOt.trim(), instrucciones: instrucciones.trim() });
     } catch (requestError) {
       setError(requestError.message || "No fue posible escalar.");
       setSubmitting(false);
@@ -1085,6 +1096,7 @@ function EscalateModal({ areas, onClose, onEscalate, ticket }) {
             <label className="field"><span>Contrato</span><input name="contrato" inputMode="numeric" value={contrato} onChange={(e) => setContrato(e.target.value)} placeholder="Solo números" /></label>
             <label className="field"><span>OT</span><input name="numeroOt" inputMode="numeric" value={numeroOt} onChange={(e) => setNumeroOt(e.target.value)} placeholder="Solo números" /></label>
             <label className="field field-wide"><span>Motivo <b>*</b></span><textarea required value={motivo} onChange={(e) => setMotivo(e.target.value)} rows="3" placeholder="Ej. Falla de planta externa, se requiere cuadrilla." /></label>
+            <label className="field field-wide"><span>Instrucciones para despacho</span><textarea value={instrucciones} onChange={(e) => setInstrucciones(e.target.value)} rows="2" placeholder="Ej. retirar al técnico y confirmar ventana." /></label>
           </div>
           {error && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}
           <footer className="modal-actions"><button className="secondary-button" disabled={submitting} type="button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={submitting} type="submit"><Icon name="upload" size={18} /> {submitting ? "Escalando..." : "Escalar ticket"}</button></footer>
@@ -1532,7 +1544,7 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onDeesca
   const canValidate = currentUser.role !== "SOPORTE" && ticket.statusCode === "VALIDACION";
   const canEscalate = ["SOPORTE", "SUPERVISOR", "ADMIN"].includes(currentUser.role) && ["ABIERTO", "ASIGNADO", "EN_PROCESO"].includes(ticket.statusCode);
   const canDeescalate = ["SOPORTE", "SUPERVISOR", "ADMIN"].includes(currentUser.role) && ticket.statusCode === "ESCALADO";
-  const canInstruct = (ticket.creatorId === currentUser.id || currentUser.is_administrator || currentUser.role === "ADMIN") && ticket.statusCode === "ESCALADO";
+  const canInstruct = ["SOPORTE", "SUPERVISOR", "ADMIN"].includes(currentUser.role) && ticket.statusCode === "ESCALADO" && (ticket.assigneeId === currentUser.id || currentUser.role !== "SOPORTE" || currentUser.is_administrator);
   const [showInstruct, setShowInstruct] = useState(false);
   const [instructText, setInstructText] = useState("");
   const canAttach = currentUser.is_administrator || currentUser.role === "ADMIN" || ticket.requester === currentUser.name || (currentUser.role === "SOPORTE" && currentUser.team === ticket.team);
@@ -1615,7 +1627,7 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onDeesca
             <section className="detail-section"><div className="detail-section-heading"><span className="detail-label">Datos de la solicitud</span><span>{ticket.contrato || ticket.numeroOt}</span></div><div className="profile-details" style={{ padding: 0, marginTop: "10px" }}>{ticket.contrato && <div className="profile-row"><span>Contrato</span><span>{ticket.contrato}</span></div>}{ticket.numeroOt && <div className="profile-row"><span>OT</span><span>{ticket.numeroOt}</span></div>}{ticket.cliente && <div className="profile-row"><span>Cliente</span><span>{ticket.cliente}</span></div>}{ticket.nodo && <div className="profile-row"><span>Nodo</span><span>{ticket.nodo}</span></div>}{ticket.tipoSolicitud && <div className="profile-row"><span>Tipo</span><span>{ticket.tipoSolicitud}</span></div>}</div></section>
             <section className="detail-section"><span className="detail-label">Descripción reportada</span><p className="detail-description">{ticket.description || "Sin descripción adicional."}</p></section>
             {ticket.resolutionNotes && <section className="detail-section solution-detail"><span className="detail-label"><Icon name="checkCircle" size={15} /> Solución registrada</span><p>{ticket.resolutionNotes}</p></section>}
-            {ticket.statusCode === "ESCALADO" && <section className="detail-section solution-detail"><span className="detail-label"><Icon name="upload" size={15} /> Escalado a {ticket.areaEscalada || "—"}{ticket.tiempoEscaladoMin != null ? ` · lleva ${formatDuracion(ticket.tiempoEscaladoMin)}` : ""}</span>{ticket.motivoEscalamiento && <p><b>Motivo:</b> {ticket.motivoEscalamiento}</p>}{ticket.instruccionesDespacho ? <p><b>Instrucciones de despacho:</b> {ticket.instruccionesDespacho}</p> : <p>Sin instrucciones de despacho todavía.</p>}</section>}
+            {ticket.statusCode === "ESCALADO" && <section className="detail-section solution-detail"><span className="detail-label"><Icon name="upload" size={15} /> Escalado a {ticket.areaEscalada || "—"}{ticket.tiempoEscaladoMin != null ? ` · lleva ${formatDuracion(ticket.tiempoEscaladoMin)}` : ""}</span>{ticket.motivoEscalamiento && <p><b>Motivo (soporte):</b> {ticket.motivoEscalamiento}</p>}{ticket.instruccionesDespacho ? <p><b>Instrucciones para despacho:</b> {ticket.instruccionesDespacho}</p> : <p>Soporte aún no deja instrucciones para despacho.</p>}</section>}
             <section className="detail-section"><div className="detail-section-heading"><span className="detail-label">Evidencia adjunta</span><span>{ticket.attachments.length}/5</span></div>{ticket.attachments.length ? <div className="attachment-list">{ticket.attachments.map((attachment) => <a href={attachment.url} key={attachment.id} rel="noreferrer" target="_blank"><img src={attachment.url} alt={attachment.original_name} style={{ width: "52px", height: "52px", objectFit: "cover", borderRadius: "6px", flex: "0 0 auto" }} onError={(e) => { e.target.style.display = "none"; }} /><span><strong>{attachment.original_name}</strong><small>{Math.max(1, Math.round(attachment.size / 1024))} KB · {formatDateTime(attachment.created_at)}</small></span><Icon name="arrowRight" size={15} /></a>)}</div> : <p className="detail-empty">No hay evidencia adjunta.</p>}{canAttach && <form className="detail-attach-form" onSubmit={submitAttach} onPaste={handleAttachPaste}><label className={`upload-box small ${attachError ? "has-error" : ""}`}><input type="file" accept=".jpg,.jpeg,.png" multiple onChange={handleAttach} /><Icon name="upload" size={16} /><span>{attachList.length ? `${attachList.length} ${attachList.length === 1 ? "imagen" : "imágenes"}` : "Adjuntar o pegar (Ctrl+V)"}</span></label><button className="secondary-button" disabled={uploading || !attachFile} type="submit">{uploading ? "Subiendo..." : "Adjuntar"}</button></form>}{attachList.length > 0 && <div className="attach-preview-grid">{attachList.map((f, i) => <div className="attach-preview" key={`${f.name}-${f.size}-${i}`}><img src={attachPreviews[i]} alt={f.name} /><span title={f.name}>{f.name}</span><button type="button" aria-label={`Quitar ${f.name}`} onClick={() => removeAttachFile(i)}>✕</button></div>)}</div>}{attachError && <p className="form-submit-error" role="alert"><Icon name="alert" size={14} /> {attachError}</p>}</section>
             <section className="detail-section history-section"><div className="detail-section-heading"><span className="detail-label">Historial del ticket</span><span>{ticket.events.length}</span></div>{ticket.events.length ? <ol className="ticket-history">{ticket.events.map((event) => <li key={event.id}><span className="history-dot" /><div><strong>{event.event_label}</strong><p>{event.comment || `${event.actor?.name || "Sistema"} actualizó el ticket.`}</p><small>{event.actor?.name || "Sistema"} · {formatDateTime(event.created_at)}</small></div></li>)}</ol> : <p className="detail-empty">Aún no hay eventos registrados.</p>}</section>
           </div>
@@ -1630,8 +1642,8 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onDeesca
               {canResolve && <button className="primary-button" type="button" onClick={() => onResolve(ticket)}>Registrar solución</button>}
               {canEscalate && <button className="secondary-button" type="button" onClick={() => onEscalate(ticket)}><Icon name="upload" size={16} /> Escalar</button>}
               {canDeescalate && <button className="primary-button" disabled={acting} type="button" onClick={() => runAction(onDeescalate)}>Recibida respuesta · continuar</button>}
-              {canInstruct && !showInstruct && <button className="secondary-button" type="button" onClick={() => { setShowInstruct(true); setInstructText(ticket.instruccionesDespacho || ""); }}>Dar instrucciones</button>}
-              {canInstruct && showInstruct && <div style={{ display: "grid", gap: "6px", marginTop: "8px", width: "100%" }}><textarea value={instructText} onChange={(e) => setInstructText(e.target.value)} placeholder="Instrucciones para soporte (ej. retirar al técnico y confirmar ventana)" rows="3" style={{ width: "100%", border: "1px solid var(--line-strong)", borderRadius: "6px", padding: "8px", fontSize: "11px" }} /><div style={{ display: "flex", gap: "6px" }}><button className="secondary-button" disabled={acting || instructText.trim().length < 4} type="button" onClick={async () => { setActing(true); setActionError(""); try { await onInstruct(ticket, instructText.trim()); setShowInstruct(false); } catch (e) { setActionError(e.message || "No se pudo enviar."); } finally { setActing(false); } }}>Enviar instrucciones</button><button className="secondary-button" type="button" onClick={() => setShowInstruct(false)}>Cancelar</button></div></div>}
+              {canInstruct && !showInstruct && <button className="secondary-button" type="button" onClick={() => { setShowInstruct(true); setInstructText(ticket.instruccionesDespacho || ""); }}>Instruir a despacho</button>}
+              {canInstruct && showInstruct && <div style={{ display: "grid", gap: "6px", marginTop: "8px", width: "100%" }}><textarea value={instructText} onChange={(e) => setInstructText(e.target.value)} placeholder="Instrucciones para despacho (ej. retirar al técnico y confirmar ventana)" rows="3" style={{ width: "100%", border: "1px solid var(--line-strong)", borderRadius: "6px", padding: "8px", fontSize: "11px" }} /><div style={{ display: "flex", gap: "6px" }}><button className="secondary-button" disabled={acting || instructText.trim().length < 4} type="button" onClick={async () => { setActing(true); setActionError(""); try { await onInstruct(ticket, instructText.trim()); setShowInstruct(false); } catch (e) { setActionError(e.message || "No se pudo enviar."); } finally { setActing(false); } }}>Enviar instrucciones</button><button className="secondary-button" type="button" onClick={() => setShowInstruct(false)}>Cancelar</button></div></div>}
               {canValidate && <>
                 <button className="primary-button" disabled={acting} type="button" onClick={() => runAction((t) => onValidate(t, true), true)}><Icon name="check" size={17} /> Aprobar solución</button>
                 {!showReject ? <button className="secondary-button" disabled={acting} type="button" onClick={() => setShowReject(true)}>Rechazar y devolver</button> : <div style={{ display: "grid", gap: "6px", marginTop: "8px", width: "100%" }}><textarea value={rejectComment} onChange={(e) => setRejectComment(e.target.value)} placeholder="Motivo del rechazo (obligatorio) — explica qué falta o por qué se devuelve" rows="3" style={{ width: "100%", border: "1px solid var(--line-strong)", borderRadius: "6px", padding: "8px", fontSize: "11px" }} /><div style={{ display: "flex", gap: "6px" }}><button className="secondary-button" disabled={acting || !rejectComment.trim()} type="button" onClick={async () => { setActing(true); setActionError(""); try { await onValidate(ticket, false, rejectComment); setShowReject(false); setRejectComment(""); } catch (e) { setActionError(e.message || "No se pudo rechazar."); } finally { setActing(false); } }}>Confirmar rechazo</button><button className="secondary-button" type="button" onClick={() => { setShowReject(false); setRejectComment(""); }}>Cancelar</button></div></div>}

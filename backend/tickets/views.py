@@ -263,7 +263,7 @@ class TicketViewSet(viewsets.ModelViewSet):
                 raise ValidationError({campo: "Solo admite números."})
         if not (ticket.contrato or ticket.numero_ot or contrato or numero_ot):
             raise ValidationError({"contrato": "Completa el Contrato o la OT para poder escalar."})
-        escalate_ticket(ticket, actor=request.user, area=area, motivo=motivo, contrato=contrato, numero_ot=numero_ot)
+        escalate_ticket(ticket, actor=request.user, area=area, motivo=motivo, contrato=contrato, numero_ot=numero_ot, instrucciones=(data.get("instrucciones") or "").strip())
         return Response(TicketSerializer(ticket, context={"request": request}).data)
 
     @action(detail=True, methods=["post"], url_path="desescalar")
@@ -280,7 +280,9 @@ class TicketViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="instruir")
     def instruir(self, request, pk=None):
         ticket = self.get_object()
-        require_validation_access(request.user, ticket)
+        require_support_access(request.user, ticket)
+        if not request.user.is_administrator and request.user.role not in {User.Role.SUPPORT, User.Role.SUPERVISOR}:
+            raise PermissionDenied("Solo soporte, supervisores o administración pueden dejar instrucciones.")
         if ticket.status != Ticket.Status.ESCALATED:
             raise ValidationError("Solo se puede instruir un ticket escalado.")
         serializer = InstructSerializer(data=request.data)

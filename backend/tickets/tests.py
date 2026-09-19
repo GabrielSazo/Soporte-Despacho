@@ -192,7 +192,7 @@ class TicketFlowTests(APITestCase):
         self.assertEqual(ticket.contrato, "40001")
         self.assertEqual(ticket.estado_previo, Ticket.Status.IN_PROGRESS)
 
-        self.client.force_authenticate(self.dispatcher)
+        self.client.force_authenticate(self.support)
         ins = self.client.post(
             f"/api/tickets/{ticket.id}/instruir/",
             {"instrucciones": "Retirar al técnico y confirmar ventana."},

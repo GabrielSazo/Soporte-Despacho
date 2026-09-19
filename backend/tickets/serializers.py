@@ -335,6 +335,7 @@ class EscalateSerializer(serializers.Serializer):
     motivo = serializers.CharField(required=False, allow_blank=True, max_length=2000)
     contrato = serializers.CharField(required=False, allow_blank=True, max_length=60)
     numero_ot = serializers.CharField(required=False, allow_blank=True, max_length=60)
+    instrucciones = serializers.CharField(required=False, allow_blank=True, max_length=5000)
 
 
 class InstructSerializer(serializers.Serializer):

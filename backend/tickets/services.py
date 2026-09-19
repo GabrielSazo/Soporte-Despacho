@@ -147,7 +147,7 @@ def validate_ticket(ticket, actor, approved, comment=""):
 
 
 @transaction.atomic
-def escalate_ticket(ticket, actor=None, area=None, motivo="", contrato="", numero_ot=""):
+def escalate_ticket(ticket, actor=None, area=None, motivo="", contrato="", numero_ot="", instrucciones=""):
     if ticket.status in {Ticket.Status.CLOSED, Ticket.Status.ESCALATED}:
         return ticket
     previous_status = ticket.status
@@ -158,9 +158,10 @@ def escalate_ticket(ticket, actor=None, area=None, motivo="", contrato="", numer
     ticket.estado_previo = previous_status
     ticket.area_escalada = area
     ticket.motivo_escalamiento = motivo
+    ticket.instrucciones_despacho = instrucciones
     ticket.status = Ticket.Status.ESCALATED
     ticket.escalated_at = timezone.now()
-    ticket.save(update_fields=["contrato", "numero_ot", "estado_previo", "area_escalada", "motivo_escalamiento", "status", "escalated_at", "updated_at"])
+    ticket.save(update_fields=["contrato", "numero_ot", "estado_previo", "area_escalada", "motivo_escalamiento", "instrucciones_despacho", "status", "escalated_at", "updated_at"])
     area_nombre = area.name if area else "automático"
     record_event(ticket, TicketEvent.EventType.ESCALATED, actor=actor, from_status=previous_status, to_status=ticket.status, comment=f"Escalado a {area_nombre}: {motivo}".strip())
     broadcast_ticket_update(ticket.id, "escalated")
