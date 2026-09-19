@@ -1076,7 +1076,7 @@ function EscalateModal({ areas, onClose, onEscalate, ticket }) {
   }
 
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+    <div className="modal-backdrop" role="presentation" style={{ zIndex: 120 }} onMouseDown={onClose}>
       <section className="ticket-modal" role="dialog" aria-modal="true" aria-labelledby="escalate-title" onMouseDown={(event) => event.stopPropagation()}>
         <header className="modal-header"><div><p className="eyebrow">Escalamiento</p><h2 id="escalate-title">Escalar {ticket.id}</h2><p>El ticket pasa a ESCALADO y se notifica al despacho.</p></div><button className="icon-button" type="button" aria-label="Cerrar" onClick={onClose}><Icon name="close" /></button></header>
         <form onSubmit={submit}>
