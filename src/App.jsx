@@ -546,7 +546,7 @@ function App() {
     return mapped;
   }
 
-  const openTickets = tickets.filter((ticket) => ticket.statusCode !== "CERRADO").length;
+  const openTickets = tickets.filter((ticket) => ticket.statusCode !== "CERRADO" && (session?.role === "SOPORTE" ? ticket.statusCode !== "VALIDACION" : true)).length;
   const validationTickets = tickets.filter((ticket) => ticket.statusCode === "VALIDACION" && (session?.role === "DESPACHADOR" ? ticket.creatorId === session.id : true));
   const myValidationCount = tickets.filter((t) => t.statusCode === "VALIDACION" && t.creatorId === session?.id).length;
   const criticalTickets = tickets.filter((ticket) => ticket.priorityCode === "CRITICA").length;
@@ -881,6 +881,14 @@ function Dashboard({ canCreate, criticalTickets, dashboard, onCreate, onOpen, on
 
 function TicketsView({ canCreate, currentUser, filter, filteredTickets, onCreate, onFilterChange, onNotify, onOpen, onResolve, onTake, query, setQuery }) {
   const filters = currentUser?.role === "SOPORTE" ? ["Trabajables", "Míos", "Asignado", "En proceso", "Validación", "Todos"] : currentUser?.role === "DESPACHADOR" ? ["Míos", "Asignado", "En proceso", "Validación", "Todos"] : ["Todos", "Abierto", "Asignado", "En proceso", "Validación"];
+  const [sort, setSort] = useState("prioridad");
+  const priorityRank = { CRITICA: 0, ALTA: 1, MEDIA: 2, BAJA: 3 };
+  const sortedTickets = [...filteredTickets].sort((a, b) => {
+    if (sort === "recientes") return new Date(b.createdAt) - new Date(a.createdAt);
+    if (sort === "antiguos") return new Date(a.createdAt) - new Date(b.createdAt);
+    return (priorityRank[a.priorityCode] ?? 9) - (priorityRank[b.priorityCode] ?? 9) || (new Date(a.createdAt) - new Date(b.createdAt));
+  });
+  const cycleSort = () => setSort(sort === "prioridad" ? "antiguos" : sort === "antiguos" ? "recientes" : "prioridad");
 
   return (
     <>
@@ -903,8 +911,8 @@ function TicketsView({ canCreate, currentUser, filter, filteredTickets, onCreate
             ))}
           </div>
         </div>
-        <div className="table-summary"><span><b>{filteredTickets.length}</b> tickets encontrados</span><button type="button" onClick={() => onNotify("Los filtros se actualizarán automáticamente con la API.")}>Ordenar: prioridad <Icon name="chevronDown" size={15} /></button></div>
-        <div className="ticket-table-wrap"><TicketTable currentUser={currentUser} onNotify={onNotify} onOpen={onOpen} onResolve={onResolve} onTake={onTake} tickets={filteredTickets} /></div>
+        <div className="table-summary"><span><b>{filteredTickets.length}</b> tickets encontrados</span><button type="button" onClick={cycleSort}>Ordenar: {sort} <Icon name="chevronDown" size={15} /></button></div>
+        <div className="ticket-table-wrap"><TicketTable currentUser={currentUser} onNotify={onNotify} onOpen={onOpen} onResolve={onResolve} onTake={onTake} tickets={sortedTickets} /></div>
         {filteredTickets.length === 0 && <EmptyState />}
       </article>
     </>
@@ -1019,7 +1027,24 @@ function ReportsView({ groups, onNotify }) {
   const kpis = summary?.kpis || {};
   const daily = summary?.daily || [];
   const maxDaily = Math.max(1, ...daily.map((d) => d.total));
+  const maxAhtDay = Math.max(0, ...daily.map((d) => d.aht_minutos || 0));
+  const AHT_W = 640, AHT_H = 180, AHT_PAD = 10;
+  const ahtX = (i) => (daily.length <= 1 ? AHT_W / 2 : AHT_PAD + (i * (AHT_W - 2 * AHT_PAD)) / (daily.length - 1));
+  const ahtY = (v) => (maxAhtDay ? AHT_H - AHT_PAD - (v / maxAhtDay) * (AHT_H - 2 * AHT_PAD) : AHT_H - AHT_PAD);
+  let ahtPath = "";
+  daily.forEach((d, i) => {
+    if (d.aht_minutos == null) return;
+    ahtPath += `${ahtPath && daily[i - 1]?.aht_minutos != null ? "L" : "M"}${ahtX(i).toFixed(1)} ${ahtY(d.aht_minutos).toFixed(1)}`;
+  });
   const fmt = (v, suffix = "") => (v === null || v === undefined ? "—" : `${v}${suffix}`);
+  const fmtDur = (min) => {
+    if (min === null || min === undefined) return "—";
+    const total = Math.round(Number(min) * 60);
+    const h = Math.floor(total / 3600);
+    const m = String(Math.floor((total % 3600) / 60)).padStart(2, "0");
+    const s = String(total % 60).padStart(2, "0");
+    return `${h}:${m}:${s}`;
+  };
 
   return (
     <>
@@ -1033,10 +1058,11 @@ function ReportsView({ groups, onNotify }) {
         </div>
         <footer className="modal-actions" style={{ margin: "12px 0 0", padding: 0, border: 0 }}><button className="primary-button" type="button" disabled={loading} onClick={load}>{loading ? "Cargando..." : "Aplicar filtros"}</button></footer>
       </article>
-      <section className="report-highlights" style={{ gridTemplateColumns: "repeat(6, minmax(0, 1fr))" }}>
+      <section className="report-highlights" style={{ gridTemplateColumns: "repeat(7, minmax(0, 1fr))" }}>
         <article><span>Entrantes</span><strong>{fmt(kpis.entrantes)}</strong></article>
         <article><span>Resueltos</span><strong>{fmt(kpis.resueltos)}</strong></article>
-        <article><span>AHT minutos</span><strong>{fmt(kpis.aht_minutos)}</strong><p>Tomado → resuelto</p></article>
+        <article><span>AHT</span><strong>{fmtDur(kpis.aht_minutos)}</strong><p>Tomado → resuelto</p></article>
+        <article><span>Devueltos a soporte</span><strong>{fmt(kpis.devueltos)}</strong><p>Rechazos de validación</p></article>
         <article><span>% SLA cumplido</span><strong>{fmt(kpis.pct_sla, "%")}</strong><p><b>Meta: 90%</b></p></article>
         <article><span>En proceso</span><strong>{fmt(kpis.en_proceso)}</strong></article>
         <article><span>Vencidos</span><strong>{fmt(kpis.vencidos)}</strong></article>
@@ -1045,8 +1071,23 @@ function ReportsView({ groups, onNotify }) {
         <article className="panel channel-panel"><PanelHeading eyebrow="Por día" title="Tráfico entrante" />
           <div style={{ display: "flex", alignItems: "flex-end", gap: "6px", padding: "10px 24px 24px", minHeight: "160px" }}>
             {daily.length === 0 && <p className="detail-empty">Sin datos en el rango.</p>}
-            {daily.map((d) => <div key={d.date} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }} title={`${d.date}: ${d.total}`}><span style={{ fontSize: "10px", fontWeight: 700 }}>{d.total}</span><div style={{ width: "100%", height: `${Math.max(4, Math.round((d.total / maxDaily) * 110))}px`, background: "var(--accent)", borderRadius: "4px 4px 0 0" }} /><small style={{ fontSize: "8px", color: "var(--quiet)" }}>{d.date.slice(5)}</small></div>)}
+            {daily.map((d) => <div key={d.date} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }} title={`${d.date}: ${d.total}` + (d.aht_minutos != null ? ` · AHT ${fmtDur(d.aht_minutos)}` : "")}><span style={{ fontSize: "10px", fontWeight: 700 }}>{d.total}</span><div style={{ width: "100%", height: `${Math.max(4, Math.round((d.total / maxDaily) * 110))}px`, background: "var(--accent)", borderRadius: "4px 4px 0 0" }} /><small style={{ fontSize: "8px", color: "var(--quiet)" }}>{d.date.slice(5)}</small></div>)}
           </div>
+          <PanelHeading eyebrow="Por día" title="AHT diario" action={<span className="legend-label"><i /> Promedio tomado → resuelto</span>} />
+          {maxAhtDay === 0 && <p className="detail-empty" style={{ padding: "0 24px 20px" }}>Sin AHT en el rango.</p>}
+          {maxAhtDay > 0 && (
+          <div className="flow-chart" aria-label="Gráfica de línea del AHT por día" style={{ color: "var(--violet)" }}>
+            <div className="chart-axis"><span>{fmtDur(maxAhtDay)}</span><span>{fmtDur(maxAhtDay / 2)}</span><span>0:00:00</span></div>
+            <div className="chart-area">
+              <svg viewBox="0 0 640 220" preserveAspectRatio="none" role="img" aria-label="Línea de AHT diario">
+                <path className="chart-grid" d="M0 20H640M0 110H640M0 200H640" />
+                <path className="line-path" d={ahtPath} />
+                {daily.map((d, i) => (d.aht_minutos == null ? null : <circle key={d.date} cx={ahtX(i)} cy={ahtY(d.aht_minutos)} r="5" className="chart-dot"><title>{`${d.date}: ${fmtDur(d.aht_minutos)}`}</title></circle>))}
+              </svg>
+              <div className="chart-labels"><span>{daily[0]?.date.slice(5)}</span><span>{daily[daily.length - 1]?.date.slice(5)}</span></div>
+            </div>
+          </div>
+          )}
         </article>
       </section>
     </>

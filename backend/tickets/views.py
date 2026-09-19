@@ -10,7 +10,7 @@ from rest_framework.views import APIView
 from accounts.models import User
 from accounts.permissions import IsAdministrator
 
-from .models import RequestType, Ticket
+from .models import RequestType, Ticket, TicketEvent
 from .permissions import require_support_access, require_validation_access, visible_tickets_for
 from .serializers import RequestTypeSerializer, ResolutionSerializer, TicketAttachmentSerializer, TicketCreateSerializer, TicketSerializer, ValidationSerializer
 from .services import escalate_ticket, route_ticket, take_ticket, validate_ticket
@@ -274,7 +274,18 @@ class ReportsSummaryView(APIView):
         date_to = request.query_params.get("to") or today.isoformat()
         daily_qs = tickets.filter(created_at__date__gte=date_from, created_at__date__lte=date_to)
         daily = list(daily_qs.annotate(day=TruncDate("created_at")).values("day").annotate(total=Count("id")).order_by("day"))
-        daily = [{"date": d["day"].isoformat(), "total": d["total"]} for d in daily]
+        aht_by_day = {}
+        for t in tickets.filter(resolved_at__isnull=False, assigned_at__isnull=False, resolved_at__date__gte=date_from, resolved_at__date__lte=date_to):
+            mins = (t.resolved_at - t.assigned_at).total_seconds() / 60
+            aht_by_day.setdefault(t.resolved_at.date().isoformat(), []).append(mins)
+        aht_by_day = {d: round(sum(v) / len(v), 1) for d, v in aht_by_day.items()}
+        daily = [{"date": d["day"].isoformat(), "total": d["total"], "aht_minutos": aht_by_day.get(d["day"].isoformat())} for d in daily]
+        rejected = TicketEvent.objects.filter(ticket__in=tickets, event_type=TicketEvent.EventType.REJECTED)
+        if request.query_params.get("from"):
+            rejected = rejected.filter(created_at__date__gte=request.query_params.get("from"))
+        if request.query_params.get("to"):
+            rejected = rejected.filter(created_at__date__lte=request.query_params.get("to"))
+        devueltos = rejected.count()
         by_service = list(tickets.values("category").annotate(total=Count("id")).order_by("-total"))
         by_group = list(tickets.values("assigned_team__group__name").annotate(total=Count("id")).order_by("-total"))
         return Response({
@@ -285,6 +296,7 @@ class ReportsSummaryView(APIView):
                 "pct_sla": pct_sla,
                 "en_proceso": en_proceso,
                 "vencidos": vencidos,
+                "devueltos": devueltos,
             },
             "daily": daily,
             "by_service": [{"service": r["category"], "total": r["total"]} for r in by_service],

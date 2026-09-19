@@ -59,7 +59,10 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
                         )
                 except User.DoesNotExist:
                     pass
-            raise
+            raise ValidationError(
+                {"detail": "Correo o contraseña incorrectos. Verifica tus credenciales."},
+                code="no_active_account",
+            )
         data["user"] = CurrentUserSerializer(self.user).data
         return data
 
