@@ -243,8 +243,8 @@ export function checkOpenTicket({ identificador = "", contrato = "", numero_ot =
   return request(`/tickets/?${qs}`);
 }
 
-export function escalateTicket(ticketId, { area_id, motivo, contrato = "", numero_ot = "" }) {
-  return request(`/tickets/${ticketId}/escalar/`, { method: "POST", body: { area_id, motivo, contrato, numero_ot } });
+export function escalateTicket(ticketId, { area_id, motivo, contrato = "", numero_ot = "", instrucciones = "" }) {
+  return request(`/tickets/${ticketId}/escalar/`, { method: "POST", body: { area_id, motivo, contrato, numero_ot, instrucciones } });
 }
 
 export function deescalateTicket(ticketId) {
