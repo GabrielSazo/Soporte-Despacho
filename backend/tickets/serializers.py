@@ -21,10 +21,11 @@ class EscalationAreaSerializer(serializers.ModelSerializer):
 class RequestTypeSerializer(serializers.ModelSerializer):
     kind_label = serializers.CharField(source="get_kind_display", read_only=True)
     service_label = serializers.CharField(source="get_service_display", read_only=True)
+    equipo_detail = TeamSummarySerializer(source="equipo_asignado", read_only=True)
 
     class Meta:
         model = RequestType
-        fields = ["id", "kind", "kind_label", "service", "service_label", "name", "is_active"]
+        fields = ["id", "kind", "kind_label", "service", "service_label", "name", "is_active", "equipo_asignado", "equipo_detail"]
 
 
 class TicketAttachmentSerializer(serializers.ModelSerializer):

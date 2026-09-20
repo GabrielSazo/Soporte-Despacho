@@ -24,6 +24,7 @@ class RequestType(models.Model):
     service = models.CharField(max_length=10, choices=Service.choices)
     name = models.CharField(max_length=120)
     is_active = models.BooleanField(default=True)
+    equipo_asignado = models.ForeignKey(Team, on_delete=models.SET_NULL, null=True, blank=True, related_name="tipos_asignados")
 
     class Meta:
         ordering = ["kind", "service", "name"]

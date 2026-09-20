@@ -84,9 +84,13 @@ def create_ticket(*, creator, **data):
     try:
         from accounts.models import Team as SupportTeam
 
-        support_code = ORIGIN_TO_SUPPORT.get(first_team.group.code if first_team.group_id else None)
-        if support_code:
-            assigned_team = SupportTeam.objects.get(code=support_code)
+        tipo = data.get("tipo_solicitud")
+        if tipo and getattr(tipo, "equipo_asignado_id", None):
+            assigned_team = SupportTeam.objects.get(pk=tipo.equipo_asignado_id)
+        else:
+            support_code = ORIGIN_TO_SUPPORT.get(first_team.group.code if first_team.group_id else None)
+            if support_code:
+                assigned_team = SupportTeam.objects.get(code=support_code)
     except Exception:
         assigned_team = first_team
     ticket = Ticket.objects.create(

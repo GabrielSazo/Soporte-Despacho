@@ -384,7 +384,7 @@ function App() {
   }
 
   useEffect(() => {
-    if (session && ["ADMIN", "SUPERVISOR"].includes(session?.role) && activeView === "Usuarios") refreshUsers();
+    if (session && ["ADMIN", "SUPERVISOR"].includes(session?.role) && activeView === "Administración") refreshUsers();
     if (session && activeView === "Mi grupo") refreshUsers();
   }, [activeView, session?.role]);
 
@@ -431,7 +431,7 @@ function App() {
   }
 
   async function saveRequestType(form, existing) {
-    const payload = { kind: form.kind, service: form.service, name: form.name.trim(), is_active: form.isActive };
+    const payload = { kind: form.kind, service: form.service, name: form.name.trim(), equipo_asignado: form.teamId ? Number(form.teamId) : null, is_active: form.isActive };
     if (existing) await updateRequestType(existing.id, payload);
     else await createRequestType(payload);
     setRequestTypeModal(null);
@@ -670,7 +670,7 @@ function App() {
   const canCreateTickets = session && ["DESPACHADOR", "ADMIN", "SUPERVISOR"].includes(session.role);
   const visibleNavigation = session?.role === "DESPACHADOR"
     ? navigation.filter((item) => ["Tickets", "Validaciones", "Escalados"].includes(item.label))
-    : session && ["ADMIN", "SUPERVISOR"].includes(session.role) ? [...navigation, { label: "Usuarios", icon: "users" }] : navigation;
+    : session && ["ADMIN", "SUPERVISOR"].includes(session.role) ? [...navigation, { label: "Administración", icon: "users" }] : navigation;
   const myTickets = tickets.filter((t) => t.creatorId === session?.id);
   const myValidation = tickets.filter((t) => t.statusCode === "VALIDACION" && t.creatorId === session?.id);
   const myEscalated = tickets.filter((t) => t.statusCode === "ESCALADO" && t.creatorId === session?.id);
@@ -807,7 +807,7 @@ function App() {
           {visibleNavigation.map((item) => <button className={`nav-item ${activeView === item.label ? "active" : ""}`} key={item.label} onClick={() => changeView(item.label)} type="button"><Icon name={item.icon} size={19} /><span>{item.label}</span>{item.badge && <b>{item.label === "Tickets" ? openTickets : item.label === "Escalados" ? escalatedTickets.length : session.role !== "SOPORTE" ? validationTickets.length : 0}</b>}</button>)}
         </nav>
         <div className="sidebar-bottom">
-          <button className="nav-item" type="button" onClick={() => ["ADMIN","SUPERVISOR"].includes(session.role) ? changeView("Usuarios") : setShowProfile(true)}><Icon name="settings" size={19} /><span>{["ADMIN","SUPERVISOR"].includes(session.role) ? "Gestionar usuarios" : "Mi perfil"}</span></button>
+          <button className="nav-item" type="button" onClick={() => setShowProfile(true)}><Icon name="settings" size={19} /><span>Mi perfil</span></button>
           <button className="nav-item logout-item" type="button" onClick={endSession}><Icon name="logout" size={19} /><span>Cerrar sesión</span></button>
         </div>
       </aside>
@@ -871,7 +871,7 @@ function App() {
             {activeView === "Escalados" && <EscalationsView canEscalate={["SOPORTE", "SUPERVISOR", "ADMIN"].includes(session.role)} tickets={escalatedTickets} onOpen={openTicketDetail} onDeescalate={deescalateTicket} />}
             {activeView === "Mi grupo" && <TeamView currentUser={session} onNotify={notify} tickets={tickets} users={users} />}
             {activeView === "Informes" && <ReportsView groups={groups} onNotify={notify} />}
-            {activeView === "Usuarios" && ["ADMIN","SUPERVISOR"].includes(session.role) && <UsersView areas={escalationAreas} currentRole={session.role} error={usersError} groups={groups} loading={usersLoading} onCreate={() => setUserModal("new")} onCreateArea={() => setAreaModal("new")} onCreateGroup={() => setGroupModal("new")} onCreateTeam={() => setTeamModal("new")} onCreateRequestType={() => setRequestTypeModal("new")} onEdit={setUserModal} onEditArea={setAreaModal} onEditGroup={setGroupModal} onEditTeam={setTeamModal} onEditRequestType={setRequestTypeModal} onResetPassword={setPasswordModal} onRetry={refreshUsers} requestTypes={requestTypes} teams={teams} users={users} />}
+            {activeView === "Administración" && ["ADMIN","SUPERVISOR"].includes(session.role) && <UsersView areas={escalationAreas} currentRole={session.role} error={usersError} groups={groups} loading={usersLoading} onCreate={() => setUserModal("new")} onCreateArea={() => setAreaModal("new")} onCreateGroup={() => setGroupModal("new")} onCreateTeam={() => setTeamModal("new")} onCreateRequestType={() => setRequestTypeModal("new")} onEdit={setUserModal} onEditArea={setAreaModal} onEditGroup={setGroupModal} onEditTeam={setTeamModal} onEditRequestType={setRequestTypeModal} onResetPassword={setPasswordModal} onRetry={refreshUsers} requestTypes={requestTypes} teams={teams} users={users} />}
           </>}
         </section>
       </main>
@@ -882,7 +882,7 @@ function App() {
       {userModal && <UserFormModal onClose={() => setUserModal(null)} onSave={saveUser} teams={teams} groups={groups} user={userModal === "new" ? null : userModal} />}
       {teamModal && <TeamFormModal groups={groups} onClose={() => setTeamModal(null)} onSave={saveTeam} team={teamModal === "new" ? null : teamModal} />}
       {groupModal && <GroupFormModal onClose={() => setGroupModal(null)} onSave={saveGroup} group={groupModal === "new" ? null : groupModal} />}
-      {requestTypeModal && <RequestTypeFormModal onClose={() => setRequestTypeModal(null)} onSave={saveRequestType} requestType={requestTypeModal === "new" ? null : requestTypeModal} />}
+      {requestTypeModal && <RequestTypeFormModal onClose={() => setRequestTypeModal(null)} onSave={saveRequestType} requestType={requestTypeModal === "new" ? null : requestTypeModal} teams={teams} />}
       {areaModal && <AreaFormModal area={areaModal === "new" ? null : areaModal} onClose={() => setAreaModal(null)} onSave={saveEscalationArea} />}
       {passwordModal && <PasswordResetModal onClose={() => setPasswordModal(null)} onSave={resetUserPassword} user={passwordModal} />}
       {showProfile && <ProfileModal onClose={() => setShowProfile(false)} tickets={tickets} user={session} />}
@@ -900,11 +900,28 @@ function Dashboard({ canCreate, criticalTickets, dashboard, onCreate, onOpen, on
   const slaPercentage = (value) => (slaTotal ? Math.round((value / slaTotal) * 100) : 0);
 
   const metrics = [
-    { label: "Tickets activos", value: activeTickets, trend: "+12%", detail: "vs. turno anterior", icon: "ticket", tone: "green" },
+    { label: "Tickets activos", value: activeTickets, trend: `${sla.vencido} vencidos`, detail: "necesitan atención", icon: "ticket", tone: "green" },
     { label: "Requieren atención", value: dashboard?.metrics?.critical_tickets ?? criticalTickets, trend: `${sla.vencido} vencidos`, detail: "SLA menor a 1 hora", icon: "alert", tone: "coral" },
-    { label: "En validación", value: validationTickets.length, trend: "1 nuevo", detail: "pendiente de respuesta", icon: "checkCircle", tone: "violet" },
-    { label: "Resueltos hoy", value: resolvedToday, trend: "94%", detail: "dentro del SLA", icon: "activity", tone: "blue" },
+    { label: "En validación", value: validationTickets.length, trend: `${validationTickets.length} casos`, detail: "pendientes de respuesta", icon: "checkCircle", tone: "violet" },
+    { label: "Resueltos hoy", value: resolvedToday, trend: "", detail: "cerrados hoy", icon: "activity", tone: "blue" },
   ];
+  const ritmo = slaScore >= 90 ? ["En buen ritmo", "La mayor parte de los casos avanza dentro del tiempo acordado."] : slaScore >= 70 ? ["Ritmo medio", "Hay casos próximos a vencer que conviene atender."] : ["Requiere atención", "Varios casos están vencidos o por vencer."];
+  const recentActivity = tickets
+    .flatMap((t) => (t.events || []).map((e) => ({ ...e, ticketRef: t.id, ticketTitle: t.title })))
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    .slice(0, 4);
+  const activityTone = (type) => (["APROBADO", "RESUELTO"].includes(type) ? ["checkCircle", "green"] : ["RECHAZADO", "ESCALADO"].includes(type) ? ["alert", "coral"] : ["users", "blue"]);
+  const hours = Array.from({ length: 8 }, (_, i) => {
+    const start = new Date();
+    start.setMinutes(0, 0, 0);
+    start.setHours(start.getHours() - (7 - i));
+    const end = new Date(start.getTime() + 3600 * 1000);
+    const total = tickets.filter((t) => { const c = new Date(t.createdAt); return c >= start && c < end; }).length;
+    return { label: `${String(start.getHours()).padStart(2, "0")}:00`, total };
+  });
+  const maxHour = Math.max(1, ...hours.map((h) => h.total));
+  const flowPath = hours.map((h, i) => `${i === 0 ? "M" : "L"}${(i * 640) / 7} ${200 - (h.total / maxHour) * 170}`).join(" ");
+  const peakHour = hours.reduce((best, h, i) => (h.total > hours[best].total ? i : best), 0);
 
   return (
     <>
@@ -921,7 +938,6 @@ function Dashboard({ canCreate, criticalTickets, dashboard, onCreate, onOpen, on
             <div className={`metric-icon ${metric.tone}`}><Icon name={metric.icon} size={21} /></div>
             <div className="metric-heading">
               <span>{metric.label}</span>
-              <button type="button" aria-label={`Más información sobre ${metric.label}`}><Icon name="dots" size={18} /></button>
             </div>
             <strong>{metric.value}</strong>
             <p><b>{metric.trend}</b> {metric.detail}</p>
@@ -937,7 +953,7 @@ function Dashboard({ canCreate, criticalTickets, dashboard, onCreate, onOpen, on
             action={<button className="text-button" type="button" onClick={onShowTickets}>Ver todos <Icon name="arrowRight" size={16} /></button>}
           />
           <div className="ticket-table-wrap compact-table-wrap">
-            <TicketTable onOpen={onOpen} tickets={tickets.slice(0, 4)} compact />
+            <TicketTable onOpen={onOpen} tickets={[...tickets].filter((t) => t.statusCode !== "CERRADO").sort((a, b) => ({ CRITICA: 0, ALTA: 1, MEDIA: 2, BAJA: 3 }[a.priorityCode] ?? 9) - (({ CRITICA: 0, ALTA: 1, MEDIA: 2, BAJA: 3 }[b.priorityCode] ?? 9)) || (new Date(a.createdAt) - new Date(b.createdAt))).slice(0, 4)} compact />
           </div>
         </article>
 
@@ -946,8 +962,8 @@ function Dashboard({ canCreate, criticalTickets, dashboard, onCreate, onOpen, on
           <div className="sla-score">
             <div className="score-ring" style={{ "--score": `${slaScore}` }}><span>{slaScore}<small>%</small></span></div>
             <div>
-              <strong>En buen ritmo</strong>
-              <p>La mayor parte de los casos avanza dentro del tiempo acordado.</p>
+              <strong>{ritmo[0]}</strong>
+              <p>{ritmo[1]}</p>
             </div>
           </div>
           <div className="sla-breakdown">
@@ -960,21 +976,21 @@ function Dashboard({ canCreate, criticalTickets, dashboard, onCreate, onOpen, on
         <article className="panel flow-panel">
           <PanelHeading eyebrow="Pulso operativo" title="Flujo de tickets" action={<span className="legend-label"><i /> Últimas 8 horas</span>} />
           <div className="flow-chart" aria-label="Gráfico de flujo de tickets durante ocho horas">
-            <div className="chart-axis"><span>16</span><span>12</span><span>8</span><span>4</span><span>0</span></div>
+            <div className="chart-axis"><span>{maxHour}</span><span>{Math.ceil(maxHour / 2)}</span><span>0</span></div>
             <div className="chart-area">
-              <svg viewBox="0 0 640 220" preserveAspectRatio="none" role="img" aria-label="Tendencia ascendente de tickets procesados">
+              <svg viewBox="0 0 640 220" preserveAspectRatio="none" role="img" aria-label="Tickets creados por hora">
                 <defs>
                   <linearGradient id="flow-gradient" x1="0" x2="0" y1="0" y2="1">
                     <stop offset="0%" stopColor="currentColor" stopOpacity="0.28" />
                     <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
                   </linearGradient>
                 </defs>
-                <path className="chart-grid" d="M0 20H640M0 72H640M0 124H640M0 176H640" />
-                <path className="area-line" d="M0 164 C40 151, 53 156, 83 143 S126 110, 161 128 S213 142, 245 100 S299 116, 329 83 S377 113, 407 95 S459 42, 493 68 S546 87, 572 40 S614 55, 640 23 V220H0Z" />
-                <path className="line-path" d="M0 164 C40 151, 53 156, 83 143 S126 110, 161 128 S213 142, 245 100 S299 116, 329 83 S377 113, 407 95 S459 42, 493 68 S546 87, 572 40 S614 55, 640 23" />
-                <circle cx="572" cy="40" r="5" className="chart-dot" />
+                <path className="chart-grid" d="M0 20H640M0 110H640M0 200H640" />
+                <path className="area-line" d={`${flowPath} V220H0Z`} />
+                <path className="line-path" d={flowPath} />
+                <circle cx={(peakHour * 640) / 7} cy={200 - (hours[peakHour].total / maxHour) * 170} r="5" className="chart-dot"><title>{`${hours[peakHour].label}: ${hours[peakHour].total}`}</title></circle>
               </svg>
-              <div className="chart-labels"><span>08:00</span><span>10:00</span><span>12:00</span><span>14:00</span><span>16:00</span></div>
+              <div className="chart-labels"><span>{hours[0].label}</span><span>{hours[3].label}</span><span>{hours[7].label}</span></div>
             </div>
           </div>
         </article>
@@ -982,9 +998,8 @@ function Dashboard({ canCreate, criticalTickets, dashboard, onCreate, onOpen, on
         <article className="panel activity-panel">
           <PanelHeading eyebrow="Actividad reciente" title="Cambios importantes" />
           <div className="activity-list">
-            <Activity icon="checkCircle" tone="green" text={<><b>INC-1046</b> pasó a validación</>} time="Hace 4 min" />
-            <Activity icon="users" tone="blue" text={<><b>Mario R.</b> tomó INC-1048</>} time="Hace 12 min" />
-            <Activity icon="alert" tone="coral" text={<><b>INC-1047</b> está próximo a vencer</>} time="Hace 18 min" />
+            {recentActivity.length === 0 && <p className="detail-empty">Sin actividad reciente.</p>}
+            {recentActivity.map((e, i) => { const [icon, tone] = activityTone(e.event_type); return <Activity key={`${e.ticketRef}-${i}`} icon={icon} tone={tone} text={<><b>{e.ticketRef}</b> {e.event_label}{e.actor?.name ? ` · ${e.actor.name}` : ""}</>} time={formatRelativeDate(e.created_at)} />; })}
           </div>
         </article>
       </section>
@@ -1298,7 +1313,7 @@ function UsersView({ areas, error, groups, loading, onCreate, onCreateArea, onCr
 
   return (
     <>
-      <PageHeader eyebrow="Administración" title="Usuarios y accesos" description="Gestiona personas y grupos. Los roles son asignables por administrador y las credenciales se restablecen desde aquí." action={tab === "usuarios" ? <button className="primary-button" type="button" onClick={onCreate}><Icon name="plus" size={18} /> Nuevo usuario</button> : tab === "tipos" ? <button className="primary-button" type="button" onClick={onCreateRequestType}><Icon name="plus" size={18} /> Nuevo tipo</button> : tab === "areas" ? <button className="primary-button" type="button" onClick={onCreateArea}><Icon name="plus" size={18} /> Nueva área</button> : <button className="primary-button" type="button" onClick={onCreateGroup}><Icon name="plus" size={18} /> Nuevo grupo</button>} />
+      <PageHeader eyebrow="Administración" title="Administración" description="Gestiona personas, grupos, catálogos y accesos. Los roles son asignables por administrador y las credenciales se restablecen desde aquí." action={tab === "usuarios" ? <button className="primary-button" type="button" onClick={onCreate}><Icon name="plus" size={18} /> Nuevo usuario</button> : tab === "tipos" ? <button className="primary-button" type="button" onClick={onCreateRequestType}><Icon name="plus" size={18} /> Nuevo tipo</button> : tab === "areas" ? <button className="primary-button" type="button" onClick={onCreateArea}><Icon name="plus" size={18} /> Nueva área</button> : <button className="primary-button" type="button" onClick={onCreateGroup}><Icon name="plus" size={18} /> Nuevo grupo</button>} />
       {error && <ApiConnectionError message={error} onRetry={onRetry} />}
       {currentRole !== "SUPERVISOR" && <div className="admin-tabs" role="tablist">
         <button className={tab === "usuarios" ? "selected" : ""} type="button" role="tab" aria-selected={tab === "usuarios"} onClick={() => setTab("usuarios")}><Icon name="users" size={16} /> Usuarios <span>{users.length}</span></button>
@@ -1312,7 +1327,7 @@ function UsersView({ areas, error, groups, loading, onCreate, onCreateArea, onCr
           <div className="filter-row" aria-label="Filtrar usuarios por rol"><Icon name="filter" size={17} />{[["Todos", "Todos"], ["DESPACHADOR", "Despachadores"], ["SOPORTE", "Soporte"], ["SUPERVISOR", "Supervisores"], ["ADMIN", "Administración"]].map(([value, label]) => <button className={role === value ? "selected" : ""} key={value} type="button" onClick={() => setRole(value)}>{label}</button>)}</div>
         </div>
         <div className="table-summary"><span><b>{filteredUsers.length}</b> usuarios encontrados</span><span>Bloqueo tras 5 intentos · Solo desbloquea vía correo</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Usuario</th><th>Rol</th><th>Grupo</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{filteredUsers.map((user) => <tr key={user.id}><td data-label="Usuario"><div className="managed-user"><div className={`avatar ${user.avatarClass}`}>{user.initials}</div><div><strong>{user.name}</strong><small>{user.email}</small></div></div></td><td data-label="Rol"><span className={`role-pill role-${user.role.toLowerCase()}`}>{user.roleLabel}</span></td><td data-label="Grupo"><div className="team-cell"><strong>{user.groupName}</strong></div></td><td data-label="Estado"><span className={`user-status ${user.is_locked ? "locked" : user.is_active ? "active" : "inactive"}`}><i /> {user.is_locked ? `Bloqueada (${user.failed_login_attempts})` : user.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action">{currentRole === "SUPERVISOR" && user.role === "ADMIN" ? <small style={{ color: "var(--quiet)" }}>Solo admin</small> : <><button type="button" onClick={() => onEdit(user)}>Editar</button><button className="reset-link" type="button" onClick={() => onResetPassword(user)}>Contraseña</button></>}</td></tr>)}</tbody></table></div>{filteredUsers.length === 0 && <EmptyState />}
-      </article> : tab === "equipos" ? <article className="panel users-panel"><div className="table-summary"><span><b>{teams.length}</b> equipos registrados</span><span>Agrupados por grupo · Código único</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Equipo</th><th>Grupo</th><th>Código</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{teams.map((team) => <tr key={team.id}><td data-label="Equipo"><strong>{team.name}</strong></td><td data-label="Grupo"><span className="team-label">{team.group_detail?.name || team.group?.name || "-"}</span></td><td data-label="Código"><span className="team-label">{team.code}</span></td><td data-label="Estado"><span className={`user-status ${team.is_active ? "active" : "inactive"}`}><i /> {team.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action"><button type="button" onClick={() => onEditTeam(team)}>Editar</button></td></tr>)}</tbody></table></div>{teams.length === 0 && <EmptyState />}</article> : tab === "tipos" ? <article className="panel users-panel"><div className="table-summary"><span><b>{(requestTypes || []).length}</b> tipos registrados</span><span>Solicitud → Servicio → Tipo</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Tipo</th><th>Solicitud</th><th>Servicio</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{(requestTypes || []).map((rt) => <tr key={rt.id}><td data-label="Tipo"><strong>{rt.name}</strong></td><td data-label="Solicitud"><span className="team-label">{rt.kind_label}</span></td><td data-label="Servicio"><span className="team-label">{rt.service}</span></td><td data-label="Estado"><span className={`user-status ${rt.is_active ? "active" : "inactive"}`}><i /> {rt.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action"><button type="button" onClick={() => onEditRequestType(rt)}>Editar</button></td></tr>)}</tbody></table></div>{(requestTypes || []).length === 0 && <EmptyState />}</article> : tab === "areas" ? <article className="panel users-panel"><div className="table-summary"><span><b>{(areas || []).length}</b> áreas registradas</span><span>Catálogo para escalamientos (Tier3, NOC, etc.)</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Área</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{(areas || []).map((a) => <tr key={a.id}><td data-label="Área"><strong>{a.name}</strong></td><td data-label="Estado"><span className={`user-status ${a.is_active ? "active" : "inactive"}`}><i /> {a.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action"><button type="button" onClick={() => onEditArea(a)}>Editar</button></td></tr>)}</tbody></table></div>{(areas || []).length === 0 && <EmptyState />}</article> : <article className="panel users-panel"><div className="table-summary"><span><b>{groups.length}</b> grupos registrados</span><span>Área macro (Tigo, Contrata, BBI N-2, etc.)</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Grupo</th><th>Código</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{groups.map((group) => <tr key={group.id}><td data-label="Grupo"><strong>{group.name}</strong></td><td data-label="Código"><span className="team-label">{group.code}</span></td><td data-label="Estado"><span className={`user-status ${group.is_active ? "active" : "inactive"}`}><i /> {group.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action"><button type="button" onClick={() => onEditGroup(group)}>Editar</button></td></tr>)}</tbody></table></div>{groups.length === 0 && <EmptyState />}</article>}
+      </article> : tab === "equipos" ? <article className="panel users-panel"><div className="table-summary"><span><b>{teams.length}</b> equipos registrados</span><span>Agrupados por grupo · Código único</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Equipo</th><th>Grupo</th><th>Código</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{teams.map((team) => <tr key={team.id}><td data-label="Equipo"><strong>{team.name}</strong></td><td data-label="Grupo"><span className="team-label">{team.group_detail?.name || team.group?.name || "-"}</span></td><td data-label="Código"><span className="team-label">{team.code}</span></td><td data-label="Estado"><span className={`user-status ${team.is_active ? "active" : "inactive"}`}><i /> {team.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action"><button type="button" onClick={() => onEditTeam(team)}>Editar</button></td></tr>)}</tbody></table></div>{teams.length === 0 && <EmptyState />}</article> : tab === "tipos" ? <article className="panel users-panel"><div className="table-summary"><span><b>{(requestTypes || []).length}</b> tipos registrados</span><span>Solicitud → Servicio → Tipo</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Tipo</th><th>Solicitud</th><th>Servicio</th><th>Atiende</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{(requestTypes || []).map((rt) => <tr key={rt.id}><td data-label="Tipo"><strong>{rt.name}</strong></td><td data-label="Solicitud"><span className="team-label">{rt.kind_label}</span></td><td data-label="Servicio"><span className="team-label">{rt.service}</span></td><td data-label="Atiende"><span className="team-label">{rt.equipo_detail?.name || "Automático"}</span></td><td data-label="Estado"><span className={`user-status ${rt.is_active ? "active" : "inactive"}`}><i /> {rt.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action"><button type="button" onClick={() => onEditRequestType(rt)}>Editar</button></td></tr>)}</tbody></table></div>{(requestTypes || []).length === 0 && <EmptyState />}</article> : tab === "areas" ? <article className="panel users-panel"><div className="table-summary"><span><b>{(areas || []).length}</b> áreas registradas</span><span>Catálogo para escalamientos (Tier3, NOC, etc.)</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Área</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{(areas || []).map((a) => <tr key={a.id}><td data-label="Área"><strong>{a.name}</strong></td><td data-label="Estado"><span className={`user-status ${a.is_active ? "active" : "inactive"}`}><i /> {a.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action"><button type="button" onClick={() => onEditArea(a)}>Editar</button></td></tr>)}</tbody></table></div>{(areas || []).length === 0 && <EmptyState />}</article> : <article className="panel users-panel"><div className="table-summary"><span><b>{groups.length}</b> grupos registrados</span><span>Área macro (Tigo, Contrata, BBI N-2, etc.)</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Grupo</th><th>Código</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{groups.map((group) => <tr key={group.id}><td data-label="Grupo"><strong>{group.name}</strong></td><td data-label="Código"><span className="team-label">{group.code}</span></td><td data-label="Estado"><span className={`user-status ${group.is_active ? "active" : "inactive"}`}><i /> {group.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action"><button type="button" onClick={() => onEditGroup(group)}>Editar</button></td></tr>)}</tbody></table></div>{groups.length === 0 && <EmptyState />}</article>}
     </>
   );
 }
@@ -1423,14 +1438,14 @@ function GroupFormModal({ group, onClose, onSave }) {
   return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="ticket-modal user-modal" role="dialog" aria-modal="true" aria-labelledby="group-form-title" onMouseDown={(e) => e.stopPropagation()}><header className="modal-header"><div><p className="eyebrow">Segmentación organizacional</p><h2 id="group-form-title">{isNew ? "Nuevo grupo" : "Editar grupo"}</h2><p>El grupo es el área macro (Tigo, Contrata, BBI N-2).</p></div><button className="icon-button" type="button" aria-label="Cerrar" onClick={onClose}><Icon name="close" /></button></header><form onSubmit={submit}><div className="form-grid user-form-grid"><label className="field"><span>Nombre <b>*</b></span><input autoFocus required name="name" value={form.name} onChange={updateField} placeholder="Tigo" /></label><label className="field"><span>Código <b>*</b></span><input required name="code" value={form.code} onChange={updateField} placeholder="tigo" /></label></div><label className="active-user-toggle"><input checked={form.isActive} name="isActive" type="checkbox" onChange={updateField} /><span><i /></span><div><strong>Grupo activo</strong><small>Visible para asignación.</small></div></label>{error && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}<footer className="modal-actions"><button className="secondary-button" disabled={submitting} type="button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={submitting} type="submit"><Icon name="check" size={18} /> {submitting ? "Guardando..." : isNew ? "Crear grupo" : "Guardar cambios"}</button></footer></form></section></div>;
 }
 
-function RequestTypeFormModal({ onClose, onSave, requestType }) {
+function RequestTypeFormModal({ onClose, onSave, requestType, teams }) {
   const isNew = !requestType;
-  const [form, setForm] = useState({ kind: requestType?.kind || "CLIENTE", service: requestType?.service || "HFC", name: requestType?.name || "", isActive: requestType?.is_active ?? true });
+  const [form, setForm] = useState({ kind: requestType?.kind || "CLIENTE", service: requestType?.service || "HFC", name: requestType?.name || "", teamId: requestType?.equipo_asignado ? String(requestType.equipo_asignado) : "", isActive: requestType?.is_active ?? true });
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   function updateField(e) { const { name, value, type, checked } = e.target; setForm((c) => ({ ...c, [name]: type === "checkbox" ? checked : value })); }
-  async function submit(e) { e.preventDefault(); if (!form.name.trim()) { setError("Completa el nombre del tipo."); return; } setSubmitting(true); setError(""); try { await onSave(form, requestType); } catch (err) { setError(err.message || "No fue posible guardar el tipo."); setSubmitting(false); } }
-  return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="ticket-modal user-modal" role="dialog" aria-modal="true" aria-labelledby="rt-form-title" onMouseDown={(e) => e.stopPropagation()}><header className="modal-header"><div><p className="eyebrow">Catálogo de solicitudes</p><h2 id="rt-form-title">{isNew ? "Nuevo tipo" : "Editar tipo"}</h2><p>Define a qué solicitud y servicio aplica.</p></div><button className="icon-button" type="button" aria-label="Cerrar" onClick={onClose}><Icon name="close" /></button></header><form onSubmit={submit}><div className="form-grid user-form-grid"><label className="field"><span>Tipo de solicitud <b>*</b></span><select name="kind" value={form.kind} onChange={updateField}><option value="CLIENTE">Solicitud de Soporte Cliente</option><option value="TECNICO">Soporte Al Tecnico</option></select></label><label className="field"><span>Servicio <b>*</b></span><select name="service" value={form.service} onChange={updateField}><option value="HFC">HFC</option><option value="FTTH">FTTH</option><option value="WTTX">WTTX</option><option value="DTH">DTH</option></select></label><label className="field field-wide"><span>Nombre <b>*</b></span><input autoFocus required name="name" value={form.name} onChange={updateField} placeholder="ONT sin VLAN" /></label></div><label className="active-user-toggle"><input checked={form.isActive} name="isActive" type="checkbox" onChange={updateField} /><span><i /></span><div><strong>Tipo activo</strong><small>Visible en el formulario.</small></div></label>{error && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}<footer className="modal-actions"><button className="secondary-button" disabled={submitting} type="button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={submitting} type="submit"><Icon name="check" size={18} /> {submitting ? "Guardando..." : isNew ? "Crear tipo" : "Guardar cambios"}</button></footer></form></section></div>;
+  async function submit(e) { e.preventDefault(); if (!form.name.trim()) { setError("Completa el nombre del tipo."); return; } setSubmitting(true); setError(""); try { await onSave({ ...form, teamId: form.teamId }, requestType); } catch (err) { setError(err.message || "No fue posible guardar el tipo."); setSubmitting(false); } }
+  return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="ticket-modal user-modal" role="dialog" aria-modal="true" aria-labelledby="rt-form-title" onMouseDown={(e) => e.stopPropagation()}><header className="modal-header"><div><p className="eyebrow">Catálogo de solicitudes</p><h2 id="rt-form-title">{isNew ? "Nuevo tipo" : "Editar tipo"}</h2><p>Define a qué solicitud y servicio aplica.</p></div><button className="icon-button" type="button" aria-label="Cerrar" onClick={onClose}><Icon name="close" /></button></header><form onSubmit={submit}><div className="form-grid user-form-grid"><label className="field"><span>Tipo de solicitud <b>*</b></span><select name="kind" value={form.kind} onChange={updateField}><option value="CLIENTE">Solicitud de Soporte Cliente</option><option value="TECNICO">Soporte Al Tecnico</option></select></label><label className="field"><span>Servicio <b>*</b></span><select name="service" value={form.service} onChange={updateField}><option value="HFC">HFC</option><option value="FTTH">FTTH</option><option value="WTTX">WTTX</option><option value="DTH">DTH</option></select></label><label className="field field-wide"><span>Nombre <b>*</b></span><input autoFocus required name="name" value={form.name} onChange={updateField} placeholder="ONT sin VLAN" /></label><label className="field field-wide"><span>Equipo que atiende</span><select name="teamId" value={form.teamId} onChange={updateField}><option value="">Automático (por grupo origen)</option>{(teams || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label></div><label className="active-user-toggle"><input checked={form.isActive} name="isActive" type="checkbox" onChange={updateField} /><span><i /></span><div><strong>Tipo activo</strong><small>Visible en el formulario.</small></div></label>{error && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}<footer className="modal-actions"><button className="secondary-button" disabled={submitting} type="button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={submitting} type="submit"><Icon name="check" size={18} /> {submitting ? "Guardando..." : isNew ? "Crear tipo" : "Guardar cambios"}</button></footer></form></section></div>;
 }
 
 function AreaFormModal({ area, onClose, onSave }) {

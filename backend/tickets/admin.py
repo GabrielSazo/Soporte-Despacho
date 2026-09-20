@@ -12,7 +12,7 @@ class EscalationAreaAdmin(admin.ModelAdmin):
 
 @admin.register(RequestType)
 class RequestTypeAdmin(admin.ModelAdmin):
-    list_display = ("name", "kind", "service", "is_active")
+    list_display = ("name", "kind", "service", "equipo_asignado", "is_active")
     list_filter = ("kind", "service", "is_active")
     search_fields = ("name",)
 
