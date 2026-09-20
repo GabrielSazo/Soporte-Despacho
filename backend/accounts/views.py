@@ -16,7 +16,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 
 from .models import Team, User, WorkGroup
-from .permissions import IsAdministrator
+from .permissions import IsAdministrator, IsAdminOrSupervisor
 from .serializers import CurrentUserSerializer, TeamSerializer, UserSerializer, WorkGroupSerializer
 
 password_reset_token_generator = PasswordResetTokenGenerator()
@@ -40,12 +40,9 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
         try:
             data = super().validate(attrs)
         except Exception as exc:
-            # El backend ya registró el intento fallido; propagar mensaje genérico
             detail = getattr(exc, "detail", None)
             if isinstance(detail, dict) and "detail" in detail:
                 raise
-            # Si el backend no encontró usuario, DRF ya devuelve 'No active account'
-            # Verificamos si es por bloqueo para dar mensaje más claro
             if email:
                 try:
                     u = User.objects.get(email__iexact=email)
@@ -62,7 +59,10 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
                         )
                 except User.DoesNotExist:
                     pass
-            raise
+            raise ValidationError(
+                {"detail": "Correo o contraseña incorrectos. Verifica tus credenciales."},
+                code="no_active_account",
+            )
         data["user"] = CurrentUserSerializer(self.user).data
         return data
 
@@ -71,12 +71,28 @@ class EmailTokenObtainPairView(TokenObtainPairView):
     serializer_class = EmailTokenObtainPairSerializer
 
 
-class CurrentUserView(generics.RetrieveAPIView):
+class CurrentUserView(generics.RetrieveUpdateAPIView):
     permission_classes = [IsAuthenticated]
     serializer_class = CurrentUserSerializer
 
     def get_object(self):
         return self.request.user
+
+    def get_serializer_class(self):
+        if self.request.method in ["PATCH", "PUT"]:
+            return UserSerializer
+        return CurrentUserSerializer
+
+    def perform_update(self, serializer):
+        # Solo permite cambiar teams/managed_groups propios
+        allowed = {"teams", "managed_groups"}
+        data = {k: v for k, v in serializer.validated_data.items() if k in allowed}
+        # Actualizar solo esos campos
+        user = self.get_object()
+        if "teams" in data:
+            user.teams.set(data["teams"])
+        if "managed_groups" in data:
+            user.managed_groups.set(data["managed_groups"])
 
 
 class LogoutView(APIView):
@@ -96,13 +112,21 @@ class LogoutView(APIView):
 class WorkGroupViewSet(viewsets.ModelViewSet):
     queryset = WorkGroup.objects.all()
     serializer_class = WorkGroupSerializer
-    permission_classes = [IsAdministrator]
+
+    def get_permissions(self):
+        if self.action in ["list", "retrieve"]:
+            return [IsAuthenticated()]
+        return [IsAdministrator()]
 
 
 class TeamViewSet(viewsets.ModelViewSet):
     queryset = Team.objects.select_related("group").all()
     serializer_class = TeamSerializer
-    permission_classes = [IsAdministrator]
+
+    def get_permissions(self):
+        if self.action in ["list", "retrieve"]:
+            return [IsAuthenticated()]
+        return [IsAdministrator()]
 
 
 class PasswordResetRequestView(APIView):
@@ -112,7 +136,6 @@ class PasswordResetRequestView(APIView):
         email = (request.data.get("email") or "").strip().lower()
         if not email:
             raise ValidationError({"email": "Debes indicar el correo."})
-        # Respuesta genérica para no enumerar usuarios; en demo mostramos detalle si no existe para facilitar pruebas.
         try:
             user = User.objects.get(email__iexact=email)
         except User.DoesNotExist:
@@ -126,15 +149,19 @@ class PasswordResetRequestView(APIView):
         token = password_reset_token_generator.make_token(user)
         reset_link = f"{settings.FRONTEND_URL.rstrip('/')}/reset-password?uid={uid}&token={token}"
         subject = "Soporte Despacho Tigo - Restablece tu contraseña"
-        message = (
-            f"Hola {user.display_name},\n\n"
-            f"Recibimos una solicitud para restablecer tu contraseña en Soporte Despacho Tigo - Centro de Control.\n"
-            f"Usa este enlace para definir una nueva clave (válido por 1 hora):\n\n"
-            f"{reset_link}\n\n"
-            f"Si no solicitaste este cambio, puedes ignorar este correo.\n"
-            f"Este es un correo automático, no respondas a esta dirección."
-        )
-        send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [user.email], fail_silently=False)
+        html_message = f"""
+        <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; background: #f3f6ff; border-radius: 12px;">
+          <h2 style="color: #001eb4; margin: 0 0 12px;">Hola {user.display_name},</h2>
+          <p style="color: #0f1a4a; font-size: 14px; line-height: 1.6;">Recibimos una solicitud para restablecer tu contraseña en <b>Soporte Despacho Tigo</b>.</p>
+          <p style="text-align: center; margin: 28px 0;">
+            <a href="{reset_link}" style="display: inline-block; padding: 12px 28px; background: #001eb4; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 700; font-size: 14px;">Restablecer contraseña</a>
+          </p>
+          <p style="color: #5a658d; font-size: 12px;">Este botón es válido por 1 hora. Si no solicitaste este cambio, ignora este correo.</p>
+          <p style="color: #8d97b5; font-size: 11px; word-break: break-all;">Si el botón no funciona, copia este enlace: {reset_link}</p>
+        </div>
+        """
+        message = f"Hola {user.display_name},\n\nRestablece tu contraseña aquí: {reset_link}\n\nVálido por 1 hora."
+        send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [user.email], fail_silently=False, html_message=html_message)
 
         response_data = {"detail": "Se envió un correo con instrucciones para restablecer tu contraseña. Revisa tu bandeja de entrada."}
         if settings.DEBUG:
@@ -148,15 +175,14 @@ class PasswordResetConfirmView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        email = (request.data.get("email") or "").strip().lower()
         uid = request.data.get("uid") or ""
         token = request.data.get("token") or ""
         new_password = request.data.get("new_password") or request.data.get("password") or ""
-        if not email or not token or not uid or not new_password:
-            raise ValidationError({"detail": "Debes indicar correo, token y nueva contraseña."})
+        if not token or not uid or not new_password:
+            raise ValidationError({"detail": "Debes indicar token y nueva contraseña."})
         try:
             pk = force_str(urlsafe_base64_decode(uid))
-            user = User.objects.get(pk=pk, email__iexact=email)
+            user = User.objects.get(pk=pk)
         except Exception:
             raise ValidationError({"token": "El enlace no es válido."})
         if not password_reset_token_generator.check_token(user, token):
@@ -169,25 +195,63 @@ class PasswordResetConfirmView(APIView):
             raise ValidationError({"new_password": list(exc.messages)})
         user.set_password(new_password)
         user.save(update_fields=["password"])
-        # Desbloqueo: solo vía restablecimiento por correo (requisito)
         user.unlock_via_password_reset()
         return Response({"detail": "Contraseña restablecida correctamente. Cuenta desbloqueada. Ya puedes iniciar sesión."})
 
 
-# Compatibilidad: endpoint anterior que pedía clave directa ahora delega al flujo por correo.
-# Se mantiene para no romper el modal administrativo, pero el login usará el flujo por correo.
 class PublicPasswordResetView(PasswordResetRequestView):
     pass
 
 
 class UserViewSet(viewsets.ModelViewSet):
-    queryset = User.objects.select_related("team__group").all()
+    queryset = User.objects.prefetch_related("teams__group", "managed_groups").all()
     serializer_class = UserSerializer
-    permission_classes = [IsAdministrator]
     http_method_names = ["get", "post", "patch", "head", "options"]
+
+    def get_permissions(self):
+        if self.action in ["list", "retrieve"]:
+            return [IsAuthenticated()]
+        if self.action in ["partial_update", "update"]:
+            return [IsAdminOrSupervisor()]
+        return [IsAdministrator()]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if user.is_administrator:
+            return qs
+        if user.is_supervisor:
+            codes = user.group_codes
+            return qs.filter(teams__group__code__in=codes).distinct() | qs.filter(managed_groups__code__in=codes).distinct() | qs.filter(pk=user.pk).distinct()
+        codes = user.group_codes
+        if codes:
+            return qs.filter(teams__group__code__in=codes).distinct() | qs.filter(pk=user.pk).distinct()
+        return qs.filter(pk=user.pk)
 
     def perform_update(self, serializer):
         target = serializer.instance
-        if target.pk == self.request.user.pk and serializer.validated_data.get("is_active") is False:
+        requester = self.request.user
+        if target.pk == requester.pk and serializer.validated_data.get("is_active") is False:
             raise ValidationError({"is_active": "No puedes desactivar tu propia cuenta."})
+        if not requester.is_administrator:
+            # Supervisor solo puede tocar usuarios de sus grupos y nunca cuentas ADMIN
+            if target.role == User.Role.ADMIN or target.is_superuser:
+                raise ValidationError({"detail": "Solo un administrador puede modificar cuentas de administración."})
+            target_codes = set(target.teams.values_list("group__code", flat=True)) | set(
+                target.managed_groups.values_list("code", flat=True)
+            )
+            if not (set(requester.group_codes) & target_codes) and target.pk != requester.pk:
+                raise ValidationError({"detail": "Solo puedes modificar usuarios de tus grupos."})
+            new_role = serializer.validated_data.get("role")
+            if new_role == User.Role.ADMIN:
+                raise ValidationError({"role": "Solo un administrador puede asignar el rol ADMIN."})
+            new_teams = serializer.validated_data.get("teams")
+            if new_teams is not None:
+                allowed = set(requester.group_codes)
+                for team in new_teams:
+                    if team.group.code not in allowed:
+                        raise ValidationError({"teams": f"Solo puedes asignar grupos que supervisas ({team.group.name})."})
+            new_mgroups = serializer.validated_data.get("managed_groups")
+            if new_mgroups is not None and new_mgroups:
+                raise ValidationError({"managed_groups": "Solo un administrador puede asignar grupos supervisados."})
         serializer.save()

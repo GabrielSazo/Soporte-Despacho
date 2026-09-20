@@ -9,11 +9,38 @@ from django.utils import timezone
 from accounts.models import Team
 
 
+class RequestType(models.Model):
+    class Kind(models.TextChoices):
+        CLIENTE = "CLIENTE", "Solicitud de Soporte Cliente"
+        TECNICO = "TECNICO", "Soporte Al Tecnico"
+
+    class Service(models.TextChoices):
+        HFC = "HFC", "HFC"
+        FTTH = "FTTH", "FTTH"
+        WTTX = "WTTX", "WTTX"
+        DTH = "DTH", "DTH"
+
+    kind = models.CharField(max_length=10, choices=Kind.choices)
+    service = models.CharField(max_length=10, choices=Service.choices)
+    name = models.CharField(max_length=120)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["kind", "service", "name"]
+        constraints = [models.UniqueConstraint(fields=["kind", "service", "name"], name="unique_request_type")]
+        verbose_name = "tipo de solicitud"
+        verbose_name_plural = "tipos de solicitud"
+
+    def __str__(self):
+        return f"{self.get_kind_display()} - {self.service} - {self.name}"
+
+
 class Ticket(models.Model):
     class Category(models.TextChoices):
         FTTH = "FTTH", "FTTH"
         HFC = "HFC", "HFC"
         DTH = "DTH", "DTH"
+        WTTX = "WTTX", "WTTX"
         ADMINISTRATIVE = "ADMINISTRATIVO", "Administrativo"
 
     class Priority(models.TextChoices):
@@ -30,11 +57,11 @@ class Ticket(models.Model):
         CLOSED = "CERRADO", "Cerrado"
         ESCALATED = "ESCALADO", "Escalado"
 
-    SLA_HOURS = {
-        Priority.CRITICAL: 1,
-        Priority.HIGH: 4,
-        Priority.MEDIUM: 8,
-        Priority.LOW: 24,
+    SLA_MINUTES = {
+        Priority.CRITICAL: 5,
+        Priority.HIGH: 8,
+        Priority.MEDIUM: 10,
+        Priority.LOW: 20,
     }
 
     creator = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="created_tickets")
@@ -49,6 +76,10 @@ class Ticket(models.Model):
     )
     title = models.CharField(max_length=180)
     description = models.TextField()
+    identificador = models.CharField(max_length=60, blank=True, default="")
+    cliente_nombre = models.CharField(max_length=180, blank=True, default="")
+    nodo = models.CharField(max_length=60, blank=True, default="")
+    tipo_solicitud = models.ForeignKey(RequestType, on_delete=models.SET_NULL, null=True, blank=True, related_name="tickets")
     category = models.CharField(max_length=20, choices=Category.choices)
     priority = models.CharField(max_length=12, choices=Priority.choices, default=Priority.MEDIUM)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.OPEN)
@@ -69,6 +100,7 @@ class Ticket(models.Model):
             models.Index(fields=["assigned_team", "status"]),
             models.Index(fields=["creator", "status"]),
             models.Index(fields=["sla_due_at"]),
+            models.Index(fields=["identificador", "status"]),
         ]
 
     def __str__(self):
@@ -80,7 +112,7 @@ class Ticket(models.Model):
 
     @property
     def sla_duration(self):
-        return timedelta(hours=self.SLA_HOURS[self.priority])
+        return timedelta(minutes=self.SLA_MINUTES[self.priority])
 
     @property
     def sla_state(self):
@@ -94,14 +126,14 @@ class Ticket(models.Model):
         return "EN_TIEMPO"
 
     def clean(self):
-        if self.origin_team_id and self.creator_id and self.creator.team_id and self.creator.team_id != self.origin_team_id:
+        if self.origin_team_id and self.creator_id and not self.creator.teams.filter(id=self.origin_team_id).exists():
             raise ValidationError("El equipo origen debe corresponder al equipo del creador.")
-        if self.assignee_id and self.assigned_team_id and self.assignee.team_id != self.assigned_team_id:
+        if self.assignee_id and self.assigned_team_id and not self.assignee.teams.filter(id=self.assigned_team_id).exists():
             raise ValidationError("La persona asignada debe pertenecer al equipo asignado.")
 
     def save(self, *args, **kwargs):
         if not self.sla_due_at:
-            self.sla_due_at = timezone.now() + timedelta(hours=self.SLA_HOURS[self.priority])
+            self.sla_due_at = timezone.now() + timedelta(minutes=self.SLA_MINUTES[self.priority])
         super().save(*args, **kwargs)
 
 
@@ -137,6 +169,7 @@ class TicketEvent(models.Model):
         ESCALATED = "ESCALADO", "Escalado por SLA"
         AUTO_CLOSED = "AUTO_CERRADO", "Cerrado automáticamente"
         ATTACHMENT = "ADJUNTO", "Evidencia adjunta"
+        RELEASED = "LIBERADO", "Liberado a bandeja"
 
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="events")
     actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="ticket_events")

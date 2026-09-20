@@ -6,22 +6,22 @@ from .models import Team, User, WorkGroup
 
 class AuthenticationTests(APITestCase):
     def setUp(self):
-        group = WorkGroup.objects.create(name="Tigo", code="tigo")
-        self.team = Team.objects.create(group=group, name="FTTH Norte", code="ftth-norte")
+        group, _ = WorkGroup.objects.get_or_create(name="Tigo", defaults={"code": "tigo"})
+        self.team, _ = Team.objects.get_or_create(group=group, name="FTTH Norte", defaults={"code": "ftth-norte"})
         self.user = User.objects.create_user(
             username="despacho@sestel.local",
             email="despacho@sestel.local",
             password="Sestel2026!",
             role=User.Role.DISPATCHER,
-            team=self.team,
         )
+        self.user.teams.set([self.team])
         self.admin = User.objects.create_user(
             username="admin@sestel.local",
             email="admin@sestel.local",
             password="Sestel2026!",
             role=User.Role.ADMIN,
-            team=self.team,
         )
+        self.admin.teams.set([self.team])
 
     def test_user_can_request_a_token_with_email(self):
         response = self.client.post(
@@ -50,7 +50,26 @@ class AuthenticationTests(APITestCase):
     def test_only_administrators_can_manage_users(self):
         self.client.force_authenticate(self.user)
         denied = self.client.get(reverse("user-list"))
-        self.assertEqual(denied.status_code, 403)
+        # Dispatcher can list same-group users (includes self)
+        self.assertEqual(denied.status_code, 200)
+        self.assertTrue(any(u["id"] == self.user.id for u in denied.data["results"]))
+
+        # Dispatcher cannot create
+        forbidden = self.client.post(
+            reverse("user-list"),
+            {
+                "username": "otro@sestel.local",
+                "email": "otro@sestel.local",
+                "first_name": "Otro",
+                "last_name": "Usuario",
+                "password": "Sestel2026!",
+                "role": User.Role.SUPPORT,
+                "teams": [self.team.id],
+                "is_active": True,
+            },
+            format="json",
+        )
+        self.assertEqual(forbidden.status_code, 403)
 
         self.client.force_authenticate(self.admin)
         created = self.client.post(
@@ -62,7 +81,7 @@ class AuthenticationTests(APITestCase):
                 "last_name": "Usuario",
                 "password": "Sestel2026!",
                 "role": User.Role.SUPPORT,
-                "team": self.team.id,
+                "teams": [self.team.id],
                 "is_active": True,
             },
             format="json",

@@ -9,24 +9,50 @@ from .models import Ticket
 def visible_tickets_for(user):
     queryset = Ticket.objects.select_related(
         "creator",
-        "creator__team__group",
         "origin_team__group",
         "assigned_team__group",
         "assignee",
-    ).prefetch_related("attachments", "events__actor")
+    ).prefetch_related("creator__teams__group", "attachments", "events__actor")
 
     if user.is_administrator:
         return queryset
+    if user.role == User.Role.SUPERVISOR:
+        group_codes = user.group_codes
+        if not group_codes:
+            return queryset.none()
+        return queryset.filter(
+            Q(assigned_team__group__code__in=group_codes) | Q(origin_team__group__code__in=group_codes)
+        )
     if user.role == User.Role.SUPPORT:
-        return queryset.filter(assigned_team=user.team) if user.team_id else queryset.none()
-    return queryset.filter(creator=user)
+        group_codes = user.group_codes
+        if not group_codes:
+            return queryset.none()
+        return queryset.filter(assigned_team__group__code__in=group_codes)
+    group_codes = user.group_codes
+    if not group_codes:
+        return queryset.filter(creator=user)
+    return queryset.filter(origin_team__group__code__in=group_codes)
 
 
 def require_support_access(user, ticket):
     if user.is_administrator:
         return
-    if user.role != User.Role.SUPPORT or not user.team_id or ticket.assigned_team_id != user.team_id:
+    group_codes = user.group_codes
+    ticket_group = ticket.assigned_team.group.code if ticket.assigned_team_id else None
+    origin_group = ticket.origin_team.group.code if ticket.origin_team_id else None
+    if user.role == User.Role.SUPERVISOR:
+        if ticket_group in group_codes or origin_group in group_codes:
+            return
+        raise PermissionDenied("No tienes acceso a este grupo.")
+    if user.role == User.Role.SUPPORT:
+        if ticket_group in group_codes:
+            return
         raise PermissionDenied("No tienes acceso operativo a este ticket.")
+    if user.role == User.Role.DISPATCHER:
+        if ticket_group in group_codes or origin_group in group_codes:
+            return
+        raise PermissionDenied("Solo puedes reasignar tickets de tu grupo.")
+    raise PermissionDenied("No tienes acceso operativo a este ticket.")
 
 
 def require_validation_access(user, ticket):

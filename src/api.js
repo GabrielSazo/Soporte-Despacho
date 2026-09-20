@@ -1,4 +1,4 @@
-const apiUrl = (import.meta.env.VITE_API_URL || "http://127.0.0.1:8010/api").replace(/\/$/, "");
+const apiUrl = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
 const accessTokenKey = "sestel-access-token";
 const refreshTokenKey = "sestel-refresh-token";
 
@@ -136,6 +136,13 @@ export function getCurrentUser() {
   return request("/auth/me/");
 }
 
+export function updateMyTeams(teams, managedGroups) {
+  const body = {};
+  if (teams) body.teams = teams;
+  if (managedGroups) body.managed_groups = managedGroups;
+  return request("/auth/me/", { method: "PATCH", body });
+}
+
 export function getTickets() {
   return request("/tickets/");
 }
@@ -198,10 +205,62 @@ export function takeTicket(ticketId) {
   return request(`/tickets/${ticketId}/take/`, { method: "POST" });
 }
 
+export function releaseTicket(ticketId) {
+  return request(`/tickets/${ticketId}/release/`, { method: "POST" });
+}
+
 export function resolveTicket(ticketId, resolutionNotes) {
   return request(`/tickets/${ticketId}/resolve/`, { method: "POST", body: { resolution_notes: resolutionNotes } });
 }
 
 export function validateTicket(ticketId, approved, comment = "") {
   return request(`/tickets/${ticketId}/validate/`, { method: "POST", body: { approved, comment } });
+}
+
+export function reassignTicket(ticketId, userId) {
+  return request(`/tickets/${ticketId}/reassign/`, { method: "POST", body: { user_id: userId } });
+}
+
+export function getRequestTypes(params = {}) {
+  const qs = new URLSearchParams(params).toString();
+  return request(`/request-types/${qs ? `?${qs}` : ""}`);
+}
+
+export function createRequestType(data) {
+  return request("/request-types/", { method: "POST", body: data });
+}
+
+export function updateRequestType(id, data) {
+  return request(`/request-types/${id}/`, { method: "PATCH", body: data });
+}
+
+export function checkOpenTicket(identificador) {
+  const qs = new URLSearchParams({ identificador, abierto: "1" }).toString();
+  return request(`/tickets/?${qs}`);
+}
+
+export function getReportsSummary(params = {}) {
+  const cleaned = Object.fromEntries(Object.entries(params).filter(([, v]) => v));
+  const qs = new URLSearchParams(cleaned).toString();
+  return request(`/reports/summary/${qs ? `?${qs}` : ""}`);
+}
+
+export async function downloadReportsCsv(params = {}) {
+  const cleaned = Object.fromEntries(Object.entries(params).filter(([, v]) => v));
+  const qs = new URLSearchParams(cleaned).toString();
+  const base = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
+  const token = sessionStorage.getItem("sestel-access-token");
+  const response = await fetch(`${base}/reports/export/${qs ? `?${qs}` : ""}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!response.ok) throw new Error("No fue posible descargar el reporte.");
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "reporte_actividades.csv";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }

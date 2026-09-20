@@ -14,14 +14,20 @@ services:
       timeout: 5s
       retries: 12
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
   api:
     build:
       context: .
       dockerfile: backend/Dockerfile
     restart: unless-stopped
     command: >
-      sh -c "python manage.py migrate --noinput && python manage.py collectstatic --noinput || true && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3"
+      sh -c "python manage.py migrate --noinput && python manage.py collectstatic --noinput || true && daphne -b 0.0.0.0 -p 8000 config.asgi:application"
     environment:
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
       DJANGO_DEBUG: "false"
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Define DJANGO_SECRET_KEY}
       DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-*}
@@ -42,6 +48,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_started
 
   frontend:
     build:

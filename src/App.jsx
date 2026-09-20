@@ -1,27 +1,37 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   createGroup as createGroupRequest,
   createTeam as createTeamRequest,
   createTicket as createTicketRequest,
   createUser as createUserRequest,
+  getCurrentUser,
+  createRequestType,
   getDashboard,
   getGroups,
+  getReportsSummary,
+  getRequestTypes,
+  downloadReportsCsv,
   getTicket,
   getTeams,
   getTickets,
   getUsers,
+  updateMyTeams,
   confirmPasswordReset,
   hasActiveSession,
   requestPasswordReset,
   resetPassword,
   resolveTicket as resolveTicketRequest,
+  releaseTicket as releaseTicketRequest,
   signIn,
   signOut,
   takeTicket as takeTicketRequest,
+  checkOpenTicket,
   updateGroup as updateGroupRequest,
+  updateRequestType,
   updateTeam as updateTeamRequest,
   updateUser as updateUserRequest,
   uploadAttachment,
+  reassignTicket as reassignTicketRequest,
   validateTicket as validateTicketRequest,
 } from "./api";
 import { Icon } from "./icons";
@@ -30,7 +40,7 @@ const navigation = [
   { label: "Resumen", icon: "dashboard" },
   { label: "Tickets", icon: "ticket", badge: "12" },
   { label: "Validaciones", icon: "checkCircle", badge: "3" },
-  { label: "Mi equipo", icon: "users" },
+  { label: "Mi grupo", icon: "users" },
   { label: "Informes", icon: "chart" },
 ];
 
@@ -53,6 +63,7 @@ const priorityClass = {
 const roleLabels = {
   DESPACHADOR: "Despachadora",
   SOPORTE: "Agente de soporte",
+  SUPERVISOR: "Supervisor",
   ADMIN: "Administradora",
 };
 
@@ -98,25 +109,46 @@ function formatDateTime(value) {
 }
 
 function mapUser(user) {
+  const teams = user.teams || (user.team ? [user.team] : []);
+  const firstTeam = teams[0];
+  const groups = user.groups || (user.group ? [user.group] : []);
+  const groupsLabel = teams.length ? [...new Set(teams.map((t) => t.group?.name).filter(Boolean))].join(", ") : groups.length ? groups.map((g) => g.name).join(", ") : user.group?.name || "Sin grupo";
   return {
     ...user,
     initials: initials(user.name),
     avatarClass: avatarClass(user.name),
-    group: user.group?.name || "Sin grupo",
+    group: firstTeam?.group?.name || groups[0]?.name || user.group?.name || "Sin grupo",
+    groupsLabel,
     roleLabel: roleLabels[user.role] || user.role,
-    team: user.team?.name || "Vista global",
+    team: groupsLabel === "Sin grupo" ? "Vista global" : groupsLabel,
+    teams,
+    groups,
   };
 }
 
 function mapManagedUser(user) {
+  const teams = user.teams_detail || user.teams || (user.team_detail ? [user.team_detail] : user.team ? [{ name: user.team_detail?.name, group: user.team_detail?.group }] : []);
+  const teamIds = (user.teams || []).map(String);
+  const mgroups = user.managed_groups_detail || user.managed_groups || [];
+  let groupNames = teams.length ? [...new Set(teams.map((t) => t.group?.name || t.group_detail?.name).filter(Boolean))].join(", ") : user.team_detail?.group?.name || "Sin grupo";
+  if (user.role === "SUPERVISOR" && mgroups.length) {
+    groupNames = mgroups.map((g) => g.name).join(", ");
+
+  }
+  if (!groupNames || groupNames === "Sin grupo") {
+    groupNames = "Sin grupo";
+  }
   return {
     ...user,
     avatarClass: avatarClass(user.name),
     initials: initials(user.name),
     roleLabel: roleLabels[user.role] || user.role,
-    teamId: user.team || "",
-    teamName: user.team_detail?.name || "Sin equipo",
-    groupName: user.team_detail?.group?.name || "Sin grupo",
+    teamId: teamIds[0] || user.team || "",
+    teamIds,
+    managedGroups: mgroups.map((g) => String(g.id)),
+    teams,
+    teamName: user.role === "SUPERVISOR" ? (mgroups.length ? `Supervisa: ${groupNames}` : groupNames) : groupNames,
+    groupName: groupNames,
   };
 }
 
@@ -136,8 +168,16 @@ function mapTicket(ticket) {
     priorityCode: ticket.priority,
     status: ticket.status_label,
     statusCode: ticket.status,
-    team: ticket.assigned_team?.name || "Sin asignar",
+    team: ticket.assigned_team?.group?.name || ticket.assigned_team?.name || "Sin asignar",
+    teamId: ticket.assigned_team?.id || null,
+    groupCode: ticket.assigned_team?.group?.code || null,
+    identificador: ticket.identificador || "",
+    cliente: ticket.cliente_nombre || "",
+    nodo: ticket.nodo || "",
+    tipoSolicitud: ticket.tipo_solicitud_detail?.name || "",
     requester: ticket.creator?.name || "Sin asignar",
+    creatorId: ticket.creator?.id || null,
+    assigneeId: ticket.assignee?.id || null,
     created: formatRelativeDate(ticket.created_at),
     createdAt: ticket.created_at,
     sla: formatRemaining(ticket.sla?.remaining_seconds),
@@ -148,7 +188,7 @@ function mapTicket(ticket) {
     description: ticket.description,
     resolutionNotes: ticket.resolution_notes,
     assignee: ticket.assignee?.name || "Sin asignar",
-    originTeam: ticket.origin_team?.name || "Sin asignar",
+    originTeam: ticket.origin_team?.group?.name || ticket.origin_team?.name || "Sin asignar",
     attachments: ticket.attachments || [],
     events: ticket.events || [],
   };
@@ -161,6 +201,7 @@ function App() {
   const [brand] = useState("tigo");
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showGroupMenu, setShowGroupMenu] = useState(false);
   const [session, setSession] = useState(readStoredSession);
   const [tickets, setTickets] = useState([]);
   const [dashboard, setDashboard] = useState(null);
@@ -178,11 +219,23 @@ function App() {
   const [userModal, setUserModal] = useState(null);
   const [teamModal, setTeamModal] = useState(null);
   const [groupModal, setGroupModal] = useState(null);
+  const [requestTypeModal, setRequestTypeModal] = useState(null);
+  const [requestTypes, setRequestTypes] = useState([]);
   const [passwordModal, setPasswordModal] = useState(null);
   const [showProfile, setShowProfile] = useState(false);
-  const [query, setQuery] = useState("Todos");
+  const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("Todos");
   const [toast, setToast] = useState("");
+
+  useEffect(() => {
+    if (!session) return;
+    if (session.role === "SOPORTE") setFilter("Trabajables");
+    else if (session.role === "DESPACHADOR") { setFilter("Míos"); setActiveView("Tickets"); }
+    else setFilter("Todos");
+    if (typeof window !== "undefined" && window.location.pathname === "/login") {
+      window.history.replaceState(null, "", "/");
+    }
+  }, [session?.id]);
 
   useEffect(() => {
     const closeOnEscape = (event) => {
@@ -198,6 +251,7 @@ function App() {
         setShowProfile(false);
         setShowNotifications(false);
         setShowUserMenu(false);
+        setShowGroupMenu(false);
       }
     };
     window.addEventListener("keydown", closeOnEscape);
@@ -212,14 +266,63 @@ function App() {
   }, [sidebarOpen, newTicketOpen, ticketToResolve, ticketDetail, userModal, teamModal, groupModal, passwordModal, showProfile]);
 
   useEffect(() => {
-    if (session) refreshWorkspace();
+    if (session) {
+      refreshWorkspace();
+      refreshTeams();
+    }
   }, [session?.id]);
 
   useEffect(() => {
-    if (session?.role === "ADMIN" && activeView === "Usuarios") refreshUsers();
+    if (!session) return;
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") refreshWorkspace(true);
+    }, 60000);
+    return () => clearInterval(timer);
+  }, [session?.id]);
+
+  useEffect(() => {
+    if (!session) return;
+    const token = sessionStorage.getItem("sestel-access-token");
+    if (!token) return;
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${protocol}//${window.location.host}/ws/tickets/?token=${token}`;
+    let ws;
+    let closed = false;
+    function connect() {
+      ws = new WebSocket(wsUrl);
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === "ticket_update" || data.type === "connected") {
+            if (data.type === "ticket_update") refreshWorkspace(true);
+          }
+        } catch {
+          if (event.data === "pong") return;
+        }
+      };
+      ws.onclose = () => {
+        if (!closed) setTimeout(connect, 5000);
+      };
+      ws.onerror = () => ws.close();
+    }
+    connect();
+    const ping = setInterval(() => { if (ws && ws.readyState === WebSocket.OPEN) ws.send("ping"); }, 30000);
+    return () => { closed = true; clearInterval(ping); if (ws) ws.close(); };
+  }, [session?.id]);
+
+  async function refreshTeams() {
+    try {
+      const [teamPayload, groupPayload] = await Promise.all([getTeams(), getGroups()]);
+      setTeams(teamPayload.results || teamPayload);
+      setGroups(groupPayload.results || groupPayload);
+    } catch {}
+  }
+
+  useEffect(() => {
+    if (session && ["ADMIN", "SUPERVISOR"].includes(session?.role) && activeView === "Usuarios") refreshUsers();
+    if (session && activeView === "Mi grupo") refreshUsers();
   }, [activeView, session?.role]);
 
-  // Tema Tigo fijo para producción
 
   function notify(message) {
     setToast(message);
@@ -249,15 +352,25 @@ function App() {
     setUsersLoading(true);
     setUsersError("");
     try {
-      const [userPayload, teamPayload, groupPayload] = await Promise.all([getUsers(), getTeams(), getGroups()]);
+      const [userPayload, teamPayload, groupPayload, rtPayload] = await Promise.all([getUsers(), getTeams(), getGroups(), getRequestTypes().catch(() => [])]);
       setUsers((userPayload.results || userPayload).map(mapManagedUser));
       setTeams(teamPayload.results || teamPayload);
       setGroups(groupPayload.results || groupPayload);
+      setRequestTypes(rtPayload.results || rtPayload || []);
     } catch (error) {
       setUsersError(error.message || "No fue posible cargar los usuarios.");
     } finally {
       setUsersLoading(false);
     }
+  }
+
+  async function saveRequestType(form, existing) {
+    const payload = { kind: form.kind, service: form.service, name: form.name.trim(), is_active: form.isActive };
+    if (existing) await updateRequestType(existing.id, payload);
+    else await createRequestType(payload);
+    setRequestTypeModal(null);
+    await refreshUsers();
+    notify(existing ? "Tipo de solicitud actualizado." : "Tipo de solicitud creado.");
   }
 
   async function startSession({ email, password }) {
@@ -294,6 +407,7 @@ function App() {
     setTicketDetail(ticket);
     setIsDetailLoading(true);
     try {
+      if (!users.length) await refreshUsers().catch(() => undefined);
       const detail = await getTicket(ticket.apiId);
       setTicketDetail(mapTicket(detail));
       replaceTicket(detail);
@@ -311,17 +425,28 @@ function App() {
       description: form.description,
       category: form.category,
       priority: form.priority,
+      identificador: form.identificador,
+      cliente_nombre: form.cliente_nombre || form.cliente,
+      nodo: form.nodo,
+      tipo_solicitud: form.tipo_solicitud,
     });
-    if (form.attachment) await uploadAttachment(ticket.id, form.attachment);
+    if (form.attachment) {
+      const files = Array.isArray(form.attachment) ? form.attachment : [form.attachment];
+      for (const f of files.slice(0, 5)) await uploadAttachment(ticket.id, f);
+    }
     setNewTicketOpen(false);
     setActiveView("Tickets");
     await refreshWorkspace(true);
     notify(`${ticket.reference} fue enviado a Soporte Despacho.`);
   }
 
-  async function validateTicket(ticket, accepted) {
-    const updatedTicket = await validateTicketRequest(ticket.apiId, accepted);
+  async function validateTicket(ticket, accepted, comment = "") {
+    const updatedTicket = await validateTicketRequest(ticket.apiId, accepted, comment);
     replaceTicket(updatedTicket);
+    if (ticketDetail && ticketDetail.apiId === ticket.apiId) {
+      const detail = await getTicket(ticket.apiId);
+      setTicketDetail(mapTicket(detail));
+    }
     await refreshWorkspace(true);
     notify(accepted ? `${ticket.id} se cerró correctamente.` : `${ticket.id} volvió a Soporte para retrabajo.`);
   }
@@ -341,6 +466,24 @@ function App() {
     notify(`${ticket.id} fue enviado al despachador para validación.`);
   }
 
+  async function releaseTicket(ticket) {
+    const updated = await releaseTicketRequest(ticket.apiId);
+    const mapped = mapTicket(updated);
+    setTicketDetail(mapped);
+    replaceTicket(updated);
+    await refreshWorkspace(true);
+    notify(`${ticket.id} liberado a la bandeja del grupo.`);
+  }
+
+  async function reassignTicket(ticket, userId) {
+    const updated = await reassignTicketRequest(ticket.apiId, userId);
+    const mapped = mapTicket(updated);
+    setTicketDetail(mapped);
+    replaceTicket(updated);
+    await refreshWorkspace(true);
+    notify(`${ticket.id} reasignado a ${mapped.team}.`);
+  }
+
   async function saveUser(form, existingUser) {
     const payload = {
       username: form.email.trim().toLowerCase(),
@@ -348,7 +491,8 @@ function App() {
       first_name: form.firstName.trim(),
       last_name: form.lastName.trim(),
       role: form.role,
-      team: form.team ? Number(form.team) : null,
+      teams: form.teams.map((id) => Number(id)),
+      managed_groups: form.managedGroups ? form.managedGroups.map((id) => Number(id)) : [],
       is_active: form.isActive,
     };
     if (form.password) payload.password = form.password;
@@ -402,20 +546,120 @@ function App() {
     return mapped;
   }
 
-  const openTickets = tickets.filter((ticket) => ticket.statusCode !== "CERRADO").length;
-  const validationTickets = tickets.filter((ticket) => ticket.statusCode === "VALIDACION");
+  const openTickets = tickets.filter((ticket) => ticket.statusCode !== "CERRADO" && (session?.role === "SOPORTE" ? ticket.statusCode !== "VALIDACION" : true)).length;
+  const validationTickets = tickets.filter((ticket) => ticket.statusCode === "VALIDACION" && (session?.role === "DESPACHADOR" ? ticket.creatorId === session.id : true));
+  const myValidationCount = tickets.filter((t) => t.statusCode === "VALIDACION" && t.creatorId === session?.id).length;
   const criticalTickets = tickets.filter((ticket) => ticket.priorityCode === "CRITICA").length;
+  const statusMap = { "Todos": null, "Míos": null, "Trabajables": null, "Abierto": "ABIERTO", "Asignado": "ASIGNADO", "En proceso": "EN_PROCESO", "Validación": "VALIDACION" };
   const filteredTickets = tickets.filter((ticket) => {
-    const searchable = `${ticket.id} ${ticket.title} ${ticket.team} ${ticket.requester}`.toLowerCase();
-    return searchable.includes(query.toLowerCase()) && (filter === "Todos" || ticket.status === filter);
+    const searchable = `${ticket.id} ${ticket.title} ${ticket.team} ${ticket.requester} ${ticket.identificador} ${ticket.cliente} ${ticket.nodo} ${ticket.tipoSolicitud}`.toLowerCase();
+    if (!searchable.includes(query.toLowerCase())) return false;
+    if (filter === "Míos") {
+      if (session?.role === "SOPORTE") return ticket.assigneeId === session?.id && ["ASIGNADO", "EN_PROCESO"].includes(ticket.statusCode);
+      return ticket.assigneeId === session?.id || ticket.creatorId === session?.id;
+    }
+    if (filter === "Trabajables") return ["ABIERTO", "ASIGNADO"].includes(ticket.statusCode) && ticket.assigneeId !== session?.id;
+    return !statusMap[filter] || ticket.statusCode === statusMap[filter];
   });
-  const canCreateTickets = session && ["DESPACHADOR", "ADMIN"].includes(session.role);
-  const visibleNavigation = session?.role === "ADMIN" ? [...navigation, { label: "Usuarios", icon: "users" }] : navigation;
-  const notifications = [
-    ...tickets.filter((t) => t.slaTone === "danger").slice(0, 3).map((t) => ({ key: `sla-${t.id}`, type: "danger", title: `SLA vencido: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
-    ...validationTickets.slice(0, 3).map((t) => ({ key: `val-${t.id}`, type: "warning", title: `Validación pendiente: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
-    ...tickets.filter((t) => t.priority === "Crítica").slice(0, 2).map((t) => ({ key: `crit-${t.id}`, type: "info", title: `Crítico: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
-  ].slice(0, 5);
+  const canCreateTickets = session && ["DESPACHADOR", "ADMIN", "SUPERVISOR"].includes(session.role);
+  const visibleNavigation = session?.role === "DESPACHADOR"
+    ? navigation.filter((item) => ["Tickets", "Validaciones"].includes(item.label))
+    : session && ["ADMIN", "SUPERVISOR"].includes(session.role) ? [...navigation, { label: "Usuarios", icon: "users" }] : navigation;
+  const myTickets = tickets.filter((t) => t.creatorId === session?.id);
+  const myValidation = tickets.filter((t) => t.statusCode === "VALIDACION" && t.creatorId === session?.id);
+  const trabajables = tickets.filter((t) => ["ABIERTO", "ASIGNADO"].includes(t.statusCode) && !t.assigneeId);
+  const [seenNotifs, setSeenNotifs] = useState(() => {
+    try {
+      return JSON.parse(sessionStorage.getItem(`sestel-seen-${session?.id}`) || "{}");
+    } catch {
+      return {};
+    }
+  });
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(`sestel-seen-${session?.id}`, JSON.stringify(seenNotifs));
+    } catch {}
+  }, [seenNotifs, session?.id]);
+  function markSeen(key) {
+    setSeenNotifs((s) => (s[key] ? s : { ...s, [key]: true }));
+  }
+  function markAllSeen() {
+    const all = {};
+    notifications.forEach((n) => { all[n.key] = true; });
+    setSeenNotifs((s) => ({ ...s, ...all }));
+  }
+  const assignedToMe = tickets.filter((t) => t.assigneeId === session?.id && t.statusCode === "ASIGNADO");
+  const notifications = (session?.role === "DESPACHADOR"
+    ? [
+        ...myValidation.slice(0, 3).map((t) => ({ key: `val-${t.id}`, type: "warning", title: `Validación pendiente: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
+        ...assignedToMe.slice(0, 2).map((t) => ({ key: `asg-${t.id}`, type: "info", title: `Asignado a ti: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
+        ...myTickets.filter((t) => t.slaTone === "danger").slice(0, 3).map((t) => ({ key: `sla-${t.id}`, type: "danger", title: `SLA vencido: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
+      ].slice(0, 5)
+    : [
+        ...assignedToMe.slice(0, 2).map((t) => ({ key: `asg-${t.id}`, type: "info", title: `Asignado a ti: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
+        ...trabajables.slice(0, 3).map((t) => ({ key: `new-${t.id}`, type: "info", title: `Nuevo en bandeja: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
+        ...trabajables.filter((t) => t.slaTone === "danger").slice(0, 2).map((t) => ({ key: `sla-${t.id}`, type: "danger", title: `SLA vencido: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
+        ...myValidation.slice(0, 2).map((t) => ({ key: `val-${t.id}`, type: "warning", title: `Validación pendiente: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
+      ].slice(0, 5)
+  ).map((n) => ({ ...n, seen: Boolean(seenNotifs[n.key]) }));
+  const unseenCount = notifications.filter((n) => !n.seen).length;
+  const BASE_TITLE = "Soporte Despacho Tigo | Centro de control";
+  useEffect(() => {
+    if (!session || !unseenCount) {
+      document.title = BASE_TITLE;
+      return;
+    }
+    let on = true;
+    document.title = `(${unseenCount}) ¡Nueva alerta!`;
+    const timer = setInterval(() => {
+      on = !on;
+      document.title = on ? `(${unseenCount}) ¡Nueva alerta!` : BASE_TITLE;
+    }, 1500);
+    return () => {
+      clearInterval(timer);
+      document.title = BASE_TITLE;
+    };
+  }, [unseenCount, session?.id]);
+  const prevNotifKeys = useRef(null);
+  const [browserNotif, setBrowserNotif] = useState(typeof Notification !== "undefined" ? Notification.permission : "denied");
+
+  function playBeep() {
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      const ctx = new Ctx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = "sine";
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.12, ctx.currentTime);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.35);
+      setTimeout(() => ctx.close(), 500);
+    } catch {}
+  }
+
+  useEffect(() => {
+    const keys = new Set(notifications.map((n) => n.key));
+    if (prevNotifKeys.current === null || !session) {
+      prevNotifKeys.current = keys;
+      return;
+    }
+    const added = notifications.filter((n) => !prevNotifKeys.current.has(n.key));
+    prevNotifKeys.current = keys;
+    if (added.length) {
+      const first = added[0];
+      notify(`${first.title} — ${first.desc}`);
+      playBeep();
+      if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+        try {
+          new Notification(first.title, { body: `${first.desc} (${first.ticket.team})` });
+        } catch {}
+      }
+    }
+  }, [notifications]);
 
   if (typeof window !== "undefined" && window.location.pathname === "/reset-password") {
     return <PasswordResetPage brand={brand} theme={theme} onToggleTheme={() => setTheme((currentTheme) => (currentTheme === "light" ? "dark" : "light"))} />;
@@ -435,15 +679,26 @@ function App() {
           </a>
           <button className="icon-button sidebar-close" type="button" aria-label="Cerrar menú" onClick={() => setSidebarOpen(false)}><Icon name="close" /></button>
         </div>
-        <div className="context-card"><span className="context-dot" /><div><span>Equipo actual</span><strong>{session.team}</strong></div><Icon name="chevronDown" size={16} /></div>
+        <div style={{ position: "relative", margin: "0 4px 28px" }}>
+          <button type="button" className="context-card" style={{ width: "100%", margin: 0, textAlign: "left", cursor: session.role === "SOPORTE" ? "pointer" : "default" }} onClick={() => { if (session.role === "SOPORTE") { setShowGroupMenu((v) => !v); setShowNotifications(false); setShowUserMenu(false); } }} aria-label="Grupos que atiendes" aria-expanded={showGroupMenu}>
+            <span className="context-dot" /><div><span>{session.role === "SOPORTE" ? "Mis grupos" : "Grupo actual"}</span><strong>{session.team}</strong></div><Icon name="chevronDown" size={16} style={{ transform: showGroupMenu ? "rotate(180deg)" : "none", transition: "transform 150ms ease" }} />
+          </button>
+          {session.role === "SOPORTE" && showGroupMenu && <>
+            <button className="dropdown-overlay" type="button" aria-label="Cerrar grupos" onClick={() => setShowGroupMenu(false)} />
+            <div className="user-dropdown" role="menu" style={{ left: 0, right: 0, width: "100%" }}>
+              <div className="user-dropdown-menu" style={{ maxHeight: "220px", overflowY: "auto" }}>
+                {groups.map((g) => { const checked = session.teams?.some((t) => t.group?.id === g.id) || session.groups?.some((sg) => sg.id === g.id); return <label key={g.id} className="user-dropdown-item" style={{ cursor: "pointer" }}><input type="checkbox" checked={checked} onChange={async () => { const teamIds = teams.filter((t) => t.group === g.id || t.group_detail?.id === g.id).map((t) => t.id); const currentTeamIds = (session.teams || []).map((t) => t.id).filter(Boolean); const hasAll = teamIds.length > 0 && teamIds.every((id) => currentTeamIds.includes(id)); const newTeamIds = hasAll ? currentTeamIds.filter((id) => !teamIds.includes(id)) : [...new Set([...currentTeamIds, ...teamIds])]; if (!newTeamIds.length) { notify("Debes atender al menos un grupo."); return; } try { await updateMyTeams(newTeamIds, null); const fresh = await getCurrentUser(); const mapped = mapUser(fresh); setSession(mapped); sessionStorage.setItem("sestel-user", JSON.stringify(mapped)); notify(hasAll ? `Ya no atiendes ${g.name}` : `Ahora atiendes ${g.name}`); refreshWorkspace(true); } catch (e) { notify(e.message || "No se pudo actualizar"); } }} />{g.name}</label>; })}
+              </div>
+            </div>
+          </>}
+        </div>
         <nav className="main-nav">
           <p className="nav-caption">Operación</p>
-          {visibleNavigation.map((item) => <button className={`nav-item ${activeView === item.label ? "active" : ""}`} key={item.label} onClick={() => changeView(item.label)} type="button"><Icon name={item.icon} size={19} /><span>{item.label}</span>{item.badge && <b>{item.label === "Tickets" ? openTickets : validationTickets.length}</b>}</button>)}
+          {visibleNavigation.map((item) => <button className={`nav-item ${activeView === item.label ? "active" : ""}`} key={item.label} onClick={() => changeView(item.label)} type="button"><Icon name={item.icon} size={19} /><span>{item.label}</span>{item.badge && <b>{item.label === "Tickets" ? openTickets : session.role !== "SOPORTE" ? validationTickets.length : 0}</b>}</button>)}
         </nav>
         <div className="sidebar-bottom">
-          <button className="nav-item" type="button" onClick={() => session.role === "ADMIN" ? changeView("Usuarios") : notify("La gestión de usuarios está disponible para administración.")}><Icon name="settings" size={19} /><span>{session.role === "ADMIN" ? "Gestionar usuarios" : "Configuración"}</span></button>
+          <button className="nav-item" type="button" onClick={() => ["ADMIN","SUPERVISOR"].includes(session.role) ? changeView("Usuarios") : setShowProfile(true)}><Icon name="settings" size={19} /><span>{["ADMIN","SUPERVISOR"].includes(session.role) ? "Gestionar usuarios" : "Mi perfil"}</span></button>
           <button className="nav-item logout-item" type="button" onClick={endSession}><Icon name="logout" size={19} /><span>Cerrar sesión</span></button>
-          <div className="user-card"><div className={`avatar ${session.avatarClass}`}>{session.initials}</div><div><strong>{session.name}</strong><span>{session.roleLabel}</span></div><Icon name="dots" size={18} /></div>
         </div>
       </aside>
       {sidebarOpen && <button className="sidebar-overlay" type="button" aria-label="Cerrar menú" onClick={() => setSidebarOpen(false)} />}
@@ -451,25 +706,26 @@ function App() {
         <header className="topbar">
           <button className="icon-button menu-toggle" type="button" aria-label="Abrir menú" onClick={() => setSidebarOpen(true)}><Icon name="menu" /></button>
           <div className="mobile-brand">Soporte Despacho</div>
-          <label className="global-search"><Icon name="search" size={19} /><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} onFocus={() => setActiveView("Tickets")} placeholder="Buscar ticket, técnico o equipo..." aria-label="Buscar tickets" /><kbd>Ctrl K</kbd></label>
+          <label className="global-search"><Icon name="search" size={19} /><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} onFocus={() => setActiveView("Tickets")} placeholder="Buscar ticket, técnico o grupo..." aria-label="Buscar tickets" /></label>
           <div className="topbar-actions">
             <button className="icon-button theme-button" type="button" aria-label={theme === "light" ? "Activar tema oscuro" : "Activar tema claro"} aria-pressed={theme === "dark"} onClick={() => setTheme((currentTheme) => (currentTheme === "light" ? "dark" : "light"))} title={theme === "light" ? "Cambiar a modo oscuro" : "Cambiar a modo claro"}><Icon name={theme === "light" ? "moon" : "sun"} size={19} /></button>
             <div className="notification-wrapper">
-              <button className={`icon-button notification-button ${notifications.length ? "has-notifications" : ""}`} type="button" aria-label={`Notificaciones ${notifications.length ? `(${notifications.length} nuevas)` : ""}`} aria-expanded={showNotifications} onClick={() => { setShowNotifications((v) => !v); setShowUserMenu(false); if (!showNotifications) refreshWorkspace(true); }}><Icon name="bell" size={20} />{notifications.length > 0 && <span />}</button>
+              <button className={`icon-button notification-button ${unseenCount ? "has-notifications" : ""}`} type="button" aria-label={`Notificaciones ${unseenCount ? `(${unseenCount} nuevas)` : ""}`} aria-expanded={showNotifications} onClick={() => { setShowNotifications((v) => !v); setShowUserMenu(false); if (!showNotifications) refreshWorkspace(true); }}><Icon name="bell" size={20} />{unseenCount > 0 && <span />}</button>
               {showNotifications && (
                 <>
                   <button className="dropdown-overlay" type="button" aria-label="Cerrar notificaciones" onClick={() => setShowNotifications(false)} />
                   <div className="notification-dropdown" role="region" aria-label="Notificaciones">
-                    <div className="notification-header"><strong>Notificaciones</strong><span>{notifications.length}</span></div>
+                    <div className="notification-header"><strong>Notificaciones</strong><span>{unseenCount} nuevas</span></div>
+                    {browserNotif === "default" && <div style={{ padding: "8px 16px", borderBottom: "1px solid var(--line)" }}><button type="button" className="text-button" onClick={async () => { try { const p = await Notification.requestPermission(); setBrowserNotif(p); } catch {} }}>Activar avisos del navegador</button></div>}
                     <div className="notification-list">
                       {notifications.length ? notifications.map((n) => (
-                        <button key={n.key} type="button" className="notification-item" onClick={() => { setShowNotifications(false); openTicketDetail(n.ticket); }}>
+                        <button key={n.key} type="button" className="notification-item" style={n.seen ? { opacity: 0.6 } : undefined} onClick={() => { markSeen(n.key); setShowNotifications(false); openTicketDetail(n.ticket); }}>
                           <span className={`notification-icon ${n.type}`}><Icon name={n.type === "danger" ? "alert" : n.type === "warning" ? "clock" : "ticket"} size={16} /></span>
-                          <span className="notification-content"><strong>{n.title}</strong><p>{n.desc}</p><small>{n.time} · {n.ticket.team}</small></span>
+                          <span className="notification-content"><strong>{n.seen ? "" : "● "}{n.title}</strong><p>{n.desc}</p><small>{n.time} · {n.ticket.team}</small></span>
                         </button>
                       )) : <div className="notification-empty"><Icon name="checkCircle" size={24} /><p>Todo al día</p><small>No hay alertas pendientes</small></div>}
                     </div>
-                    <div className="notification-footer"><button type="button" className="text-button" onClick={() => { setShowNotifications(false); refreshWorkspace(); }}>Actualizar</button></div>
+                    <div className="notification-footer"><button type="button" className="text-button" onClick={() => markAllSeen()}>Marcar leídas</button><button type="button" className="text-button" onClick={() => { setShowNotifications(false); refreshWorkspace(); }}>Actualizar</button></div>
                   </div>
                 </>
               )}
@@ -501,19 +757,20 @@ function App() {
           {isLoading ? <LoadingState /> : <>
             {activeView === "Resumen" && <Dashboard canCreate={canCreateTickets} criticalTickets={criticalTickets} dashboard={dashboard} onCreate={() => setNewTicketOpen(true)} onOpen={openTicketDetail} onShowTickets={() => setActiveView("Tickets")} tickets={tickets} validationTickets={validationTickets} />}
             {activeView === "Tickets" && <TicketsView canCreate={canCreateTickets} currentUser={session} filter={filter} filteredTickets={filteredTickets} onCreate={() => setNewTicketOpen(true)} onFilterChange={setFilter} onNotify={notify} onOpen={openTicketDetail} onResolve={setTicketToResolve} onTake={takeTicket} query={query} setQuery={setQuery} />}
-            {activeView === "Validaciones" && <ValidationsView canValidate={session.role !== "SOPORTE"} tickets={validationTickets} onValidate={validateTicket} />}
-            {activeView === "Mi equipo" && <TeamView currentUser={session} onNotify={notify} tickets={tickets} />}
-            {activeView === "Informes" && <ReportsView tickets={tickets} />}
-            {activeView === "Usuarios" && session.role === "ADMIN" && <UsersView error={usersError} groups={groups} loading={usersLoading} onCreate={() => setUserModal("new")} onCreateGroup={() => setGroupModal("new")} onCreateTeam={() => setTeamModal("new")} onEdit={setUserModal} onEditGroup={setGroupModal} onEditTeam={setTeamModal} onResetPassword={setPasswordModal} onRetry={refreshUsers} teams={teams} users={users} />}
+            {activeView === "Validaciones" && <ValidationsView canValidate={session.role !== "SOPORTE"} tickets={validationTickets} onOpen={openTicketDetail} onValidate={validateTicket} />}
+            {activeView === "Mi grupo" && <TeamView currentUser={session} onNotify={notify} tickets={tickets} users={users} />}
+            {activeView === "Informes" && <ReportsView groups={groups} onNotify={notify} />}
+            {activeView === "Usuarios" && ["ADMIN","SUPERVISOR"].includes(session.role) && <UsersView currentRole={session.role} error={usersError} groups={groups} loading={usersLoading} onCreate={() => setUserModal("new")} onCreateGroup={() => setGroupModal("new")} onCreateTeam={() => setTeamModal("new")} onCreateRequestType={() => setRequestTypeModal("new")} onEdit={setUserModal} onEditGroup={setGroupModal} onEditTeam={setTeamModal} onEditRequestType={setRequestTypeModal} onResetPassword={setPasswordModal} onRetry={refreshUsers} requestTypes={requestTypes} teams={teams} users={users} />}
           </>}
         </section>
       </main>
-      {newTicketOpen && canCreateTickets && <NewTicketModal onClose={() => setNewTicketOpen(false)} onCreate={createTicket} session={session} />}
+      {newTicketOpen && canCreateTickets && <NewTicketModal onClose={() => setNewTicketOpen(false)} onCreate={createTicket} onOpenTicket={async (id) => { setNewTicketOpen(false); const t = tickets.find((x) => x.apiId === id); if (t) openTicketDetail(t); }} session={session} />}
       {ticketToResolve && <ResolveTicketModal onClose={() => setTicketToResolve(null)} onResolve={resolveTicket} ticket={ticketToResolve} />}
-      {ticketDetail && <TicketDetailModal currentUser={session} isLoading={isDetailLoading} onAttach={attachToTicket} onClose={() => setTicketDetail(null)} onResolve={(ticket) => { setTicketDetail(null); setTicketToResolve(ticket); }} onTake={async (ticket) => { await takeTicket(ticket); setTicketDetail(null); }} onValidate={async (ticket, accepted) => { await validateTicket(ticket, accepted); setTicketDetail(null); }} ticket={ticketDetail} />}
-      {userModal && <UserFormModal onClose={() => setUserModal(null)} onSave={saveUser} teams={teams} user={userModal === "new" ? null : userModal} />}
+      {ticketDetail && <TicketDetailModal currentUser={session} isLoading={isDetailLoading} onAttach={attachToTicket} onClose={() => setTicketDetail(null)} onReassign={reassignTicket} onResolve={(ticket) => { setTicketDetail(null); setTicketToResolve(ticket); }} onTake={async (ticket) => { const updated = await takeTicket(ticket); const detail = await getTicket(ticket.apiId); setTicketDetail(mapTicket(detail)); }} onRelease={releaseTicket} onValidate={async (ticket, accepted, comment) => { await validateTicket(ticket, accepted, comment); setTicketDetail(null); }} teams={teams} ticket={ticketDetail} users={users} />}
+      {userModal && <UserFormModal onClose={() => setUserModal(null)} onSave={saveUser} teams={teams} groups={groups} user={userModal === "new" ? null : userModal} />}
       {teamModal && <TeamFormModal groups={groups} onClose={() => setTeamModal(null)} onSave={saveTeam} team={teamModal === "new" ? null : teamModal} />}
       {groupModal && <GroupFormModal onClose={() => setGroupModal(null)} onSave={saveGroup} group={groupModal === "new" ? null : groupModal} />}
+      {requestTypeModal && <RequestTypeFormModal onClose={() => setRequestTypeModal(null)} onSave={saveRequestType} requestType={requestTypeModal === "new" ? null : requestTypeModal} />}
       {passwordModal && <PasswordResetModal onClose={() => setPasswordModal(null)} onSave={resetUserPassword} user={passwordModal} />}
       {showProfile && <ProfileModal onClose={() => setShowProfile(false)} tickets={tickets} user={session} />}
       {toast && <Toast message={toast} onClose={() => setToast("")} />}
@@ -623,14 +880,22 @@ function Dashboard({ canCreate, criticalTickets, dashboard, onCreate, onOpen, on
 }
 
 function TicketsView({ canCreate, currentUser, filter, filteredTickets, onCreate, onFilterChange, onNotify, onOpen, onResolve, onTake, query, setQuery }) {
-  const filters = ["Todos", "Abierto", "Asignado", "En proceso", "Validación"];
+  const filters = currentUser?.role === "SOPORTE" ? ["Trabajables", "Míos", "Asignado", "En proceso", "Validación", "Todos"] : currentUser?.role === "DESPACHADOR" ? ["Míos", "Asignado", "En proceso", "Validación", "Todos"] : ["Todos", "Abierto", "Asignado", "En proceso", "Validación"];
+  const [sort, setSort] = useState("prioridad");
+  const priorityRank = { CRITICA: 0, ALTA: 1, MEDIA: 2, BAJA: 3 };
+  const sortedTickets = [...filteredTickets].sort((a, b) => {
+    if (sort === "recientes") return new Date(b.createdAt) - new Date(a.createdAt);
+    if (sort === "antiguos") return new Date(a.createdAt) - new Date(b.createdAt);
+    return (priorityRank[a.priorityCode] ?? 9) - (priorityRank[b.priorityCode] ?? 9) || (new Date(a.createdAt) - new Date(b.createdAt));
+  });
+  const cycleSort = () => setSort(sort === "prioridad" ? "antiguos" : sort === "antiguos" ? "recientes" : "prioridad");
 
   return (
     <>
       <PageHeader
         eyebrow="Gestión de solicitudes"
         title="Bandeja de tickets"
-        description="Consulta y prioriza los casos asignados a tu grupo y equipo de trabajo."
+        description="Consulta y prioriza los casos asignados a tu grupo de trabajo."
         action={canCreate ? <button className="primary-button" type="button" onClick={onCreate}><Icon name="plus" size={18} /> Nuevo ticket</button> : null}
       />
       <article className="panel tickets-page-panel">
@@ -646,43 +911,51 @@ function TicketsView({ canCreate, currentUser, filter, filteredTickets, onCreate
             ))}
           </div>
         </div>
-        <div className="table-summary"><span><b>{filteredTickets.length}</b> tickets encontrados</span><button type="button" onClick={() => onNotify("Los filtros se actualizarán automáticamente con la API.")}>Ordenar: prioridad <Icon name="chevronDown" size={15} /></button></div>
-        <div className="ticket-table-wrap"><TicketTable currentUser={currentUser} onNotify={onNotify} onOpen={onOpen} onResolve={onResolve} onTake={onTake} tickets={filteredTickets} /></div>
+        <div className="table-summary"><span><b>{filteredTickets.length}</b> tickets encontrados</span><button type="button" onClick={cycleSort}>Ordenar: {sort} <Icon name="chevronDown" size={15} /></button></div>
+        <div className="ticket-table-wrap"><TicketTable currentUser={currentUser} onNotify={onNotify} onOpen={onOpen} onResolve={onResolve} onTake={onTake} tickets={sortedTickets} /></div>
         {filteredTickets.length === 0 && <EmptyState />}
       </article>
     </>
   );
 }
 
-function ValidationsView({ canValidate, tickets, onValidate }) {
+function ValidationsView({ canValidate, tickets, onOpen, onValidate }) {
+  const [rejectId, setRejectId] = useState(null);
+  const [rejectComment, setRejectComment] = useState("");
   return (
     <>
       <PageHeader
         eyebrow="Cierre con validación cruzada"
         title="Pendientes de confirmar"
-        description="Solo el despachador que creó la solicitud puede aprobar o rechazar la solución propuesta."
+        description=""
       />
       <section className="validation-grid">
         {!canValidate ? <EmptyValidation /> : null}
         {canValidate && tickets.length > 0 ? tickets.map((ticket) => (
-          <article className="validation-card" key={ticket.id}>
+          <article className="validation-card" key={ticket.id} onClick={() => onOpen && onOpen(ticket)} style={{ cursor: onOpen ? "pointer" : "default" }}>
             <div className="validation-card-top"><span className="ticket-id">{ticket.id}</span><span className="status-pill status-validation">Validación</span></div>
             <h2>{ticket.title}</h2>
             <div className="solution-note"><Icon name="checkCircle" size={19} /><div><span>Solución de Soporte</span><p>{ticket.resolutionNotes || "Soporte marcó este caso como resuelto. Confirma el resultado en campo."}</p></div></div>
             <div className="validation-meta"><span><div className="avatar small-avatar">{initials(ticket.assignee)}</div> {ticket.assignee}</span><span><Icon name="clock" size={16} /> {ticket.created}</span></div>
-            <div className="validation-actions"><button className="secondary-button" type="button" onClick={() => onValidate(ticket, false)}>Rechazar y devolver</button><button className="primary-button" type="button" onClick={() => onValidate(ticket, true)}><Icon name="check" size={17} /> Aprobar solución</button></div>
+            {rejectId === ticket.apiId ? <div style={{ display: "grid", gap: "8px", marginTop: "10px" }} onClick={(e) => e.stopPropagation()}><textarea value={rejectComment} onChange={(e) => setRejectComment(e.target.value)} placeholder="Motivo del rechazo (obligatorio)" rows="3" style={{ width: "100%", border: "1px solid var(--line-strong)", borderRadius: "6px", padding: "8px", fontSize: "11px" }} /><div style={{ display: "flex", gap: "6px" }}><button className="secondary-button" disabled={!rejectComment.trim()} type="button" onClick={() => { onValidate(ticket, false, rejectComment); setRejectId(null); setRejectComment(""); }}>Confirmar rechazo</button><button className="secondary-button" type="button" onClick={() => { setRejectId(null); setRejectComment(""); }}>Cancelar</button></div></div> : <div className="validation-actions" onClick={(e) => e.stopPropagation()}><button className="secondary-button" type="button" onClick={() => setRejectId(ticket.apiId)}>Rechazar y devolver</button><button className="primary-button" type="button" onClick={() => onValidate(ticket, true)}><Icon name="check" size={17} /> Aprobar solución</button></div>}
+            <div style={{ marginTop: "8px", fontSize: "10px", color: "var(--quiet)", textAlign: "center" }}>Clic para ver detalle →</div>
           </article>
         )) : null}
         {canValidate && tickets.length === 0 ? <EmptyValidation /> : null}
-        <aside className="validation-side-note"><Icon name="shield" size={21} /><strong>Tu validación cierra el ciclo</strong><p>Al aprobar, el ticket quedará cerrado. Si rechazas, volverá a Soporte en estado En proceso.</p></aside>
       </section>
     </>
   );
 }
 
-function TeamView({ currentUser, onNotify, tickets }) {
+function TeamView({ currentUser, onNotify, tickets, users }) {
+  const [showRules, setShowRules] = useState(false);
   const peopleByName = new Map();
-  if (currentUser.role === "SOPORTE") {
+  const memberUsers = (users || []).filter((u) => u.is_active && !u.is_locked);
+  if (memberUsers.length) {
+    memberUsers.forEach((u) => {
+      peopleByName.set(u.name, { initials: u.initials, name: u.name, role: u.roleLabel, load: 0, status: u.name === currentUser.name ? "En línea" : "En atención", className: u.avatarClass });
+    });
+  } else if (currentUser.role === "SOPORTE") {
     peopleByName.set(currentUser.name, { initials: currentUser.initials, name: currentUser.name, role: currentUser.roleLabel, load: 0, status: "En línea", className: currentUser.avatarClass });
   }
   tickets.forEach((ticket) => {
@@ -694,7 +967,8 @@ function TeamView({ currentUser, onNotify, tickets }) {
   const people = [...peopleByName.values()];
   return (
     <>
-      <PageHeader eyebrow="Disponibilidad del equipo" title="Personas que respaldan tu operación" description="La carga se calcula a partir de los tickets visibles para tu perfil y equipo." action={<button className="secondary-button" type="button" onClick={() => onNotify("La asignación automática prioriza al agente que lleva más tiempo sin recibir un caso.")}><Icon name="users" size={18} /> Ver reglas de asignación</button>} />
+      <PageHeader eyebrow="Disponibilidad del grupo" title="Personas que respaldan tu operación" description="La carga se calcula a partir de los tickets visibles para tu perfil y grupo." action={<button className="secondary-button" type="button" onClick={() => setShowRules(true)}><Icon name="users" size={18} /> Ver reglas de asignación</button>} />
+      {showRules && <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowRules(false)}><section className="ticket-modal user-modal" role="dialog" aria-modal="true" aria-labelledby="rules-title" onMouseDown={(e) => e.stopPropagation()}><header className="modal-header"><div><p className="eyebrow">Cómo se asigna</p><h2 id="rules-title">Reglas de asignación</h2></div><button className="icon-button" type="button" aria-label="Cerrar" onClick={() => setShowRules(false)}><Icon name="close" /></button></header><div style={{ padding: "19px 25px 25px", display: "grid", gap: "10px", fontSize: "12px", lineHeight: 1.5 }}><p><b>Tigo</b> → <b>Soporte B</b> · <b>BBI N-2, celtech, cellus, nexel</b> → <b>Soporte A</b></p><p>Los tickets nuevos quedan <b>abiertos</b> en la bandeja del grupo: cualquiera que lo cubra puede tomarlo.</p><p>Al <b>rechazar</b> una solución o <b>liberar</b> un ticket, vuelve a la bandeja del grupo (sin asignar).</p><p><b>Reasignar</b> mueve el ticket a una persona del mismo grupo.</p></div></section></div>}
       <section className="team-grid">
         {people.length ? people.map((person) => (
           <article className="team-card" key={person.name}>
@@ -710,36 +984,117 @@ function TeamView({ currentUser, onNotify, tickets }) {
   );
 }
 
-function ReportsView({ tickets }) {
-  const total = tickets.length;
-  const closed = tickets.filter((ticket) => ticket.statusCode === "CERRADO").length;
-  const withinSla = tickets.filter((ticket) => ticket.slaTone === "safe").length;
-  const byCategory = ["FTTH", "HFC", "DTH"].map((category) => ({
-    category,
-    total: tickets.filter((ticket) => ticket.category === category).length,
-  }));
-  const percentage = (value) => (total ? Math.round((value / total) * 100) : 0);
-  const ftth = percentage(byCategory[0].total);
-  const hfc = percentage(byCategory[1].total);
-  const dth = percentage(byCategory[2].total);
-  const donutStyle = { background: `conic-gradient(#4c8c69 0 ${ftth}%, #6387be ${ftth}% ${ftth + hfc}%, #d59b47 ${ftth + hfc}% 100%)` };
+function ReportsView({ groups, onNotify }) {
+  const [filters, setFilters] = useState({ group: "", service: "", from: "", to: "" });
+  const [summary, setSummary] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+
+  async function load() {
+    setLoading(true);
+    try {
+      const params = {};
+      if (filters.group) params.group = filters.group;
+      if (filters.service) params.service = filters.service;
+      if (filters.from) params.from = filters.from;
+      if (filters.to) params.to = filters.to;
+      setSummary(await getReportsSummary(params));
+    } catch (e) {
+      onNotify && onNotify(e.message || "No se pudo cargar el reporte.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { load(); }, []);
+
+  async function download() {
+    setDownloading(true);
+    try {
+      await downloadReportsCsv({ group: filters.group, service: filters.service, from: filters.from, to: filters.to });
+      onNotify && onNotify("Reporte descargado.");
+    } catch (e) {
+      onNotify && onNotify(e.message || "No se pudo descargar.");
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  function update(name, value) {
+    setFilters((f) => ({ ...f, [name]: value }));
+  }
+
+  const kpis = summary?.kpis || {};
+  const daily = summary?.daily || [];
+  const maxDaily = Math.max(1, ...daily.map((d) => d.total));
+  const maxAhtDay = Math.max(0, ...daily.map((d) => d.aht_minutos || 0));
+  const AHT_W = 640, AHT_H = 180, AHT_PAD = 10;
+  const ahtX = (i) => (daily.length <= 1 ? AHT_W / 2 : AHT_PAD + (i * (AHT_W - 2 * AHT_PAD)) / (daily.length - 1));
+  const ahtY = (v) => (maxAhtDay ? AHT_H - AHT_PAD - (v / maxAhtDay) * (AHT_H - 2 * AHT_PAD) : AHT_H - AHT_PAD);
+  let ahtPath = "";
+  daily.forEach((d, i) => {
+    if (d.aht_minutos == null) return;
+    ahtPath += `${ahtPath && daily[i - 1]?.aht_minutos != null ? "L" : "M"}${ahtX(i).toFixed(1)} ${ahtY(d.aht_minutos).toFixed(1)}`;
+  });
+  const fmt = (v, suffix = "") => (v === null || v === undefined ? "—" : `${v}${suffix}`);
+  const fmtDur = (min) => {
+    if (min === null || min === undefined) return "—";
+    const total = Math.round(Number(min) * 60);
+    const h = Math.floor(total / 3600);
+    const m = String(Math.floor((total % 3600) / 60)).padStart(2, "0");
+    const s = String(total % 60).padStart(2, "0");
+    return `${h}:${m}:${s}`;
+  };
+
   return (
     <>
-      <PageHeader eyebrow="Indicadores operativos" title="El turno en cifras" description="Vista consolidada para identificar capacidad, cumplimiento y oportunidades de mejora." action={<div className="date-picker"><Icon name="calendar" size={18} /> Hoy, 22 de agosto <Icon name="chevronDown" size={15} /></div>} />
-      <section className="report-highlights">
-        <article><span>Tickets visibles</span><strong>{total}</strong><p><b>Según tu perfil</b> y restricciones de equipo</p></article>
-        <article><span>Tickets cerrados</span><strong>{closed}</strong><p><b>{percentage(closed)}%</b> de los tickets visibles</p></article>
-        <article><span>Cumplimiento SLA</span><strong>{percentage(withinSla)}<small>%</small></strong><p><b>Meta: 90%</b> del turno</p></article>
+      <PageHeader eyebrow="Indicadores operativos" title="El turno en cifras" description="Filtra por grupo, servicio y fecha. AHT = tiempo promedio de atención (tomado → resuelto)." action={<button className="primary-button" type="button" disabled={downloading} onClick={download}><Icon name="upload" size={18} /> {downloading ? "Descargando..." : "Descargar CSV"}</button>} />
+      <article className="panel" style={{ padding: "16px 20px", marginBottom: "17px" }}>
+        <div className="form-grid" style={{ marginTop: 0 }}>
+          <label className="field"><span>Grupo</span><select value={filters.group} onChange={(e) => update("group", e.target.value)}><option value="">Todos</option>{(groups || []).map((g) => <option key={g.id} value={g.code}>{g.name}</option>)}</select></label>
+          <label className="field"><span>Tipo servicio</span><select value={filters.service} onChange={(e) => update("service", e.target.value)}><option value="">Todos</option><option value="HFC">HFC</option><option value="FTTH">FTTH</option><option value="WTTX">WTTX</option><option value="DTH">DTH</option></select></label>
+          <label className="field"><span>Desde</span><input type="date" value={filters.from} onChange={(e) => update("from", e.target.value)} /></label>
+          <label className="field"><span>Hasta</span><input type="date" value={filters.to} onChange={(e) => update("to", e.target.value)} /></label>
+        </div>
+        <footer className="modal-actions" style={{ margin: "12px 0 0", padding: 0, border: 0 }}><button className="primary-button" type="button" disabled={loading} onClick={load}>{loading ? "Cargando..." : "Aplicar filtros"}</button></footer>
+      </article>
+      <section className="report-highlights" style={{ gridTemplateColumns: "repeat(7, minmax(0, 1fr))" }}>
+        <article><span>Entrantes</span><strong>{fmt(kpis.entrantes)}</strong></article>
+        <article><span>Resueltos</span><strong>{fmt(kpis.resueltos)}</strong></article>
+        <article><span>AHT</span><strong>{fmtDur(kpis.aht_minutos)}</strong><p>Tomado → resuelto</p></article>
+        <article><span>Devueltos a soporte</span><strong>{fmt(kpis.devueltos)}</strong><p>Rechazos de validación</p></article>
+        <article><span>% SLA cumplido</span><strong>{fmt(kpis.pct_sla, "%")}</strong><p><b>Meta: 90%</b></p></article>
+        <article><span>En proceso</span><strong>{fmt(kpis.en_proceso)}</strong></article>
+        <article><span>Vencidos</span><strong>{fmt(kpis.vencidos)}</strong></article>
       </section>
-      <section className="reports-grid">
-        <article className="panel channel-panel"><PanelHeading eyebrow="Por tecnología" title="Origen de los tickets" /><div className="donut-layout"><div className="donut" style={donutStyle}><span>{total}<small>total</small></span></div><div className="donut-legend"><span><i className="ftth" /> FTTH <b>{ftth}%</b></span><span><i className="hfc" /> HFC <b>{hfc}%</b></span><span><i className="dth" /> DTH <b>{dth}%</b></span></div></div></article>
-        <article className="panel performance-panel"><PanelHeading eyebrow="Distribución" title="Participación por tecnología" /><div className="performance-bars"><ReportBar label="FTTH" value={ftth} /><ReportBar label="HFC" value={hfc} /><ReportBar label="DTH" value={dth} /></div></article>
+      <section className="reports-grid" style={{ gridTemplateColumns: "1fr" }}>
+        <article className="panel channel-panel"><PanelHeading eyebrow="Por día" title="Tráfico entrante" />
+          <div style={{ display: "flex", alignItems: "flex-end", gap: "6px", padding: "10px 24px 24px", minHeight: "160px" }}>
+            {daily.length === 0 && <p className="detail-empty">Sin datos en el rango.</p>}
+            {daily.map((d) => <div key={d.date} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }} title={`${d.date}: ${d.total}` + (d.aht_minutos != null ? ` · AHT ${fmtDur(d.aht_minutos)}` : "")}><span style={{ fontSize: "10px", fontWeight: 700 }}>{d.total}</span><div style={{ width: "100%", height: `${Math.max(4, Math.round((d.total / maxDaily) * 110))}px`, background: "var(--accent)", borderRadius: "4px 4px 0 0" }} /><small style={{ fontSize: "8px", color: "var(--quiet)" }}>{d.date.slice(5)}</small></div>)}
+          </div>
+          <PanelHeading eyebrow="Por día" title="AHT diario" action={<span className="legend-label"><i /> Promedio tomado → resuelto</span>} />
+          {maxAhtDay === 0 && <p className="detail-empty" style={{ padding: "0 24px 20px" }}>Sin AHT en el rango.</p>}
+          {maxAhtDay > 0 && (
+          <div className="flow-chart" aria-label="Gráfica de línea del AHT por día" style={{ color: "var(--violet)" }}>
+            <div className="chart-axis"><span>{fmtDur(maxAhtDay)}</span><span>{fmtDur(maxAhtDay / 2)}</span><span>0:00:00</span></div>
+            <div className="chart-area">
+              <svg viewBox="0 0 640 220" preserveAspectRatio="none" role="img" aria-label="Línea de AHT diario">
+                <path className="chart-grid" d="M0 20H640M0 110H640M0 200H640" />
+                <path className="line-path" d={ahtPath} />
+                {daily.map((d, i) => (d.aht_minutos == null ? null : <circle key={d.date} cx={ahtX(i)} cy={ahtY(d.aht_minutos)} r="5" className="chart-dot"><title>{`${d.date}: ${fmtDur(d.aht_minutos)}`}</title></circle>))}
+              </svg>
+              <div className="chart-labels"><span>{daily[0]?.date.slice(5)}</span><span>{daily[daily.length - 1]?.date.slice(5)}</span></div>
+            </div>
+          </div>
+          )}
+        </article>
       </section>
     </>
   );
 }
 
-function UsersView({ error, groups, loading, onCreate, onCreateGroup, onCreateTeam, onEdit, onEditGroup, onEditTeam, onResetPassword, onRetry, teams, users }) {
+function UsersView({ error, groups, loading, onCreate, onCreateGroup, onCreateTeam, onCreateRequestType, onEdit, onEditGroup, onEditTeam, onEditRequestType, onResetPassword, onRetry, requestTypes, teams, users, currentRole }) {
   const [query, setQuery] = useState("");
   const [role, setRole] = useState("Todos");
   const [tab, setTab] = useState("usuarios");
@@ -750,25 +1105,25 @@ function UsersView({ error, groups, loading, onCreate, onCreateGroup, onCreateTe
 
   return (
     <>
-      <PageHeader eyebrow="Administración" title="Usuarios y accesos" description="Gestiona personas, equipos y grupos. Los roles son asignables por administrador y las credenciales se restablecen desde aquí." action={tab === "usuarios" ? <button className="primary-button" type="button" onClick={onCreate}><Icon name="plus" size={18} /> Nuevo usuario</button> : tab === "equipos" ? <button className="primary-button" type="button" onClick={onCreateTeam}><Icon name="plus" size={18} /> Nuevo equipo</button> : <button className="primary-button" type="button" onClick={onCreateGroup}><Icon name="plus" size={18} /> Nuevo grupo</button>} />
+      <PageHeader eyebrow="Administración" title="Usuarios y accesos" description="Gestiona personas y grupos. Los roles son asignables por administrador y las credenciales se restablecen desde aquí." action={tab === "usuarios" ? <button className="primary-button" type="button" onClick={onCreate}><Icon name="plus" size={18} /> Nuevo usuario</button> : tab === "tipos" ? <button className="primary-button" type="button" onClick={onCreateRequestType}><Icon name="plus" size={18} /> Nuevo tipo</button> : <button className="primary-button" type="button" onClick={onCreateGroup}><Icon name="plus" size={18} /> Nuevo grupo</button>} />
       {error && <ApiConnectionError message={error} onRetry={onRetry} />}
-      <div className="admin-tabs" role="tablist">
+      {currentRole !== "SUPERVISOR" && <div className="admin-tabs" role="tablist">
         <button className={tab === "usuarios" ? "selected" : ""} type="button" role="tab" aria-selected={tab === "usuarios"} onClick={() => setTab("usuarios")}><Icon name="users" size={16} /> Usuarios <span>{users.length}</span></button>
-        <button className={tab === "equipos" ? "selected" : ""} type="button" role="tab" aria-selected={tab === "equipos"} onClick={() => setTab("equipos")}><Icon name="folder" size={16} /> Equipos <span>{teams.length}</span></button>
         <button className={tab === "grupos" ? "selected" : ""} type="button" role="tab" aria-selected={tab === "grupos"} onClick={() => setTab("grupos")}><Icon name="shield" size={16} /> Grupos <span>{groups.length}</span></button>
-      </div>
+        <button className={tab === "tipos" ? "selected" : ""} type="button" role="tab" aria-selected={tab === "tipos"} onClick={() => setTab("tipos")}><Icon name="ticket" size={16} /> Tipos <span>{(requestTypes || []).length}</span></button>
+      </div>}
       {loading ? <LoadingState /> : tab === "usuarios" ? <article className="panel users-panel">
         <div className="toolbar users-toolbar">
-          <label className="table-search"><Icon name="search" size={18} /><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar nombre, correo o equipo" /></label>
-          <div className="filter-row" aria-label="Filtrar usuarios por rol"><Icon name="filter" size={17} />{[["Todos", "Todos"], ["DESPACHADOR", "Despachadores"], ["SOPORTE", "Soporte"], ["ADMIN", "Administración"]].map(([value, label]) => <button className={role === value ? "selected" : ""} key={value} type="button" onClick={() => setRole(value)}>{label}</button>)}</div>
+          <label className="table-search"><Icon name="search" size={18} /><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar nombre, correo o grupo" /></label>
+          <div className="filter-row" aria-label="Filtrar usuarios por rol"><Icon name="filter" size={17} />{[["Todos", "Todos"], ["DESPACHADOR", "Despachadores"], ["SOPORTE", "Soporte"], ["SUPERVISOR", "Supervisores"], ["ADMIN", "Administración"]].map(([value, label]) => <button className={role === value ? "selected" : ""} key={value} type="button" onClick={() => setRole(value)}>{label}</button>)}</div>
         </div>
-        <div className="table-summary"><span><b>{filteredUsers.length}</b> usuarios encontrados</span><span>Bloqueo tras 5 intentos · Solo desbloquea vía correo</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Usuario</th><th>Rol</th><th>Grupo / equipo</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{filteredUsers.map((user) => <tr key={user.id}><td data-label="Usuario"><div className="managed-user"><div className={`avatar ${user.avatarClass}`}>{user.initials}</div><div><strong>{user.name}</strong><small>{user.email}</small></div></div></td><td data-label="Rol"><span className={`role-pill role-${user.role.toLowerCase()}`}>{user.roleLabel}</span></td><td data-label="Grupo / equipo"><div className="team-cell"><strong>{user.teamName}</strong><small>{user.groupName}</small></div></td><td data-label="Estado"><span className={`user-status ${user.is_locked ? "locked" : user.is_active ? "active" : "inactive"}`}><i /> {user.is_locked ? `Bloqueada (${user.failed_login_attempts})` : user.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action"><button type="button" onClick={() => onEdit(user)}>Editar</button><button className="reset-link" type="button" onClick={() => onResetPassword(user)}>Contraseña</button></td></tr>)}</tbody></table></div>{filteredUsers.length === 0 && <EmptyState />}
-      </article> : tab === "equipos" ? <article className="panel users-panel"><div className="table-summary"><span><b>{teams.length}</b> equipos registrados</span><span>Agrupados por grupo · Código único</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Equipo</th><th>Grupo</th><th>Código</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{teams.map((team) => <tr key={team.id}><td data-label="Equipo"><strong>{team.name}</strong></td><td data-label="Grupo"><span className="team-label">{team.group_detail?.name || team.group?.name || "-"}</span></td><td data-label="Código"><span className="team-label">{team.code}</span></td><td data-label="Estado"><span className={`user-status ${team.is_active ? "active" : "inactive"}`}><i /> {team.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action"><button type="button" onClick={() => onEditTeam(team)}>Editar</button></td></tr>)}</tbody></table></div>{teams.length === 0 && <EmptyState />}</article> : <article className="panel users-panel"><div className="table-summary"><span><b>{groups.length}</b> grupos registrados</span><span>Área macro (Tigo, Contrata, BBI N-2, etc.)</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Grupo</th><th>Código</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{groups.map((group) => <tr key={group.id}><td data-label="Grupo"><strong>{group.name}</strong></td><td data-label="Código"><span className="team-label">{group.code}</span></td><td data-label="Estado"><span className={`user-status ${group.is_active ? "active" : "inactive"}`}><i /> {group.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action"><button type="button" onClick={() => onEditGroup(group)}>Editar</button></td></tr>)}</tbody></table></div>{groups.length === 0 && <EmptyState />}</article>}
+        <div className="table-summary"><span><b>{filteredUsers.length}</b> usuarios encontrados</span><span>Bloqueo tras 5 intentos · Solo desbloquea vía correo</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Usuario</th><th>Rol</th><th>Grupo</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{filteredUsers.map((user) => <tr key={user.id}><td data-label="Usuario"><div className="managed-user"><div className={`avatar ${user.avatarClass}`}>{user.initials}</div><div><strong>{user.name}</strong><small>{user.email}</small></div></div></td><td data-label="Rol"><span className={`role-pill role-${user.role.toLowerCase()}`}>{user.roleLabel}</span></td><td data-label="Grupo"><div className="team-cell"><strong>{user.groupName}</strong></div></td><td data-label="Estado"><span className={`user-status ${user.is_locked ? "locked" : user.is_active ? "active" : "inactive"}`}><i /> {user.is_locked ? `Bloqueada (${user.failed_login_attempts})` : user.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action">{currentRole === "SUPERVISOR" && user.role === "ADMIN" ? <small style={{ color: "var(--quiet)" }}>Solo admin</small> : <><button type="button" onClick={() => onEdit(user)}>Editar</button><button className="reset-link" type="button" onClick={() => onResetPassword(user)}>Contraseña</button></>}</td></tr>)}</tbody></table></div>{filteredUsers.length === 0 && <EmptyState />}
+      </article> : tab === "equipos" ? <article className="panel users-panel"><div className="table-summary"><span><b>{teams.length}</b> equipos registrados</span><span>Agrupados por grupo · Código único</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Equipo</th><th>Grupo</th><th>Código</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{teams.map((team) => <tr key={team.id}><td data-label="Equipo"><strong>{team.name}</strong></td><td data-label="Grupo"><span className="team-label">{team.group_detail?.name || team.group?.name || "-"}</span></td><td data-label="Código"><span className="team-label">{team.code}</span></td><td data-label="Estado"><span className={`user-status ${team.is_active ? "active" : "inactive"}`}><i /> {team.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action"><button type="button" onClick={() => onEditTeam(team)}>Editar</button></td></tr>)}</tbody></table></div>{teams.length === 0 && <EmptyState />}</article> : tab === "tipos" ? <article className="panel users-panel"><div className="table-summary"><span><b>{(requestTypes || []).length}</b> tipos registrados</span><span>Solicitud → Servicio → Tipo</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Tipo</th><th>Solicitud</th><th>Servicio</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{(requestTypes || []).map((rt) => <tr key={rt.id}><td data-label="Tipo"><strong>{rt.name}</strong></td><td data-label="Solicitud"><span className="team-label">{rt.kind_label}</span></td><td data-label="Servicio"><span className="team-label">{rt.service}</span></td><td data-label="Estado"><span className={`user-status ${rt.is_active ? "active" : "inactive"}`}><i /> {rt.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action"><button type="button" onClick={() => onEditRequestType(rt)}>Editar</button></td></tr>)}</tbody></table></div>{(requestTypes || []).length === 0 && <EmptyState />}</article> : <article className="panel users-panel"><div className="table-summary"><span><b>{groups.length}</b> grupos registrados</span><span>Área macro (Tigo, Contrata, BBI N-2, etc.)</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Grupo</th><th>Código</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{groups.map((group) => <tr key={group.id}><td data-label="Grupo"><strong>{group.name}</strong></td><td data-label="Código"><span className="team-label">{group.code}</span></td><td data-label="Estado"><span className={`user-status ${group.is_active ? "active" : "inactive"}`}><i /> {group.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action"><button type="button" onClick={() => onEditGroup(group)}>Editar</button></td></tr>)}</tbody></table></div>{groups.length === 0 && <EmptyState />}</article>}
     </>
   );
 }
 
-function UserFormModal({ onClose, onSave, teams, user }) {
+function UserFormModal({ onClose, onSave, teams, groups, user }) {
   const isNew = !user;
   const [form, setForm] = useState({
     firstName: user?.first_name || "",
@@ -776,7 +1131,8 @@ function UserFormModal({ onClose, onSave, teams, user }) {
     email: user?.email || "",
     password: "",
     role: user?.role || "DESPACHADOR",
-    team: user?.teamId ? String(user.teamId) : "",
+    teams: user?.teamIds || (user?.teamId ? [String(user.teamId)] : []),
+    managedGroups: user?.managedGroups?.map(String) || user?.managed_groups?.map(String) || [],
     isActive: user?.is_active ?? true,
   });
   const [error, setError] = useState("");
@@ -787,10 +1143,38 @@ function UserFormModal({ onClose, onSave, teams, user }) {
     setForm((current) => ({ ...current, [name]: type === "checkbox" ? checked : value }));
   }
 
+  function toggleTeam(teamId) {
+    const id = String(teamId);
+    setForm((current) => ({
+      ...current,
+      teams: current.teams.includes(id) ? current.teams.filter((t) => t !== id) : [...current.teams, id],
+    }));
+  }
+  function toggleGroup(groupId) {
+    const id = String(groupId);
+    setForm((current) => ({
+      ...current,
+      managedGroups: current.managedGroups.includes(id) ? current.managedGroups.filter((g) => g !== id) : [...current.managedGroups, id],
+    }));
+  }
+  function toggleGroupTeams(groupId) {
+    const groupTeams = teams.filter((t) => String(t.group) === String(groupId) || String(t.group_detail?.id) === String(groupId));
+    const groupTeamIds = groupTeams.map((t) => String(t.id));
+    const allSelected = groupTeamIds.every((id) => form.teams.includes(id));
+    setForm((current) => ({
+      ...current,
+      teams: allSelected ? current.teams.filter((id) => !groupTeamIds.includes(id)) : [...new Set([...current.teams, ...groupTeamIds])],
+    }));
+  }
+
   async function submit(event) {
     event.preventDefault();
-    if (form.role !== "ADMIN" && !form.team) {
-      setError("Selecciona un equipo para un despachador o agente de soporte.");
+    if (form.role === "SUPERVISOR" && form.managedGroups.length === 0) {
+      setError("Selecciona al menos un grupo para el supervisor.");
+      return;
+    }
+    if (form.role !== "ADMIN" && form.role !== "SUPERVISOR" && form.teams.length === 0) {
+      setError("Selecciona al menos un grupo para despachador o soporte.");
       return;
     }
     setSubmitting(true);
@@ -806,14 +1190,14 @@ function UserFormModal({ onClose, onSave, teams, user }) {
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section className="ticket-modal user-modal" role="dialog" aria-modal="true" aria-labelledby="user-form-title" onMouseDown={(event) => event.stopPropagation()}>
-        <header className="modal-header"><div><p className="eyebrow">Administración de acceso</p><h2 id="user-form-title">{isNew ? "Crear usuario" : "Editar usuario"}</h2><p>{isNew ? "El acceso se asignará al guardar el perfil." : "Actualiza permisos, equipo o credenciales de forma segura."}</p></div><button className="icon-button" type="button" aria-label="Cerrar formulario" onClick={onClose}><Icon name="close" /></button></header>
+        <header className="modal-header"><div><p className="eyebrow">Administración de acceso</p><h2 id="user-form-title">{isNew ? "Crear usuario" : "Editar usuario"}</h2><p>{isNew ? "El acceso se asignará al guardar el perfil." : "Actualiza permisos, grupo o credenciales de forma segura."}</p></div><button className="icon-button" type="button" aria-label="Cerrar formulario" onClick={onClose}><Icon name="close" /></button></header>
         <form onSubmit={submit}>
           <div className="form-grid user-form-grid">
             <label className="field"><span>Nombres <b>*</b></span><input autoFocus required name="firstName" value={form.firstName} onChange={updateField} placeholder="Nombres" /></label>
             <label className="field"><span>Apellidos <b>*</b></span><input required name="lastName" value={form.lastName} onChange={updateField} placeholder="Apellidos" /></label>
             <label className="field field-wide"><span>Correo institucional <b>*</b></span><input required type="email" name="email" value={form.email} onChange={updateField} placeholder="nombre@empresa.com" /></label>
-            <label className="field"><span>Rol <b>*</b></span><select name="role" value={form.role} onChange={updateField}><option value="DESPACHADOR">Despachador</option><option value="SOPORTE">Agente de soporte</option><option value="ADMIN">Administrador</option></select></label>
-            <label className="field"><span>Equipo {form.role !== "ADMIN" && <b>*</b>}</span><select name="team" value={form.team} onChange={updateField}><option value="">Sin equipo</option>{teams.map((team) => <option key={team.id} value={team.id}>{team.group_detail?.name || team.group?.name} · {team.name}</option>)}</select></label>
+            <label className="field"><span>Rol <b>*</b></span><select name="role" value={form.role} onChange={updateField}><option value="DESPACHADOR">Despachador</option><option value="SOPORTE">Agente de soporte</option><option value="SUPERVISOR">Supervisor</option><option value="ADMIN">Administrador</option></select></label>
+            {form.role === "SUPERVISOR" ? <label className="field field-wide"><span>Grupos supervisados <b>*</b></span><div className="teams-checklist compact">{groups.map((g) => <label key={g.id} className="team-check"><input type="checkbox" checked={form.managedGroups.includes(String(g.id))} onChange={() => toggleGroup(g.id)} /><span>{g.name} <small>· {g.code}</small></span></label>)}{groups.length === 0 && <small>Sin grupos registrados</small>}</div></label> : <label className="field field-wide"><span>Grupos {(form.role !== "ADMIN") && <b>*</b>}</span><div className="teams-checklist compact">{groups.map((g) => { const groupTeams = teams.filter((t) => String(t.group) === String(g.id) || String(t.group_detail?.id) === String(g.id)); if (!groupTeams.length) return null; const allSelected = groupTeams.every((t) => form.teams.includes(String(t.id))); return <label key={g.id} className="team-check"><input type="checkbox" checked={allSelected} onChange={() => toggleGroupTeams(g.id)} /><span>{g.name} <small>· {g.code}</small></span></label>; })}{groups.length === 0 && <small>Sin grupos registrados</small>}</div></label>}
             <label className="field field-wide"><span>{isNew ? "Contraseña temporal" : "Nueva contraseña"} {isNew && <b>*</b>}</span><input required={isNew} minLength="8" name="password" type="password" value={form.password} onChange={updateField} placeholder={isNew ? "Mínimo 8 caracteres" : "Déjalo vacío para conservarla"} /></label>
           </div>
           <label className="active-user-toggle"><input checked={form.isActive} name="isActive" type="checkbox" onChange={updateField} /><span><i /></span><div><strong>Usuario activo</strong><small>Puede iniciar sesión y recibir asignaciones.</small></div></label>
@@ -845,6 +1229,16 @@ function GroupFormModal({ group, onClose, onSave }) {
   return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="ticket-modal user-modal" role="dialog" aria-modal="true" aria-labelledby="group-form-title" onMouseDown={(e) => e.stopPropagation()}><header className="modal-header"><div><p className="eyebrow">Segmentación organizacional</p><h2 id="group-form-title">{isNew ? "Nuevo grupo" : "Editar grupo"}</h2><p>El grupo es el área macro (Tigo, Contrata, BBI N-2).</p></div><button className="icon-button" type="button" aria-label="Cerrar" onClick={onClose}><Icon name="close" /></button></header><form onSubmit={submit}><div className="form-grid user-form-grid"><label className="field"><span>Nombre <b>*</b></span><input autoFocus required name="name" value={form.name} onChange={updateField} placeholder="Tigo" /></label><label className="field"><span>Código <b>*</b></span><input required name="code" value={form.code} onChange={updateField} placeholder="tigo" /></label></div><label className="active-user-toggle"><input checked={form.isActive} name="isActive" type="checkbox" onChange={updateField} /><span><i /></span><div><strong>Grupo activo</strong><small>Visible para asignación.</small></div></label>{error && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}<footer className="modal-actions"><button className="secondary-button" disabled={submitting} type="button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={submitting} type="submit"><Icon name="check" size={18} /> {submitting ? "Guardando..." : isNew ? "Crear grupo" : "Guardar cambios"}</button></footer></form></section></div>;
 }
 
+function RequestTypeFormModal({ onClose, onSave, requestType }) {
+  const isNew = !requestType;
+  const [form, setForm] = useState({ kind: requestType?.kind || "CLIENTE", service: requestType?.service || "HFC", name: requestType?.name || "", isActive: requestType?.is_active ?? true });
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  function updateField(e) { const { name, value, type, checked } = e.target; setForm((c) => ({ ...c, [name]: type === "checkbox" ? checked : value })); }
+  async function submit(e) { e.preventDefault(); if (!form.name.trim()) { setError("Completa el nombre del tipo."); return; } setSubmitting(true); setError(""); try { await onSave(form, requestType); } catch (err) { setError(err.message || "No fue posible guardar el tipo."); setSubmitting(false); } }
+  return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="ticket-modal user-modal" role="dialog" aria-modal="true" aria-labelledby="rt-form-title" onMouseDown={(e) => e.stopPropagation()}><header className="modal-header"><div><p className="eyebrow">Catálogo de solicitudes</p><h2 id="rt-form-title">{isNew ? "Nuevo tipo" : "Editar tipo"}</h2><p>Define a qué solicitud y servicio aplica.</p></div><button className="icon-button" type="button" aria-label="Cerrar" onClick={onClose}><Icon name="close" /></button></header><form onSubmit={submit}><div className="form-grid user-form-grid"><label className="field"><span>Tipo de solicitud <b>*</b></span><select name="kind" value={form.kind} onChange={updateField}><option value="CLIENTE">Solicitud de Soporte Cliente</option><option value="TECNICO">Soporte Al Tecnico</option></select></label><label className="field"><span>Servicio <b>*</b></span><select name="service" value={form.service} onChange={updateField}><option value="HFC">HFC</option><option value="FTTH">FTTH</option><option value="WTTX">WTTX</option><option value="DTH">DTH</option></select></label><label className="field field-wide"><span>Nombre <b>*</b></span><input autoFocus required name="name" value={form.name} onChange={updateField} placeholder="ONT sin VLAN" /></label></div><label className="active-user-toggle"><input checked={form.isActive} name="isActive" type="checkbox" onChange={updateField} /><span><i /></span><div><strong>Tipo activo</strong><small>Visible en el formulario.</small></div></label>{error && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}<footer className="modal-actions"><button className="secondary-button" disabled={submitting} type="button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={submitting} type="submit"><Icon name="check" size={18} /> {submitting ? "Guardando..." : isNew ? "Crear tipo" : "Guardar cambios"}</button></footer></form></section></div>;
+}
+
 function PasswordResetModal({ onClose, onSave, user }) {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -865,11 +1259,11 @@ function PanelHeading({ eyebrow, title, action }) {
 function TicketTable({ tickets, compact = false, currentUser, onNotify, onOpen, onResolve, onTake }) {
   return (
     <table className={`ticket-table ${compact ? "compact" : ""}`}>
-      <thead><tr><th>Ticket</th><th>Prioridad</th><th>Estado</th><th>Equipo</th><th>SLA restante</th>{!compact && <th aria-label="Acciones" />}</tr></thead>
+      <thead><tr><th>Ticket</th><th>Prioridad</th><th>Estado</th><th>Grupo</th><th>SLA restante</th>{!compact && <th aria-label="Acciones" />}</tr></thead>
       <tbody>
         {tickets.map((ticket) => (
           <tr className={onOpen ? "ticket-row-clickable" : ""} key={ticket.id} onClick={() => onOpen?.(ticket)}>
-            <td data-label="Ticket"><div className="ticket-title"><div className="avatar ticket-avatar">{ticket.avatar}</div><div><span>{ticket.id}</span><strong>{ticket.title}</strong><small>{ticket.category} · {ticket.created}</small></div></div></td>
+            <td data-label="Ticket"><div className="ticket-title"><div className="avatar ticket-avatar">{ticket.avatar}</div><div><span>{ticket.id}{ticket.identificador ? ` · ${ticket.identificador}` : ""}</span><strong>{ticket.title}</strong><small>{ticket.category}{ticket.tipoSolicitud ? ` · ${ticket.tipoSolicitud}` : ""} · {ticket.created}</small></div></div></td>
             <td data-label="Prioridad"><span className={`priority-pill ${priorityClass[ticket.priority]}`}>{ticket.priority}</span></td>
             <td data-label="Estado"><span className={`status-pill ${statusClass[ticket.status]}`}>{ticket.status}</span></td>
             <td data-label="Equipo"><span className="team-label">{ticket.team}</span></td>
@@ -946,16 +1340,35 @@ function ResolveTicketModal({ onClose, onResolve, ticket }) {
   );
 }
 
-function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onResolve, onTake, onValidate, ticket }) {
+function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onReassign, onRelease, onResolve, onTake, onValidate, teams, ticket, users }) {
   const [actionError, setActionError] = useState("");
   const [acting, setActing] = useState(false);
   const [attachFile, setAttachFile] = useState(null);
   const [attachError, setAttachError] = useState("");
   const [uploading, setUploading] = useState(false);
+  const attachList = attachFile ? (Array.isArray(attachFile) ? attachFile : [attachFile]) : [];
+  const [attachPreviews, setAttachPreviews] = useState([]);
+  useEffect(() => {
+    const urls = attachList.map((f) => URL.createObjectURL(f));
+    setAttachPreviews(urls);
+    return () => urls.forEach((u) => URL.revokeObjectURL(u));
+  }, [attachFile]);
+
+  function removeAttachFile(index) {
+    const list = attachList.filter((_, i) => i !== index);
+    setAttachFile(list.length === 0 ? null : list.length === 1 ? list[0] : list);
+    setAttachError("");
+  }
+  const [reassignTeam, setReassignTeam] = useState("");
+  const [rejectComment, setRejectComment] = useState("");
+  const [showReject, setShowReject] = useState(false);
   const canTake = currentUser.role === "SOPORTE" && ["ABIERTO", "ASIGNADO"].includes(ticket.statusCode);
+  const canRelease = ["ASIGNADO", "EN_PROCESO"].includes(ticket.statusCode) && (ticket.assigneeId === currentUser.id || currentUser.role === "ADMIN" || (currentUser.role === "SUPERVISOR" && (currentUser.groups || []).map((g) => g.code).includes(ticket.groupCode)));
   const canResolve = currentUser.role === "SOPORTE" && ticket.statusCode === "EN_PROCESO";
   const canValidate = currentUser.role !== "SOPORTE" && ticket.statusCode === "VALIDACION";
   const canAttach = currentUser.is_administrator || currentUser.role === "ADMIN" || ticket.requester === currentUser.name || (currentUser.role === "SOPORTE" && currentUser.team === ticket.team);
+  const canReassign = ticket.statusCode !== "CERRADO" && ["DESPACHADOR", "SOPORTE", "SUPERVISOR", "ADMIN"].includes(currentUser.role) && (currentUser.role === "ADMIN" || (currentUser.groups || []).map((g) => g.code).includes(ticket.groupCode));
+  const candidates = (users || []).filter((u) => u.is_active && !u.is_locked && u.role === "SOPORTE" && (u.groupName || "").split(",").map((s) => s.trim()).includes(ticket.team));
 
   async function runAction(action, accepted) {
     setActing(true);
@@ -968,21 +1381,37 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onResolv
     }
   }
 
-  function handleAttach(event) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    if (!["image/jpeg", "image/jpg", "image/png"].includes(file.type) && !/\.jpe?g$|\.png$/i.test(file.name)) {
-      setAttachError("Solo se permiten JPG o PNG.");
-      setAttachFile(null);
+  function pickAttachFiles(files, append = false) {
+    if (!files.length) return;
+    const current = append ? (Array.isArray(attachFile) ? attachFile : attachFile ? [attachFile] : []) : [];
+    const combined = [...current, ...files];
+    if (ticket.attachments.length + combined.length > 5) {
+      setAttachError(`Máximo 5 imágenes por ticket (ya tienes ${ticket.attachments.length}).`);
       return;
     }
-    if (file.size > 5 * 1024 * 1024) {
-      setAttachError("El archivo supera 5 MB.");
-      setAttachFile(null);
-      return;
+    for (const f of files) {
+      if (f.size > 5 * 1024 * 1024) {
+        setAttachError(`"${f.name}" supera 5 MB.`);
+        return;
+      }
+      if (!["image/jpeg", "image/jpg", "image/png"].includes(f.type) && !/\.jpe?g$|\.png$/i.test(f.name)) {
+        setAttachError(`"${f.name}" no es JPG/PNG.`);
+        return;
+      }
     }
     setAttachError("");
-    setAttachFile(file);
+    setAttachFile(combined.length === 1 ? combined[0] : combined);
+  }
+
+  function handleAttach(event) {
+    pickAttachFiles(Array.from(event.target.files || []));
+  }
+
+  function handleAttachPaste(event) {
+    const files = Array.from(event.clipboardData?.files || []).filter((f) => f.type.startsWith("image/"));
+    if (!files.length) return;
+    event.preventDefault();
+    pickAttachFiles(files, true);
   }
 
   async function submitAttach(event) {
@@ -994,9 +1423,10 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onResolv
     setUploading(true);
     setAttachError("");
     try {
-      await onAttach(ticket, attachFile);
+      const files = Array.isArray(attachFile) ? attachFile : [attachFile];
+      for (const f of files) await onAttach(ticket, f);
       setAttachFile(null);
-      event.target.reset();
+      if (event.target) event.target.reset();
     } catch (error) {
       setAttachError(error.message || "No fue posible adjuntar la imagen.");
     } finally {
@@ -1013,9 +1443,10 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onResolv
         </header>
         {isLoading ? <div className="detail-loading"><span className="loading-mark"><i /><i /><i /></span><p>Cargando historial del ticket...</p></div> : <div className="ticket-detail-content">
           <div className="detail-main">
+            <section className="detail-section"><div className="detail-section-heading"><span className="detail-label">Datos de la solicitud</span><span>{ticket.identificador}</span></div><div className="profile-details" style={{ padding: 0, marginTop: "10px" }}>{ticket.identificador && <div className="profile-row"><span>Contrato / OT</span><span>{ticket.identificador}</span></div>}{ticket.cliente && <div className="profile-row"><span>Cliente</span><span>{ticket.cliente}</span></div>}{ticket.nodo && <div className="profile-row"><span>Nodo</span><span>{ticket.nodo}</span></div>}{ticket.tipoSolicitud && <div className="profile-row"><span>Tipo</span><span>{ticket.tipoSolicitud}</span></div>}</div></section>
             <section className="detail-section"><span className="detail-label">Descripción reportada</span><p className="detail-description">{ticket.description || "Sin descripción adicional."}</p></section>
             {ticket.resolutionNotes && <section className="detail-section solution-detail"><span className="detail-label"><Icon name="checkCircle" size={15} /> Solución registrada</span><p>{ticket.resolutionNotes}</p></section>}
-            <section className="detail-section"><div className="detail-section-heading"><span className="detail-label">Evidencia adjunta</span><span>{ticket.attachments.length}</span></div>{ticket.attachments.length ? <div className="attachment-list">{ticket.attachments.map((attachment) => <a href={attachment.url} key={attachment.id} rel="noreferrer" target="_blank"><Icon name="folder" size={18} /><span><strong>{attachment.original_name}</strong><small>{Math.max(1, Math.round(attachment.size / 1024))} KB · {formatDateTime(attachment.created_at)}</small></span><Icon name="arrowRight" size={15} /></a>)}</div> : <p className="detail-empty">No hay evidencia adjunta.</p>}{canAttach && <form className="detail-attach-form" onSubmit={submitAttach}><label className={`upload-box small ${attachError ? "has-error" : ""}`}><input type="file" accept=".jpg,.jpeg,.png" onChange={handleAttach} /><Icon name="upload" size={16} /><span>{attachFile ? attachFile.name : "Adjuntar JPG/PNG (máx. 5 MB)"}</span></label><button className="secondary-button" disabled={uploading || !attachFile} type="submit">{uploading ? "Subiendo..." : "Adjuntar imagen"}</button></form>}{attachError && <p className="form-submit-error" role="alert"><Icon name="alert" size={14} /> {attachError}</p>}</section>
+            <section className="detail-section"><div className="detail-section-heading"><span className="detail-label">Evidencia adjunta</span><span>{ticket.attachments.length}/5</span></div>{ticket.attachments.length ? <div className="attachment-list">{ticket.attachments.map((attachment) => <a href={attachment.url} key={attachment.id} rel="noreferrer" target="_blank"><img src={attachment.url} alt={attachment.original_name} style={{ width: "52px", height: "52px", objectFit: "cover", borderRadius: "6px", flex: "0 0 auto" }} onError={(e) => { e.target.style.display = "none"; }} /><span><strong>{attachment.original_name}</strong><small>{Math.max(1, Math.round(attachment.size / 1024))} KB · {formatDateTime(attachment.created_at)}</small></span><Icon name="arrowRight" size={15} /></a>)}</div> : <p className="detail-empty">No hay evidencia adjunta.</p>}{canAttach && <form className="detail-attach-form" onSubmit={submitAttach} onPaste={handleAttachPaste}><label className={`upload-box small ${attachError ? "has-error" : ""}`}><input type="file" accept=".jpg,.jpeg,.png" multiple onChange={handleAttach} /><Icon name="upload" size={16} /><span>{attachList.length ? `${attachList.length} ${attachList.length === 1 ? "imagen" : "imágenes"}` : "Adjuntar o pegar (Ctrl+V)"}</span></label><button className="secondary-button" disabled={uploading || !attachFile} type="submit">{uploading ? "Subiendo..." : "Adjuntar"}</button></form>}{attachList.length > 0 && <div className="attach-preview-grid">{attachList.map((f, i) => <div className="attach-preview" key={`${f.name}-${f.size}-${i}`}><img src={attachPreviews[i]} alt={f.name} /><span title={f.name}>{f.name}</span><button type="button" aria-label={`Quitar ${f.name}`} onClick={() => removeAttachFile(i)}>✕</button></div>)}</div>}{attachError && <p className="form-submit-error" role="alert"><Icon name="alert" size={14} /> {attachError}</p>}</section>
             <section className="detail-section history-section"><div className="detail-section-heading"><span className="detail-label">Historial del ticket</span><span>{ticket.events.length}</span></div>{ticket.events.length ? <ol className="ticket-history">{ticket.events.map((event) => <li key={event.id}><span className="history-dot" /><div><strong>{event.event_label}</strong><p>{event.comment || `${event.actor?.name || "Sistema"} actualizó el ticket.`}</p><small>{event.actor?.name || "Sistema"} · {formatDateTime(event.created_at)}</small></div></li>)}</ol> : <p className="detail-empty">Aún no hay eventos registrados.</p>}</section>
           </div>
           <aside className="detail-sidebar">
@@ -1023,11 +1454,16 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onResolv
             <div className="detail-meta"><span className="detail-label">SLA restante</span><strong className={`sla-time ${ticket.slaTone}`}><i /> {ticket.sla}</strong><small>Vence: {formatDateTime(ticket.slaDueAt)}</small></div>
             <div className="detail-meta"><span className="detail-label">Despachador</span><strong>{ticket.requester}</strong><small>{ticket.originTeam}</small></div>
             <div className="detail-meta"><span className="detail-label">Atiende</span><strong>{ticket.assignee}</strong><small>{ticket.team}</small></div>
-            {(canTake || canResolve || canValidate) && <div className="detail-actions">
+            {(canTake || canRelease || canResolve || canValidate) && <div className="detail-actions">
               {canTake && <button className="primary-button" disabled={acting} type="button" onClick={() => runAction(onTake)}>Tomar ticket</button>}
+              {canRelease && <button className="secondary-button" disabled={acting} type="button" onClick={() => runAction(onRelease)}>Liberar a bandeja</button>}
               {canResolve && <button className="primary-button" type="button" onClick={() => onResolve(ticket)}>Registrar solución</button>}
-              {canValidate && <><button className="primary-button" disabled={acting} type="button" onClick={() => runAction(onValidate, true)}><Icon name="check" size={17} /> Aprobar solución</button><button className="secondary-button" disabled={acting} type="button" onClick={() => runAction(onValidate, false)}>Rechazar y devolver</button></>}
+              {canValidate && <>
+                <button className="primary-button" disabled={acting} type="button" onClick={() => runAction((t) => onValidate(t, true), true)}><Icon name="check" size={17} /> Aprobar solución</button>
+                {!showReject ? <button className="secondary-button" disabled={acting} type="button" onClick={() => setShowReject(true)}>Rechazar y devolver</button> : <div style={{ display: "grid", gap: "6px", marginTop: "8px", width: "100%" }}><textarea value={rejectComment} onChange={(e) => setRejectComment(e.target.value)} placeholder="Motivo del rechazo (obligatorio) — explica qué falta o por qué se devuelve" rows="3" style={{ width: "100%", border: "1px solid var(--line-strong)", borderRadius: "6px", padding: "8px", fontSize: "11px" }} /><div style={{ display: "flex", gap: "6px" }}><button className="secondary-button" disabled={acting || !rejectComment.trim()} type="button" onClick={async () => { setActing(true); setActionError(""); try { await onValidate(ticket, false, rejectComment); setShowReject(false); setRejectComment(""); } catch (e) { setActionError(e.message || "No se pudo rechazar."); } finally { setActing(false); } }}>Confirmar rechazo</button><button className="secondary-button" type="button" onClick={() => { setShowReject(false); setRejectComment(""); }}>Cancelar</button></div></div>}
+              </>}
             </div>}
+            {canReassign && <div className="detail-meta" style={{ marginTop: "14px" }}><span className="detail-label">Reasignar a persona del grupo</span><div style={{ display: "flex", gap: "6px", marginTop: "6px" }}><select value={reassignTeam} onChange={(e) => setReassignTeam(e.target.value)} style={{ flex: 1, height: "34px", border: "1px solid var(--line-strong)", borderRadius: "6px", padding: "0 8px", fontSize: "11px" }}><option value="">Seleccionar persona</option>{candidates.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select><button className="secondary-button" disabled={acting || !reassignTeam} type="button" style={{ minHeight: "34px" }} onClick={async () => { setActing(true); setActionError(""); try { await onReassign(ticket, Number(reassignTeam)); setReassignTeam(""); } catch (e) { setActionError(e.message || "No se pudo reasignar."); } finally { setActing(false); } }}>Mover</button></div>{candidates.length === 0 && <small style={{ color: "var(--quiet)", fontSize: "10px" }}>Sin agentes en este grupo.</small>}</div>}
             {actionError && <p className="detail-action-error" role="alert"><Icon name="alert" size={15} /> {actionError}</p>}
           </aside>
         </div>}
@@ -1036,55 +1472,171 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onResolv
   );
 }
 
-function NewTicketModal({ onClose, onCreate, session }) {
-  const [form, setForm] = useState({ title: "", category: "FTTH", priority: "MEDIA", description: "" });
+function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
+  const [form, setForm] = useState({ kind: "", service: "", tipoId: "", identificador: "", cliente: "", nodo: "", title: "", description: "" });
+  const [catalog, setCatalog] = useState([]);
   const [attachment, setAttachment] = useState(null);
   const [attachmentError, setAttachmentError] = useState("");
   const [submitError, setSubmitError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [duplicate, setDuplicate] = useState(null);
+  const [checking, setChecking] = useState(false);
+  const [idError, setIdError] = useState("");
+  const [clientError, setClientError] = useState("");
+  const attachList = attachment ? (Array.isArray(attachment) ? attachment : [attachment]) : [];
+  const [previews, setPreviews] = useState([]);
+  useEffect(() => {
+    const urls = attachList.map((f) => URL.createObjectURL(f));
+    setPreviews(urls);
+    return () => urls.forEach((u) => URL.revokeObjectURL(u));
+  }, [attachment]);
+
+  function removeAttachment(index) {
+    const list = attachList.filter((_, i) => i !== index);
+    setAttachment(list.length === 0 ? null : list.length === 1 ? list[0] : list);
+    setAttachmentError("");
+  }
+
+  function validateIdentificador(value) {
+    if (!value.trim()) { setIdError(""); return false; }
+    if (!/^[0-9]+$/.test(value.trim())) { setIdError("Contrato / OT solo admite números."); return false; }
+    setIdError("");
+    return true;
+  }
+
+  function validateCliente(value) {
+    if (!value.trim()) { setClientError(""); return false; }
+    if (!/^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9\s.\-,&()']+$/.test(value.trim())) { setClientError("Solo letras, números, espacios y . , - & ( )."); return false; }
+    setClientError("");
+    return true;
+  }
+
+  useEffect(() => {
+    getRequestTypes({ active: "1" }).then((payload) => setCatalog(payload.results || payload)).catch(() => setCatalog([]));
+  }, []);
+
+  const services = [...new Set(catalog.filter((t) => !form.kind || t.kind === form.kind).map((t) => t.service))];
+  const options = catalog.filter((t) => (!form.kind || t.kind === form.kind) && (!form.service || t.service === form.service));
 
   function updateField(event) {
     const { name, value } = event.target;
-    setForm((currentForm) => ({ ...currentForm, [name]: value }));
+    setForm((currentForm) => {
+      const next = { ...currentForm, [name]: value };
+      if (name === "kind") { next.service = ""; next.tipoId = ""; }
+      if (name === "service") { next.tipoId = ""; }
+      if (name === "tipoId") {
+        const sel = options.find((o) => String(o.id) === String(value));
+        if (sel) {
+          const kindShort = next.kind === "TECNICO" ? "Técnico" : "Cliente";
+          next.title = `${kindShort} · ${next.service} · ${sel.name}`;
+        }
+      }
+      return next;
+    });
+    if (name === "identificador") setDuplicate(null);
+  }
+
+  async function checkDuplicate() {
+    const value = form.identificador.trim();
+    if (!value || !validateIdentificador(value)) return;
+    setChecking(true);
+    try {
+      const payload = await checkOpenTicket(value);
+      const results = payload.results || payload;
+      setDuplicate(results.length ? results[0] : null);
+    } catch {
+      setDuplicate(null);
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  function pickFiles(files, append = false) {
+    if (!files.length) return;
+    const current = append ? (Array.isArray(attachment) ? attachment : attachment ? [attachment] : []) : [];
+    const combined = [...current, ...files];
+    if (combined.length > 5) {
+      setAttachmentError(`Máximo 5 imágenes (ya tienes ${current.length}).`);
+      return;
+    }
+    for (const f of files) {
+      if (f.size > 5 * 1024 * 1024) {
+        setAttachmentError(`"${f.name}" supera 5 MB.`);
+        return;
+      }
+      if (!["image/jpeg", "image/jpg", "image/png"].includes(f.type) && !/\.jpe?g$|\.png$/i.test(f.name)) {
+        setAttachmentError(`"${f.name}" no es JPG/PNG.`);
+        return;
+      }
+    }
+    setAttachment(combined.length === 1 ? combined[0] : combined);
+    setAttachmentError("");
   }
 
   function handleAttachment(event) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
-      setAttachment(null);
-      setAttachmentError("El archivo supera el límite de 5 MB.");
-      return;
-    }
-    setAttachment(file);
-    setAttachmentError("");
+    pickFiles(Array.from(event.target.files || []));
+  }
+
+  function handlePaste(event) {
+    const files = Array.from(event.clipboardData?.files || []).filter((f) => f.type.startsWith("image/"));
+    if (!files.length) return;
+    event.preventDefault();
+    pickFiles(files, true);
   }
 
   async function submit(event) {
     event.preventDefault();
+    const idOk = validateIdentificador(form.identificador);
+    const clientOk = validateCliente(form.cliente);
+    if (!idOk || !clientOk) {
+      setSubmitError("Revisa los campos marcados en rojo.");
+      return;
+    }
+    const idValue = form.identificador.trim();
+    const clientValue = form.cliente.trim();
     setSubmitting(true);
     setSubmitError("");
     try {
-      await onCreate({ ...form, attachment });
+      await onCreate({
+        title: form.title,
+        description: form.description,
+        category: form.service,
+        priority: "MEDIA",
+        identificador: idValue,
+        cliente_nombre: clientValue,
+        nodo: form.nodo.trim(),
+        tipo_solicitud: form.tipoId ? Number(form.tipoId) : null,
+        attachment,
+      });
     } catch (error) {
       setSubmitError(error.message || "No fue posible crear el ticket.");
       setSubmitting(false);
     }
   }
 
+  const idLabel = form.kind === "CLIENTE" ? "Contrato" : form.kind === "TECNICO" ? "OT" : "Contrato / OT";
+  const canFillDetails = Boolean(form.kind && form.service && form.tipoId);
+
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section className="ticket-modal" role="dialog" aria-modal="true" aria-labelledby="new-ticket-title" onMouseDown={(event) => event.stopPropagation()}>
-        <header className="modal-header"><div><p className="eyebrow">Nueva solicitud</p><h2 id="new-ticket-title">Crear ticket de soporte</h2><p>Tu grupo y equipo se asignarán automáticamente.</p></div><button className="icon-button" type="button" aria-label="Cerrar formulario" onClick={onClose}><Icon name="close" /></button></header>
+        <header className="modal-header"><div><p className="eyebrow">Nueva solicitud</p><h2 id="new-ticket-title">Crear ticket de soporte</h2><p>Elige el tipo de solicitud y completa los campos.</p></div><button className="icon-button" type="button" aria-label="Cerrar formulario" onClick={onClose}><Icon name="close" /></button></header>
         <form onSubmit={submit}>
-          <div className="auto-assignment"><Icon name="shield" size={19} /><div><span>Enrutamiento automático</span><strong>{session.group} · {session.team} · Soporte Despacho</strong></div></div>
+          <div className="auto-assignment"><Icon name="shield" size={19} /><div><span>Enrutamiento automático</span><strong>{session.groupsLabel || session.group} · Soporte Despacho</strong></div></div>
           <div className="form-grid">
-            <label className="field field-wide"><span>Asunto <b>*</b></span><input autoFocus required name="title" value={form.title} onChange={updateField} placeholder="Describe el inconveniente de forma breve" /></label>
-            <label className="field"><span>Tecnología <b>*</b></span><select name="category" value={form.category} onChange={updateField}><option value="FTTH">FTTH</option><option value="HFC">HFC</option><option value="DTH">DTH</option><option value="ADMINISTRATIVO">Administrativo</option></select></label>
-            <label className="field"><span>Prioridad <b>*</b></span><select name="priority" value={form.priority} onChange={updateField}><option value="CRITICA">Crítica</option><option value="ALTA">Alta</option><option value="MEDIA">Media</option><option value="BAJA">Baja</option></select></label>
-            <label className="field field-wide"><span>Detalle del caso <b>*</b></span><textarea required name="description" value={form.description} onChange={updateField} rows="4" placeholder="Incluye síntomas, número de orden, ubicación o pasos ya realizados." /></label>
+            <label className="field"><span>Tipo de solicitud <b>*</b></span><select required name="kind" value={form.kind} onChange={updateField}><option value="">Seleccionar</option><option value="CLIENTE">Solicitud de Soporte Cliente</option><option value="TECNICO">Soporte Al Tecnico</option></select></label>
+            <label className="field"><span>Tipo de servicio <b>*</b></span><select required name="service" value={form.service} onChange={updateField} disabled={!form.kind}><option value="">Seleccionar</option>{services.map((s) => <option key={s} value={s}>{s}</option>)}</select></label>
+            <label className="field field-wide"><span>Solicitud específica <b>*</b></span><select required name="tipoId" value={form.tipoId} onChange={updateField} disabled={!form.service}><option value="">Seleccionar</option>{options.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select></label>
+            <label className="field"><span>{idLabel} <b>*</b></span><input required name="identificador" inputMode="numeric" value={form.identificador} onChange={updateField} onBlur={(e) => { validateIdentificador(e.target.value); checkDuplicate(); }} disabled={!canFillDetails} placeholder={form.kind === "TECNICO" ? "Solo números" : "Solo números"} />{idError && <small className="field-error">{idError}</small>}</label>
+            <label className="field"><span>Prioridad</span><input disabled value="Media (automática)" /></label>
+            <label className="field"><span>Nombre Cliente <b>*</b></span><input required name="cliente" value={form.cliente} onChange={updateField} onBlur={(e) => validateCliente(e.target.value)} disabled={!canFillDetails} placeholder="Nombre del cliente" />{clientError && <small className="field-error">{clientError}</small>}</label>
+            <label className="field"><span>Nodo <b>*</b></span><input required name="nodo" value={form.nodo} onChange={updateField} disabled={!canFillDetails} placeholder="Nodo" /></label>
+            <label className="field field-wide"><span>Comentarios <b>*</b></span><textarea required name="description" value={form.description} onChange={updateField} disabled={!canFillDetails} rows="4" placeholder="Detalle del caso, síntomas, ubicación o pasos ya realizados." /></label>
           </div>
-          <div className="attachment-section"><div><span>Adjuntar evidencia</span><small>JPG o PNG, máximo 5 MB</small></div><label className={`upload-box ${attachmentError ? "has-error" : ""}`}><input type="file" accept=".jpg,.jpeg,.png" onChange={handleAttachment} /><Icon name="upload" size={20} /><span>{attachment?.name || "Seleccionar archivo"}</span></label>{attachmentError && <p className="field-error">{attachmentError}</p>}</div>
+          {checking && <p className="form-info" role="status">Verificando {idLabel}...</p>}
+          {duplicate && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> Ya existe {duplicate.reference} abierto con este {idLabel} ({duplicate.status_label}). <button type="button" className="text-button" onClick={() => onOpenTicket && onOpenTicket(duplicate.id)}>Ver ticket y documentarlo ahí</button></p>}
+          <div className="attachment-section" onPaste={handlePaste}><div><span>Adjuntar evidencia</span><small>JPG o PNG, máximo 5 MB, hasta 5 imágenes — o pega con Ctrl+V</small></div><label className={`upload-box ${attachmentError ? "has-error" : ""}`}><input type="file" accept=".jpg,.jpeg,.png" multiple onChange={handleAttachment} /><Icon name="upload" size={20} /><span>{attachList.length ? `${attachList.length} ${attachList.length === 1 ? "imagen" : "imágenes"}` : "Seleccionar o pegar imagen"}</span></label>{attachmentError && <p className="field-error">{attachmentError}</p>}</div>
+          {attachList.length > 0 && <div className="attach-preview-grid">{attachList.map((f, i) => <div className="attach-preview" key={`${f.name}-${f.size}-${i}`}><img src={previews[i]} alt={f.name} /><span title={f.name}>{f.name}</span><button type="button" aria-label={`Quitar ${f.name}`} onClick={() => removeAttachment(i)}>✕</button></div>)}</div>}
           {submitError && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> {submitError}</p>}
           <footer className="modal-actions"><button className="secondary-button" disabled={submitting} type="button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={submitting} type="submit"><Icon name="ticket" size={18} /> {submitting ? "Enviando..." : "Enviar a soporte"}</button></footer>
         </form>
@@ -1158,13 +1710,9 @@ function LoginScreen({ brand, onLogin, onToggleTheme, theme }) {
         </a>
         <div className="login-intro-content">
           <p className="eyebrow">Soporte técnico conectado</p>
-          <h1>Decisiones claras para cada solicitud.</h1>
-          <p>Centraliza la operación de HFC, FTTH y DTH desde una única bandeja con seguimiento de SLA.</p>
-          <div className="login-flow" aria-label="Flujo de un ticket">
-            <span>Solicitud</span><Icon name="arrowRight" size={16} /><span>Soporte</span><Icon name="arrowRight" size={16} /><span>Validación</span>
-          </div>
+          <h1>Soporte Despacho</h1>
+          <p>Centro de control Tigo.</p>
         </div>
-        <div className="login-intro-footer"><span><b>3</b> perfiles de operación</span><span><b>1</b> vista centralizada</span></div>
       </section>
 
       <section className="login-form-area">
@@ -1203,12 +1751,12 @@ function PasswordResetPage({ brand, theme, onToggleTheme }) {
     e.preventDefault();
     setError("");
     setSuccess("");
-    if (!email.trim() || !uid.trim() || !token.trim()) { setError("El enlace debe contener uid y token. Solicita un nuevo correo si es necesario."); return; }
+    if (!uid.trim() || !token.trim()) { setError("El enlace debe contener uid y token. Solicita un nuevo correo si es necesario."); return; }
     if (newPassword.length < 8) { setError("La nueva contraseña debe tener al menos 8 caracteres."); return; }
     if (newPassword !== confirm) { setError("Las contraseñas no coinciden."); return; }
     setSubmitting(true);
     try {
-      await confirmPasswordReset({ email: email.trim().toLowerCase(), uid: uid.trim(), token: token.trim(), newPassword });
+      await confirmPasswordReset({ email: "", uid: uid.trim(), token: token.trim(), newPassword });
       setSuccess("Clave restablecida correctamente. Ya puedes iniciar sesión.");
     } catch (err) {
       setError(err.message || "No fue posible restablecer la clave.");
@@ -1241,8 +1789,7 @@ function PasswordResetPage({ brand, theme, onToggleTheme }) {
           <form className="login-card" onSubmit={submit}>
             <p className="eyebrow">Restablecer</p>
             <h2>Nueva contraseña</h2>
-            <p className="login-copy">Ingresa el correo y define tu nueva clave. El enlace es válido por 1 hora y de un solo uso.</p>
-            <label className="login-field"><span>Correo institucional</span><input autoComplete="email" required type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="nombre@empresa.com" /></label>
+            <p className="login-copy">Define tu nueva clave. El enlace es válido por 1 hora y de un solo uso.</p>
             <input type="hidden" value={uid} />
             <input type="hidden" value={token} />
             <label className="login-field"><span>Nueva contraseña</span><input required minLength="8" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Mínimo 8 caracteres" /></label>
@@ -1270,16 +1817,14 @@ function ProfileModal({ onClose, tickets, user }) {
         </div>
         <div className="profile-details">
           <div className="profile-row"><span>Usuario</span><span>{user.username}</span></div>
-          <div className="profile-row"><span>Grupo</span><span>{user.group}</span></div>
-          <div className="profile-row"><span>Equipo</span><span>{user.team}</span></div>
+          <div className="profile-row"><span>Grupos</span><span>{user.groupsLabel || user.group}</span></div>
           <div className="profile-row"><span>Estado</span><span>{user.is_locked ? "Bloqueada" : "Activa"}</span></div>
         </div>
-        <div className="profile-stats">
+        <div className="profile-stats" style={{ paddingBottom: "20px" }}>
           <div className="profile-stat"><strong>{created}</strong><span>Creados</span></div>
           <div className="profile-stat"><strong>{assigned}</strong><span>Asignados</span></div>
           <div className="profile-stat"><strong>{active}</strong><span>Activos</span></div>
         </div>
-        <footer className="modal-actions" style={{ marginTop: "16px" }}><button className="secondary-button" type="button" onClick={onClose}>Cerrar</button></footer>
       </section>
     </div>
   );

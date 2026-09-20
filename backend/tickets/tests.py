@@ -21,8 +21,11 @@ class TicketFlowTests(APITestCase):
         self.media_override.enable()
         self.addCleanup(self.media_override.disable)
         self.addCleanup(lambda: shutil.rmtree(self.media_root, ignore_errors=True))
-        group = WorkGroup.objects.create(name="Tigo", code="tigo")
-        self.team = Team.objects.create(group=group, name="FTTH Norte", code="ftth-norte")
+        group, _ = WorkGroup.objects.get_or_create(name="Tigo", defaults={"code": "tigo"})
+        self.team, _ = Team.objects.get_or_create(group=group, name="FTTH Norte", defaults={"code": "ftth-norte"})
+        self.soporte_b, _ = Team.objects.get_or_create(
+            group=WorkGroup.objects.get(code="soporte-b"), name="Soporte B", defaults={"code": "soporte-b"}
+        )
         self.dispatcher = User.objects.create_user(
             username="despacho@sestel.local",
             email="despacho@sestel.local",
@@ -30,24 +33,24 @@ class TicketFlowTests(APITestCase):
             first_name="Andrea",
             last_name="Morales",
             role=User.Role.DISPATCHER,
-            team=self.team,
         )
+        self.dispatcher.teams.set([self.team])
         self.other_dispatcher = User.objects.create_user(
             username="otro@sestel.local",
             email="otro@sestel.local",
             password="Sestel2026!",
             role=User.Role.DISPATCHER,
-            team=self.team,
         )
+        self.other_dispatcher.teams.set([self.team])
         self.support = User.objects.create_user(
             username="soporte@sestel.local",
             email="soporte@sestel.local",
             password="Sestel2026!",
             role=User.Role.SUPPORT,
-            team=self.team,
         )
+        self.support.teams.set([self.team, self.soporte_b])
 
-    def create_ticket_through_api(self):
+    def create_ticket_through_api(self, identificador="10001"):
         self.client.force_authenticate(self.dispatcher)
         response = self.client.post(
             "/api/tickets/",
@@ -56,6 +59,9 @@ class TicketFlowTests(APITestCase):
                 "description": "La ONT permanece sin señal después de la activación.",
                 "category": Ticket.Category.FTTH,
                 "priority": Ticket.Priority.HIGH,
+                "identificador": identificador,
+                "cliente_nombre": "Cliente Prueba",
+                "nodo": "NODO-1",
             },
             format="json",
         )
@@ -65,12 +71,19 @@ class TicketFlowTests(APITestCase):
     def test_ticket_is_scoped_to_its_creator_for_dispatchers(self):
         ticket = self.create_ticket_through_api()
         self.assertEqual(ticket.creator, self.dispatcher)
-        self.assertEqual(ticket.origin_team, self.dispatcher.team)
+        self.assertEqual(ticket.origin_team, self.team)
 
         self.client.force_authenticate(self.other_dispatcher)
         response = self.client.get("/api/tickets/")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["count"], 0)
+        self.assertEqual(response.data["count"], 1)
+        other_group, _ = WorkGroup.objects.get_or_create(name="Otro Grupo", defaults={"code": "otro-grupo-test"})
+        other_team, _ = Team.objects.get_or_create(group=other_group, name="Otro Equipo", defaults={"code": "otro-equipo-test"})
+        outsider = User.objects.create_user(username="outsider@sestel.local", email="outsider@sestel.local", password="Sestel2026!", role=User.Role.DISPATCHER)
+        outsider.teams.set([other_team])
+        self.client.force_authenticate(outsider)
+        response2 = self.client.get("/api/tickets/")
+        self.assertEqual(response2.data["count"], 0)
 
     def test_support_resolution_requires_creator_validation(self):
         ticket = self.create_ticket_through_api()
@@ -92,7 +105,7 @@ class TicketFlowTests(APITestCase):
             {"approved": True},
             format="json",
         )
-        self.assertEqual(rejected_response.status_code, 404)
+        self.assertEqual(rejected_response.status_code, 403)
 
         self.client.force_authenticate(self.dispatcher)
         approved_response = self.client.post(

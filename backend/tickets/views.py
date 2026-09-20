@@ -1,4 +1,4 @@
-from django.db.models import Count, Q
+from django.db.models import Count, F, Q
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -10,11 +10,35 @@ from rest_framework.views import APIView
 from accounts.models import User
 from accounts.permissions import IsAdministrator
 
-from .models import Ticket
+from .models import RequestType, Ticket, TicketEvent
 from .permissions import require_support_access, require_validation_access, visible_tickets_for
-from .serializers import ResolutionSerializer, TicketAttachmentSerializer, TicketCreateSerializer, TicketSerializer, ValidationSerializer
+from .serializers import RequestTypeSerializer, ResolutionSerializer, TicketAttachmentSerializer, TicketCreateSerializer, TicketSerializer, ValidationSerializer
 from .services import escalate_ticket, route_ticket, take_ticket, validate_ticket
 from .services import resolve_ticket as resolve_ticket_service
+
+
+class RequestTypeViewSet(viewsets.ModelViewSet):
+    queryset = RequestType.objects.all()
+    serializer_class = RequestTypeSerializer
+    http_method_names = ["get", "post", "patch", "head", "options"]
+
+    def get_permissions(self):
+        if self.action in ["list", "retrieve"]:
+            return [IsAuthenticated()]
+        return [IsAdministrator()]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        kind = self.request.query_params.get("kind")
+        service = self.request.query_params.get("service")
+        active = self.request.query_params.get("active")
+        if kind:
+            queryset = queryset.filter(kind=kind)
+        if service:
+            queryset = queryset.filter(service=service)
+        if active is not None and active != "":
+            queryset = queryset.filter(is_active=active.lower() in {"1", "true", "yes"})
+        return queryset
 
 
 class TicketViewSet(viewsets.ModelViewSet):
@@ -23,6 +47,7 @@ class TicketViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = visible_tickets_for(self.request.user)
+        user = self.request.user
         status_value = self.request.query_params.get("status")
         priority = self.request.query_params.get("priority")
         team = self.request.query_params.get("team")
@@ -32,8 +57,15 @@ class TicketViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(status=status_value)
         if priority:
             queryset = queryset.filter(priority=priority)
-        if team and self.request.user.is_administrator:
+        identificador = self.request.query_params.get("identificador")
+        if identificador:
+            queryset = queryset.filter(identificador__iexact=identificador.strip())
+        if self.request.query_params.get("abierto") in {"1", "true", "yes"}:
+            queryset = queryset.exclude(status=Ticket.Status.CLOSED)
+        if team and user.is_administrator:
             queryset = queryset.filter(assigned_team_id=team)
+        if team and user.role == User.Role.SUPERVISOR:
+            queryset = queryset.filter(assigned_team__group__code=team)
         if query:
             filters = Q(title__icontains=query) | Q(description__icontains=query) | Q(creator__username__icontains=query)
             reference_number = query.upper().replace("INC-", "")
@@ -84,6 +116,27 @@ class TicketViewSet(viewsets.ModelViewSet):
         return Response(TicketSerializer(ticket, context={"request": request}).data)
 
     @action(detail=True, methods=["post"])
+    def release(self, request, pk=None):
+        from .models import TicketEvent
+        from .services import broadcast_ticket_update, record_event
+
+        ticket = self.get_object()
+        require_support_access(request.user, ticket)
+        if ticket.status not in {Ticket.Status.ASSIGNED, Ticket.Status.IN_PROGRESS}:
+            raise ValidationError("Solo se pueden liberar tickets asignados o en proceso.")
+        me = request.user
+        if not (me.is_administrator or ticket.assignee_id == me.id or (me.role == User.Role.SUPERVISOR and ticket.assigned_team.group.code in me.group_codes)):
+            raise PermissionDenied("Solo el asignado, un supervisor del grupo o un administrador puede liberar este ticket.")
+        previous = ticket.assignee.display_name if ticket.assignee_id else "Sin asignar"
+        ticket.assignee = None
+        ticket.assigned_at = None
+        ticket.status = Ticket.Status.OPEN
+        ticket.save(update_fields=["assignee", "assigned_at", "status", "updated_at"])
+        record_event(ticket, TicketEvent.EventType.RELEASED, actor=me, from_status=previous, to_status=ticket.status, comment=f"Liberado a bandeja por {me.display_name}.")
+        broadcast_ticket_update(ticket.id, "released")
+        return Response(TicketSerializer(ticket, context={"request": request}).data)
+
+    @action(detail=True, methods=["post"])
     def resolve(self, request, pk=None):
         ticket = self.get_object()
         require_support_access(request.user, ticket)
@@ -105,6 +158,47 @@ class TicketViewSet(viewsets.ModelViewSet):
         validate_ticket(ticket, request.user, **serializer.validated_data)
         return Response(TicketSerializer(ticket, context={"request": request}).data)
 
+    @action(detail=True, methods=["post"])
+    def reassign(self, request, pk=None):
+        ticket = self.get_object()
+        require_support_access(request.user, ticket)
+        if ticket.status == Ticket.Status.CLOSED:
+            raise ValidationError("No se puede reasignar un ticket cerrado.")
+        user_id = request.data.get("user_id") or request.data.get("assignee")
+        if not user_id:
+            raise ValidationError({"user": "Debes indicar la persona destino."})
+        try:
+            new_assignee = User.objects.get(pk=user_id, is_active=True)
+        except User.DoesNotExist:
+            raise ValidationError({"user": "Persona no existe o está inactiva."})
+        group_code = ticket.assigned_team.group.code if ticket.assigned_team_id else None
+        if not group_code or not new_assignee.teams.filter(group__code=group_code).exists():
+            raise PermissionDenied("Solo puedes reasignar a personas del mismo grupo del ticket.")
+        # Despachador/Supervisor solo dentro de su grupo (soporte ya validado por require_support_access)
+        if request.user.role in {User.Role.DISPATCHER, User.Role.SUPERVISOR} and group_code not in request.user.group_codes:
+            raise PermissionDenied("Solo puedes reasignar dentro de tu grupo.")
+        from django.utils import timezone as tz
+        from .services import record_event
+        from .models import TicketEvent
+        previous_assignee = ticket.assignee.display_name if ticket.assignee_id else "Sin asignar"
+        new_team = new_assignee.teams.filter(group__code=group_code).first() or ticket.assigned_team
+        ticket.assigned_team = new_team
+        ticket.assignee = new_assignee
+        ticket.assigned_at = tz.now()
+        if ticket.status == Ticket.Status.OPEN:
+            ticket.status = Ticket.Status.ASSIGNED
+        ticket.save(update_fields=["assigned_team", "assignee", "assigned_at", "status", "updated_at"])
+        record_event(ticket, TicketEvent.EventType.ASSIGNED, actor=request.user, from_status=previous_assignee, to_status=new_assignee.display_name, comment=f"Reasignado a {new_assignee.display_name}.")
+        try:
+            from channels.layers import get_channel_layer
+            from asgiref.sync import async_to_sync
+            channel_layer = get_channel_layer()
+            if channel_layer:
+                async_to_sync(channel_layer.group_send)("tickets_global", {"type": "ticket_update", "data": {"type": "ticket_update", "ticket_id": ticket.id, "action": "reassigned"}})
+        except Exception:
+            pass
+        return Response(TicketSerializer(ticket, context={"request": request}).data)
+
     @action(detail=True, methods=["post"], permission_classes=[IsAdministrator])
     def escalate(self, request, pk=None):
         ticket = self.get_object()
@@ -115,13 +209,153 @@ class TicketViewSet(viewsets.ModelViewSet):
     def attachments(self, request, pk=None):
         ticket = self.get_object()
         can_attach = request.user.is_administrator or ticket.creator_id == request.user.id
-        can_attach = can_attach or (request.user.role == User.Role.SUPPORT and request.user.team_id == ticket.assigned_team_id)
+        can_attach = can_attach or (request.user.role == User.Role.SUPPORT and ticket.assigned_team.group.code in request.user.group_codes)
+        can_attach = can_attach or (request.user.role == User.Role.SUPERVISOR and ticket.assigned_team.group.code in request.user.group_codes)
+        can_attach = can_attach or (request.user.role == User.Role.DISPATCHER and ticket.origin_team.group.code in request.user.group_codes)
+        if ticket.attachments.count() >= 5:
+            raise ValidationError("Máximo 5 imágenes por ticket.")
         if not can_attach:
             raise PermissionDenied("No puedes adjuntar evidencia a este ticket.")
         serializer = TicketAttachmentSerializer(data=request.data, context={"request": request, "ticket": ticket})
         serializer.is_valid(raise_exception=True)
         attachment = serializer.save()
         return Response(TicketAttachmentSerializer(attachment, context={"request": request}).data, status=status.HTTP_201_CREATED)
+
+
+def _filter_reports(request, queryset):
+    group = request.query_params.get("group")
+    service = request.query_params.get("service")
+    tipo = request.query_params.get("tipo")
+    status_value = request.query_params.get("status")
+    date_from = request.query_params.get("from")
+    date_to = request.query_params.get("to")
+    if group:
+        queryset = queryset.filter(assigned_team__group__code=group)
+    if service:
+        queryset = queryset.filter(category=service)
+    if tipo:
+        queryset = queryset.filter(tipo_solicitud_id=tipo)
+    if status_value:
+        queryset = queryset.filter(status=status_value)
+    if date_from:
+        queryset = queryset.filter(created_at__date__gte=date_from)
+    if date_to:
+        queryset = queryset.filter(created_at__date__lte=date_to)
+    return queryset
+
+
+def _ticket_aht_minutes(ticket):
+    if ticket.resolved_at and ticket.assigned_at:
+        return round((ticket.resolved_at - ticket.assigned_at).total_seconds() / 60, 1)
+    return None
+
+
+class ReportsSummaryView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from datetime import timedelta
+        from django.db.models.functions import TruncDate
+
+        tickets = _filter_reports(request, visible_tickets_for(request.user))
+        entrantes = tickets.count()
+        resueltos = tickets.filter(resolved_at__isnull=False).count()
+        cerrados = tickets.filter(status=Ticket.Status.CLOSED)
+        en_proceso = tickets.exclude(status__in=[Ticket.Status.CLOSED]).count()
+        vencidos = sum(1 for t in tickets.exclude(status=Ticket.Status.CLOSED) if t.sla_state == "VENCIDO")
+        ahts = [_ticket_aht_minutes(t) for t in tickets.filter(resolved_at__isnull=False, assigned_at__isnull=False)]
+        aht = round(sum(ahts) / len(ahts), 1) if ahts else None
+        sla_ok = cerrados.filter(closed_at__lte=F("sla_due_at")).count()
+        pct_sla = round(sla_ok / cerrados.count() * 100, 1) if cerrados.count() else None
+
+        today = timezone.now().date()
+        start = today - timedelta(days=13)
+        date_from = request.query_params.get("from") or start.isoformat()
+        date_to = request.query_params.get("to") or today.isoformat()
+        daily_qs = tickets.filter(created_at__date__gte=date_from, created_at__date__lte=date_to)
+        daily = list(daily_qs.annotate(day=TruncDate("created_at")).values("day").annotate(total=Count("id")).order_by("day"))
+        aht_by_day = {}
+        for t in tickets.filter(resolved_at__isnull=False, assigned_at__isnull=False, resolved_at__date__gte=date_from, resolved_at__date__lte=date_to):
+            mins = (t.resolved_at - t.assigned_at).total_seconds() / 60
+            aht_by_day.setdefault(t.resolved_at.date().isoformat(), []).append(mins)
+        aht_by_day = {d: round(sum(v) / len(v), 1) for d, v in aht_by_day.items()}
+        daily = [{"date": d["day"].isoformat(), "total": d["total"], "aht_minutos": aht_by_day.get(d["day"].isoformat())} for d in daily]
+        rejected = TicketEvent.objects.filter(ticket__in=tickets, event_type=TicketEvent.EventType.REJECTED)
+        if request.query_params.get("from"):
+            rejected = rejected.filter(created_at__date__gte=request.query_params.get("from"))
+        if request.query_params.get("to"):
+            rejected = rejected.filter(created_at__date__lte=request.query_params.get("to"))
+        devueltos = rejected.count()
+        by_service = list(tickets.values("category").annotate(total=Count("id")).order_by("-total"))
+        by_group = list(tickets.values("assigned_team__group__name").annotate(total=Count("id")).order_by("-total"))
+        return Response({
+            "kpis": {
+                "entrantes": entrantes,
+                "resueltos": resueltos,
+                "aht_minutos": aht,
+                "pct_sla": pct_sla,
+                "en_proceso": en_proceso,
+                "vencidos": vencidos,
+                "devueltos": devueltos,
+            },
+            "daily": daily,
+            "by_service": [{"service": r["category"], "total": r["total"]} for r in by_service],
+            "by_group": [{"group": r["assigned_team__group__name"], "total": r["total"]} for r in by_group],
+            "from": date_from,
+            "to": date_to,
+        })
+
+
+class ReportsExportView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        import csv
+        from django.http import HttpResponse
+
+        tickets = _filter_reports(request, visible_tickets_for(request.user)).select_related(
+            "creator", "origin_team__group", "assigned_team__group", "assignee", "tipo_solicitud"
+        ).prefetch_related("events__actor").order_by("created_at", "id")
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="reporte_actividades.csv"'
+        writer = csv.writer(response, delimiter=";")
+        writer.writerow([
+            "Ticket", "Identificador", "Cliente", "Nodo", "Usuario solicitante", "Proceso",
+            "Area solicitante", "Tipo de solicitud", "Servicio", "Prioridad", "Estado ticket",
+            "Actividad", "Fecha actividad", "Minutos desde anterior", "Estado actividad",
+            "Participante actividad", "Comentario actividad", "AHT ticket (min)",
+        ])
+        for ticket in tickets:
+            aht = _ticket_aht_minutes(ticket)
+            base = [
+                ticket.reference, ticket.identificador, ticket.cliente_nombre, ticket.nodo,
+                ticket.creator.display_name if ticket.creator_id else "",
+                "Soporte Despacho",
+                ticket.origin_team.group.name if ticket.origin_team_id else "",
+                ticket.tipo_solicitud.name if ticket.tipo_solicitud_id else "",
+                ticket.category, ticket.get_priority_display(), ticket.get_status_display(),
+            ]
+            events = list(ticket.events.order_by("created_at", "id"))
+            if not events:
+                writer.writerow(base + ["", "", "", "", "", "", aht if aht is not None else ""])
+                continue
+            previous = None
+            for event in events:
+                if previous:
+                    minutes = round((event.created_at - previous).total_seconds() / 60, 2)
+                else:
+                    minutes = 0
+                previous = event.created_at
+                writer.writerow(base + [
+                    event.get_event_type_display(),
+                    timezone.localtime(event.created_at).strftime("%d/%m/%Y %H:%M"),
+                    minutes,
+                    event.get_to_status_display() or event.get_from_status_display() or "",
+                    event.actor.display_name if event.actor_id else "Sistema",
+                    (event.comment or "")[:500],
+                    aht if aht is not None else "",
+                ])
+        return response
 
 
 class DashboardView(APIView):
