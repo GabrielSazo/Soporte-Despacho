@@ -17,7 +17,12 @@ import {
   getUsers,
   updateMyTeams,
   confirmPasswordReset,
+  createEscalationArea as createEscalationAreaRequest,
+  deescalateTicket as deescalateTicketRequest,
+  escalateTicket as escalateTicketRequest,
+  getEscalationAreas,
   hasActiveSession,
+  instructTicket as instructTicketRequest,
   requestPasswordReset,
   resetPassword,
   resolveTicket as resolveTicketRequest,
@@ -25,6 +30,7 @@ import {
   signIn,
   signOut,
   takeTicket as takeTicketRequest,
+  updateEscalationArea as updateEscalationAreaRequest,
   checkOpenTicket,
   updateGroup as updateGroupRequest,
   updateRequestType,
@@ -40,6 +46,7 @@ const navigation = [
   { label: "Resumen", icon: "dashboard" },
   { label: "Tickets", icon: "ticket", badge: "12" },
   { label: "Validaciones", icon: "checkCircle", badge: "3" },
+  { label: "Escalados", icon: "upload", badge: "0" },
   { label: "Mi grupo", icon: "users" },
   { label: "Informes", icon: "chart" },
 ];
@@ -103,9 +110,46 @@ function formatRemaining(seconds = 0) {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
 }
 
+function formatDuracion(min) {
+  if (min === null || min === undefined) return "—";
+  const total = Math.round(Number(min) * 60);
+  const h = Math.floor(total / 3600);
+  const m = String(Math.floor((total % 3600) / 60)).padStart(2, "0");
+  const s = String(total % 60).padStart(2, "0");
+  return `${h}:${m}:${s}`;
+}
+
 function formatDateTime(value) {
   if (!value) return "Sin registro";
   return new Intl.DateTimeFormat("es-GT", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+}
+
+function compressImageFile(file, maxSide = 1600, quality = 0.82) {
+  return new Promise((resolve) => {
+    if (!file || !file.type || !file.type.startsWith("image/")) { resolve(file); return; }
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, maxSide / Math.max(img.width || 1, img.height || 1));
+      if (scale >= 1 && file.size <= 600 * 1024) { resolve(file); return; }
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => {
+          if (!blob) { resolve(file); return; }
+          const base = (file.name || "imagen").replace(/\.[^.]+$/, "");
+          resolve(new File([blob], `${base}.jpg`, { type: "image/jpeg" }));
+        }, "image/jpeg", quality);
+      } catch {
+        resolve(file);
+      }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+    img.src = url;
+  });
 }
 
 function mapUser(user) {
@@ -171,7 +215,15 @@ function mapTicket(ticket) {
     team: ticket.assigned_team?.group?.name || ticket.assigned_team?.name || "Sin asignar",
     teamId: ticket.assigned_team?.id || null,
     groupCode: ticket.assigned_team?.group?.code || null,
-    identificador: ticket.identificador || "",
+    identificador: ticket.contrato || ticket.numero_ot || "",
+    contrato: ticket.contrato || "",
+    numeroOt: ticket.numero_ot || "",
+    areaEscalada: ticket.area_escalada_detail?.name || "",
+    areaEscaladaId: ticket.area_escalada || null,
+    motivoEscalamiento: ticket.motivo_escalamiento || "",
+    instruccionesDespacho: ticket.instrucciones_despacho || "",
+    estadoPrevio: ticket.estado_previo || "",
+    tiempoEscaladoMin: ticket.tiempo_escalado_minutos ?? null,
     cliente: ticket.cliente_nombre || "",
     nodo: ticket.nodo || "",
     tipoSolicitud: ticket.tipo_solicitud_detail?.name || "",
@@ -180,6 +232,7 @@ function mapTicket(ticket) {
     assigneeId: ticket.assignee?.id || null,
     created: formatRelativeDate(ticket.created_at),
     createdAt: ticket.created_at,
+    resolvedAt: ticket.resolved_at || null,
     sla: formatRemaining(ticket.sla?.remaining_seconds),
     slaTone: slaTone[ticket.sla?.state] || "safe",
     slaState: ticket.sla?.state,
@@ -191,6 +244,7 @@ function mapTicket(ticket) {
     originTeam: ticket.origin_team?.group?.name || ticket.origin_team?.name || "Sin asignar",
     attachments: ticket.attachments || [],
     events: ticket.events || [],
+    validationCycle: (ticket.events || []).filter((e) => e.event_type === "RESUELTO").length,
   };
 }
 
@@ -221,6 +275,9 @@ function App() {
   const [groupModal, setGroupModal] = useState(null);
   const [requestTypeModal, setRequestTypeModal] = useState(null);
   const [requestTypes, setRequestTypes] = useState([]);
+  const [escalationAreas, setEscalationAreas] = useState([]);
+  const [ticketToEscalate, setTicketToEscalate] = useState(null);
+  const [areaModal, setAreaModal] = useState(null);
   const [passwordModal, setPasswordModal] = useState(null);
   const [showProfile, setShowProfile] = useState(false);
   const [query, setQuery] = useState("");
@@ -238,11 +295,25 @@ function App() {
   }, [session?.id]);
 
   useEffect(() => {
+    if (!showUserMenu && !showNotifications && !showGroupMenu) return;
+    const closeOnOutside = (event) => {
+      if (event.target.closest?.(".user-menu-wrapper,.notification-wrapper,.user-dropdown,.context-card")) return;
+      setShowUserMenu(false);
+      setShowNotifications(false);
+      setShowGroupMenu(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutside);
+    return () => document.removeEventListener("pointerdown", closeOnOutside);
+  }, [showUserMenu, showNotifications, showGroupMenu]);
+
+  useEffect(() => {
     const closeOnEscape = (event) => {
       if (event.key === "Escape") {
         setSidebarOpen(false);
         setNewTicketOpen(false);
         setTicketToResolve(null);
+        setTicketToEscalate(null);
+        setAreaModal(null);
         setTicketDetail(null);
         setUserModal(null);
         setTeamModal(null);
@@ -259,11 +330,11 @@ function App() {
   }, []);
 
   useEffect(() => {
-    document.body.style.overflow = sidebarOpen || newTicketOpen || ticketToResolve || ticketDetail || userModal || teamModal || groupModal || passwordModal || showProfile ? "hidden" : "";
+    document.body.style.overflow = sidebarOpen || newTicketOpen || ticketToResolve || ticketToEscalate || areaModal || ticketDetail || userModal || teamModal || groupModal || passwordModal || showProfile ? "hidden" : "";
     return () => {
       document.body.style.overflow = "";
     };
-  }, [sidebarOpen, newTicketOpen, ticketToResolve, ticketDetail, userModal, teamModal, groupModal, passwordModal, showProfile]);
+  }, [sidebarOpen, newTicketOpen, ticketToResolve, ticketToEscalate, areaModal, ticketDetail, userModal, teamModal, groupModal, passwordModal, showProfile]);
 
   useEffect(() => {
     if (session) {
@@ -294,7 +365,15 @@ function App() {
         try {
           const data = JSON.parse(event.data);
           if (data.type === "ticket_update" || data.type === "connected") {
-            if (data.type === "ticket_update") refreshWorkspace(true);
+            if (data.type === "ticket_update") {
+              refreshWorkspace(true);
+              const openId = ticketDetailRef.current?.apiId;
+              if (openId && data.ticket_id === openId) {
+                getTicket(openId).then((detail) => {
+                  if (ticketDetailRef.current?.apiId === openId) setTicketDetail(mapTicket(detail));
+                }).catch(() => undefined);
+              }
+            }
           }
         } catch {
           if (event.data === "pong") return;
@@ -319,7 +398,7 @@ function App() {
   }
 
   useEffect(() => {
-    if (session && ["ADMIN", "SUPERVISOR"].includes(session?.role) && activeView === "Usuarios") refreshUsers();
+    if (session && ["ADMIN", "SUPERVISOR"].includes(session?.role) && activeView === "Administración") refreshUsers();
     if (session && activeView === "Mi grupo") refreshUsers();
   }, [activeView, session?.role]);
 
@@ -336,6 +415,7 @@ function App() {
       const [ticketPayload, dashboardPayload] = await Promise.all([getTickets(), getDashboard()]);
       setTickets((ticketPayload.results || ticketPayload).map(mapTicket));
       setDashboard(dashboardPayload);
+      getEscalationAreas().then((p) => setEscalationAreas(p.results || p || [])).catch(() => undefined);
     } catch (error) {
       if (error.status === 401) {
         sessionStorage.removeItem("sestel-user");
@@ -365,7 +445,7 @@ function App() {
   }
 
   async function saveRequestType(form, existing) {
-    const payload = { kind: form.kind, service: form.service, name: form.name.trim(), is_active: form.isActive };
+    const payload = { kind: form.kind, service: form.service, name: form.name.trim(), equipo_asignado: form.teamId ? Number(form.teamId) : null, is_active: form.isActive };
     if (existing) await updateRequestType(existing.id, payload);
     else await createRequestType(payload);
     setRequestTypeModal(null);
@@ -425,7 +505,8 @@ function App() {
       description: form.description,
       category: form.category,
       priority: form.priority,
-      identificador: form.identificador,
+      contrato: form.contrato || "",
+      numero_ot: form.numero_ot || "",
       cliente_nombre: form.cliente_nombre || form.cliente,
       nodo: form.nodo,
       tipo_solicitud: form.tipo_solicitud,
@@ -482,6 +563,44 @@ function App() {
     replaceTicket(updated);
     await refreshWorkspace(true);
     notify(`${ticket.id} reasignado a ${mapped.team}.`);
+  }
+
+  async function escalateTicket(ticket, payload) {
+    const updated = await escalateTicketRequest(ticket.apiId, payload);
+    const mapped = mapTicket(updated);
+    setTicketDetail(mapped);
+    setTicketToEscalate(null);
+    replaceTicket(updated);
+    await refreshWorkspace(true);
+    notify(`${ticket.id} escalado a ${mapped.areaEscalada || "escalamiento"}.`);
+  }
+
+  async function deescalateTicket(ticket) {
+    const updated = await deescalateTicketRequest(ticket.apiId);
+    const mapped = mapTicket(updated);
+    setTicketDetail(mapped);
+    replaceTicket(updated);
+    await refreshWorkspace(true);
+    notify(`${ticket.id} volvió del escalamiento. Continúa el flujo.`);
+  }
+
+  async function instructTicket(ticket, instrucciones) {
+    const updated = await instructTicketRequest(ticket.apiId, instrucciones);
+    const mapped = mapTicket(updated);
+    setTicketDetail(mapped);
+    replaceTicket(updated);
+    await refreshWorkspace(true);
+    notify(`Instrucciones enviadas a soporte en ${ticket.id}.`);
+  }
+
+  async function saveEscalationArea(form, existing) {
+    const payload = { name: form.name.trim(), is_active: form.isActive };
+    if (existing) await updateEscalationAreaRequest(existing.id, payload);
+    else await createEscalationAreaRequest(payload);
+    setAreaModal(null);
+    const areas = await getEscalationAreas().catch(() => []);
+    setEscalationAreas(areas.results || areas || []);
+    notify(existing ? "Área de escalamiento actualizada." : "Área de escalamiento creada.");
   }
 
   async function saveUser(form, existingUser) {
@@ -546,13 +665,14 @@ function App() {
     return mapped;
   }
 
-  const openTickets = tickets.filter((ticket) => ticket.statusCode !== "CERRADO" && (session?.role === "SOPORTE" ? ticket.statusCode !== "VALIDACION" : true)).length;
+  const openTickets = tickets.filter((ticket) => ticket.statusCode !== "CERRADO" && (session?.role === "SOPORTE" ? !["VALIDACION", "ESCALADO"].includes(ticket.statusCode) : true)).length;
   const validationTickets = tickets.filter((ticket) => ticket.statusCode === "VALIDACION" && (session?.role === "DESPACHADOR" ? ticket.creatorId === session.id : true));
+  const escalatedTickets = tickets.filter((ticket) => ticket.statusCode === "ESCALADO");
   const myValidationCount = tickets.filter((t) => t.statusCode === "VALIDACION" && t.creatorId === session?.id).length;
   const criticalTickets = tickets.filter((ticket) => ticket.priorityCode === "CRITICA").length;
-  const statusMap = { "Todos": null, "Míos": null, "Trabajables": null, "Abierto": "ABIERTO", "Asignado": "ASIGNADO", "En proceso": "EN_PROCESO", "Validación": "VALIDACION" };
+  const statusMap = { "Todos": null, "Míos": null, "Trabajables": null, "Abierto": "ABIERTO", "Asignado": "ASIGNADO", "En proceso": "EN_PROCESO", "Validación": "VALIDACION", "Escalados": "ESCALADO", "Cerrados": "CERRADO" };
   const filteredTickets = tickets.filter((ticket) => {
-    const searchable = `${ticket.id} ${ticket.title} ${ticket.team} ${ticket.requester} ${ticket.identificador} ${ticket.cliente} ${ticket.nodo} ${ticket.tipoSolicitud}`.toLowerCase();
+    const searchable = `${ticket.id} ${ticket.title} ${ticket.team} ${ticket.requester} ${ticket.identificador} ${ticket.contrato} ${ticket.numeroOt} ${ticket.cliente} ${ticket.nodo} ${ticket.tipoSolicitud}`.toLowerCase();
     if (!searchable.includes(query.toLowerCase())) return false;
     if (filter === "Míos") {
       if (session?.role === "SOPORTE") return ticket.assigneeId === session?.id && ["ASIGNADO", "EN_PROCESO"].includes(ticket.statusCode);
@@ -563,10 +683,11 @@ function App() {
   });
   const canCreateTickets = session && ["DESPACHADOR", "ADMIN", "SUPERVISOR"].includes(session.role);
   const visibleNavigation = session?.role === "DESPACHADOR"
-    ? navigation.filter((item) => ["Tickets", "Validaciones"].includes(item.label))
-    : session && ["ADMIN", "SUPERVISOR"].includes(session.role) ? [...navigation, { label: "Usuarios", icon: "users" }] : navigation;
+    ? navigation.filter((item) => ["Tickets", "Validaciones", "Escalados"].includes(item.label))
+    : session && ["ADMIN", "SUPERVISOR"].includes(session.role) ? [...navigation, { label: "Administración", icon: "users" }] : navigation;
   const myTickets = tickets.filter((t) => t.creatorId === session?.id);
   const myValidation = tickets.filter((t) => t.statusCode === "VALIDACION" && t.creatorId === session?.id);
+  const myEscalated = tickets.filter((t) => t.statusCode === "ESCALADO" && t.creatorId === session?.id);
   const trabajables = tickets.filter((t) => ["ABIERTO", "ASIGNADO"].includes(t.statusCode) && !t.assigneeId);
   const [seenNotifs, setSeenNotifs] = useState(() => {
     try {
@@ -591,7 +712,8 @@ function App() {
   const assignedToMe = tickets.filter((t) => t.assigneeId === session?.id && t.statusCode === "ASIGNADO");
   const notifications = (session?.role === "DESPACHADOR"
     ? [
-        ...myValidation.slice(0, 3).map((t) => ({ key: `val-${t.id}`, type: "warning", title: `Validación pendiente: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
+        ...myValidation.slice(0, 3).map((t) => ({ key: `val-${t.id}-v${t.validationCycle}`, type: "warning", title: `Validación pendiente: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
+        ...myEscalated.slice(0, 3).map((t) => ({ key: `esc-${t.id}`, type: "warning", title: `Escalado a ${t.areaEscalada || "escalamiento"}: ${t.id}`, desc: t.motivoEscalamiento || t.title, time: t.created, ticket: t })),
         ...assignedToMe.slice(0, 2).map((t) => ({ key: `asg-${t.id}`, type: "info", title: `Asignado a ti: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
         ...myTickets.filter((t) => t.slaTone === "danger").slice(0, 3).map((t) => ({ key: `sla-${t.id}`, type: "danger", title: `SLA vencido: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
       ].slice(0, 5)
@@ -599,11 +721,12 @@ function App() {
         ...assignedToMe.slice(0, 2).map((t) => ({ key: `asg-${t.id}`, type: "info", title: `Asignado a ti: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
         ...trabajables.slice(0, 3).map((t) => ({ key: `new-${t.id}`, type: "info", title: `Nuevo en bandeja: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
         ...trabajables.filter((t) => t.slaTone === "danger").slice(0, 2).map((t) => ({ key: `sla-${t.id}`, type: "danger", title: `SLA vencido: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
-        ...myValidation.slice(0, 2).map((t) => ({ key: `val-${t.id}`, type: "warning", title: `Validación pendiente: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
+        ...myValidation.slice(0, 2).map((t) => ({ key: `val-${t.id}-v${t.validationCycle}`, type: "warning", title: `Validación pendiente: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
       ].slice(0, 5)
   ).map((n) => ({ ...n, seen: Boolean(seenNotifs[n.key]) }));
   const unseenCount = notifications.filter((n) => !n.seen).length;
   const BASE_TITLE = "Soporte Despacho Tigo | Centro de control";
+const BASE_FAVICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23001EB4'/%3E%3Ctext x='32' y='44' font-family='Arial' font-size='36' font-weight='bold' fill='white' text-anchor='middle'%3ES%3C/text%3E%3C/svg%3E";
   useEffect(() => {
     if (!session || !unseenCount) {
       document.title = BASE_TITLE;
@@ -620,7 +743,45 @@ function App() {
       document.title = BASE_TITLE;
     };
   }, [unseenCount, session?.id]);
+  useEffect(() => {
+    let link = document.querySelector("link[rel='icon']");
+    if (!link) {
+      link = document.createElement("link");
+      link.rel = "icon";
+      document.head.appendChild(link);
+    }
+    if (!session || !unseenCount) {
+      link.href = BASE_FAVICON;
+      return;
+    }
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = 64;
+      canvas.height = 64;
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#001EB4";
+      ctx.fillRect(0, 0, 64, 64);
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 34px Arial, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("S", 30, 34);
+      const label = unseenCount > 99 ? "99+" : String(unseenCount);
+      ctx.beginPath();
+      ctx.arc(48, 16, 15, 0, Math.PI * 2);
+      ctx.fillStyle = "#d92626";
+      ctx.fill();
+      ctx.fillStyle = "#fff";
+      ctx.font = `bold ${label.length > 2 ? 13 : 17}px Arial, sans-serif`;
+      ctx.fillText(label, 48, 17);
+      link.href = canvas.toDataURL("image/png");
+    } catch {
+      link.href = BASE_FAVICON;
+    }
+  }, [unseenCount, session?.id]);
   const prevNotifKeys = useRef(null);
+  const ticketDetailRef = useRef(null);
+  useEffect(() => { ticketDetailRef.current = ticketDetail; }, [ticketDetail]);
   const [browserNotif, setBrowserNotif] = useState(typeof Notification !== "undefined" ? Notification.permission : "denied");
 
   function playBeep() {
@@ -694,10 +855,10 @@ function App() {
         </div>
         <nav className="main-nav">
           <p className="nav-caption">Operación</p>
-          {visibleNavigation.map((item) => <button className={`nav-item ${activeView === item.label ? "active" : ""}`} key={item.label} onClick={() => changeView(item.label)} type="button"><Icon name={item.icon} size={19} /><span>{item.label}</span>{item.badge && <b>{item.label === "Tickets" ? openTickets : session.role !== "SOPORTE" ? validationTickets.length : 0}</b>}</button>)}
+          {visibleNavigation.map((item) => <button className={`nav-item ${activeView === item.label ? "active" : ""}`} key={item.label} onClick={() => changeView(item.label)} type="button"><Icon name={item.icon} size={19} /><span>{item.label}</span>{item.badge && <b>{item.label === "Tickets" ? openTickets : item.label === "Escalados" ? escalatedTickets.length : session.role !== "SOPORTE" ? validationTickets.length : 0}</b>}</button>)}
         </nav>
         <div className="sidebar-bottom">
-          <button className="nav-item" type="button" onClick={() => ["ADMIN","SUPERVISOR"].includes(session.role) ? changeView("Usuarios") : setShowProfile(true)}><Icon name="settings" size={19} /><span>{["ADMIN","SUPERVISOR"].includes(session.role) ? "Gestionar usuarios" : "Mi perfil"}</span></button>
+          <button className="nav-item" type="button" onClick={() => setShowProfile(true)}><Icon name="settings" size={19} /><span>Mi perfil</span></button>
           <button className="nav-item logout-item" type="button" onClick={endSession}><Icon name="logout" size={19} /><span>Cerrar sesión</span></button>
         </div>
       </aside>
@@ -758,19 +919,22 @@ function App() {
             {activeView === "Resumen" && <Dashboard canCreate={canCreateTickets} criticalTickets={criticalTickets} dashboard={dashboard} onCreate={() => setNewTicketOpen(true)} onOpen={openTicketDetail} onShowTickets={() => setActiveView("Tickets")} tickets={tickets} validationTickets={validationTickets} />}
             {activeView === "Tickets" && <TicketsView canCreate={canCreateTickets} currentUser={session} filter={filter} filteredTickets={filteredTickets} onCreate={() => setNewTicketOpen(true)} onFilterChange={setFilter} onNotify={notify} onOpen={openTicketDetail} onResolve={setTicketToResolve} onTake={takeTicket} query={query} setQuery={setQuery} />}
             {activeView === "Validaciones" && <ValidationsView canValidate={session.role !== "SOPORTE"} tickets={validationTickets} onOpen={openTicketDetail} onValidate={validateTicket} />}
+            {activeView === "Escalados" && <EscalationsView canEscalate={["SOPORTE", "SUPERVISOR", "ADMIN"].includes(session.role)} tickets={escalatedTickets} onOpen={openTicketDetail} onDeescalate={deescalateTicket} />}
             {activeView === "Mi grupo" && <TeamView currentUser={session} onNotify={notify} tickets={tickets} users={users} />}
             {activeView === "Informes" && <ReportsView groups={groups} onNotify={notify} />}
-            {activeView === "Usuarios" && ["ADMIN","SUPERVISOR"].includes(session.role) && <UsersView currentRole={session.role} error={usersError} groups={groups} loading={usersLoading} onCreate={() => setUserModal("new")} onCreateGroup={() => setGroupModal("new")} onCreateTeam={() => setTeamModal("new")} onCreateRequestType={() => setRequestTypeModal("new")} onEdit={setUserModal} onEditGroup={setGroupModal} onEditTeam={setTeamModal} onEditRequestType={setRequestTypeModal} onResetPassword={setPasswordModal} onRetry={refreshUsers} requestTypes={requestTypes} teams={teams} users={users} />}
+            {activeView === "Administración" && ["ADMIN","SUPERVISOR"].includes(session.role) && <UsersView areas={escalationAreas} currentRole={session.role} error={usersError} groups={groups} loading={usersLoading} onCreate={() => setUserModal("new")} onCreateArea={() => setAreaModal("new")} onCreateGroup={() => setGroupModal("new")} onCreateTeam={() => setTeamModal("new")} onCreateRequestType={() => setRequestTypeModal("new")} onEdit={setUserModal} onEditArea={setAreaModal} onEditGroup={setGroupModal} onEditTeam={setTeamModal} onEditRequestType={setRequestTypeModal} onResetPassword={setPasswordModal} onRetry={refreshUsers} requestTypes={requestTypes} teams={teams} users={users} />}
           </>}
         </section>
       </main>
       {newTicketOpen && canCreateTickets && <NewTicketModal onClose={() => setNewTicketOpen(false)} onCreate={createTicket} onOpenTicket={async (id) => { setNewTicketOpen(false); const t = tickets.find((x) => x.apiId === id); if (t) openTicketDetail(t); }} session={session} />}
       {ticketToResolve && <ResolveTicketModal onClose={() => setTicketToResolve(null)} onResolve={resolveTicket} ticket={ticketToResolve} />}
-      {ticketDetail && <TicketDetailModal currentUser={session} isLoading={isDetailLoading} onAttach={attachToTicket} onClose={() => setTicketDetail(null)} onReassign={reassignTicket} onResolve={(ticket) => { setTicketDetail(null); setTicketToResolve(ticket); }} onTake={async (ticket) => { const updated = await takeTicket(ticket); const detail = await getTicket(ticket.apiId); setTicketDetail(mapTicket(detail)); }} onRelease={releaseTicket} onValidate={async (ticket, accepted, comment) => { await validateTicket(ticket, accepted, comment); setTicketDetail(null); }} teams={teams} ticket={ticketDetail} users={users} />}
+      {ticketToEscalate && <EscalateModal areas={escalationAreas} onClose={() => setTicketToEscalate(null)} onEscalate={escalateTicket} ticket={ticketToEscalate} />}
+      {ticketDetail && <TicketDetailModal currentUser={session} isLoading={isDetailLoading} onAttach={attachToTicket} onClose={() => setTicketDetail(null)} onDeescalate={deescalateTicket} onEscalate={(ticket) => setTicketToEscalate(ticket)} onInstruct={instructTicket} onReassign={reassignTicket} onResolve={(ticket) => { setTicketDetail(null); setTicketToResolve(ticket); }} onTake={async (ticket) => { const updated = await takeTicket(ticket); const detail = await getTicket(ticket.apiId); setTicketDetail(mapTicket(detail)); }} onRelease={releaseTicket} onValidate={async (ticket, accepted, comment) => { await validateTicket(ticket, accepted, comment); setTicketDetail(null); }} teams={teams} ticket={ticketDetail} users={users} />}
       {userModal && <UserFormModal onClose={() => setUserModal(null)} onSave={saveUser} teams={teams} groups={groups} user={userModal === "new" ? null : userModal} />}
       {teamModal && <TeamFormModal groups={groups} onClose={() => setTeamModal(null)} onSave={saveTeam} team={teamModal === "new" ? null : teamModal} />}
       {groupModal && <GroupFormModal onClose={() => setGroupModal(null)} onSave={saveGroup} group={groupModal === "new" ? null : groupModal} />}
-      {requestTypeModal && <RequestTypeFormModal onClose={() => setRequestTypeModal(null)} onSave={saveRequestType} requestType={requestTypeModal === "new" ? null : requestTypeModal} />}
+      {requestTypeModal && <RequestTypeFormModal onClose={() => setRequestTypeModal(null)} onSave={saveRequestType} requestType={requestTypeModal === "new" ? null : requestTypeModal} teams={teams} />}
+      {areaModal && <AreaFormModal area={areaModal === "new" ? null : areaModal} onClose={() => setAreaModal(null)} onSave={saveEscalationArea} />}
       {passwordModal && <PasswordResetModal onClose={() => setPasswordModal(null)} onSave={resetUserPassword} user={passwordModal} />}
       {showProfile && <ProfileModal onClose={() => setShowProfile(false)} tickets={tickets} user={session} />}
       {toast && <Toast message={toast} onClose={() => setToast("")} />}
@@ -787,11 +951,28 @@ function Dashboard({ canCreate, criticalTickets, dashboard, onCreate, onOpen, on
   const slaPercentage = (value) => (slaTotal ? Math.round((value / slaTotal) * 100) : 0);
 
   const metrics = [
-    { label: "Tickets activos", value: activeTickets, trend: "+12%", detail: "vs. turno anterior", icon: "ticket", tone: "green" },
+    { label: "Tickets activos", value: activeTickets, trend: `${sla.vencido} vencidos`, detail: "necesitan atención", icon: "ticket", tone: "green" },
     { label: "Requieren atención", value: dashboard?.metrics?.critical_tickets ?? criticalTickets, trend: `${sla.vencido} vencidos`, detail: "SLA menor a 1 hora", icon: "alert", tone: "coral" },
-    { label: "En validación", value: validationTickets.length, trend: "1 nuevo", detail: "pendiente de respuesta", icon: "checkCircle", tone: "violet" },
-    { label: "Resueltos hoy", value: resolvedToday, trend: "94%", detail: "dentro del SLA", icon: "activity", tone: "blue" },
+    { label: "En validación", value: validationTickets.length, trend: `${validationTickets.length} casos`, detail: "pendientes de respuesta", icon: "checkCircle", tone: "violet" },
+    { label: "Resueltos hoy", value: resolvedToday, trend: "", detail: "cerrados hoy", icon: "activity", tone: "blue" },
   ];
+  const ritmo = slaScore >= 90 ? ["En buen ritmo", "La mayor parte de los casos avanza dentro del tiempo acordado."] : slaScore >= 70 ? ["Ritmo medio", "Hay casos próximos a vencer que conviene atender."] : ["Requiere atención", "Varios casos están vencidos o por vencer."];
+  const recentActivity = tickets
+    .flatMap((t) => (t.events || []).map((e) => ({ ...e, ticketRef: t.id, ticketTitle: t.title })))
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    .slice(0, 4);
+  const activityTone = (type) => (["APROBADO", "RESUELTO"].includes(type) ? ["checkCircle", "green"] : ["RECHAZADO", "ESCALADO"].includes(type) ? ["alert", "coral"] : ["users", "blue"]);
+  const hours = Array.from({ length: 8 }, (_, i) => {
+    const start = new Date();
+    start.setMinutes(0, 0, 0);
+    start.setHours(start.getHours() - (7 - i));
+    const end = new Date(start.getTime() + 3600 * 1000);
+    const total = tickets.filter((t) => { const c = new Date(t.createdAt); return c >= start && c < end; }).length;
+    return { label: `${String(start.getHours()).padStart(2, "0")}:00`, total };
+  });
+  const maxHour = Math.max(1, ...hours.map((h) => h.total));
+  const flowPath = hours.map((h, i) => `${i === 0 ? "M" : "L"}${(i * 640) / 7} ${200 - (h.total / maxHour) * 170}`).join(" ");
+  const peakHour = hours.reduce((best, h, i) => (h.total > hours[best].total ? i : best), 0);
 
   return (
     <>
@@ -808,7 +989,6 @@ function Dashboard({ canCreate, criticalTickets, dashboard, onCreate, onOpen, on
             <div className={`metric-icon ${metric.tone}`}><Icon name={metric.icon} size={21} /></div>
             <div className="metric-heading">
               <span>{metric.label}</span>
-              <button type="button" aria-label={`Más información sobre ${metric.label}`}><Icon name="dots" size={18} /></button>
             </div>
             <strong>{metric.value}</strong>
             <p><b>{metric.trend}</b> {metric.detail}</p>
@@ -824,7 +1004,7 @@ function Dashboard({ canCreate, criticalTickets, dashboard, onCreate, onOpen, on
             action={<button className="text-button" type="button" onClick={onShowTickets}>Ver todos <Icon name="arrowRight" size={16} /></button>}
           />
           <div className="ticket-table-wrap compact-table-wrap">
-            <TicketTable onOpen={onOpen} tickets={tickets.slice(0, 4)} compact />
+            <TicketTable onOpen={onOpen} tickets={[...tickets].filter((t) => t.statusCode !== "CERRADO").sort((a, b) => ({ CRITICA: 0, ALTA: 1, MEDIA: 2, BAJA: 3 }[a.priorityCode] ?? 9) - (({ CRITICA: 0, ALTA: 1, MEDIA: 2, BAJA: 3 }[b.priorityCode] ?? 9)) || (new Date(a.createdAt) - new Date(b.createdAt))).slice(0, 4)} compact />
           </div>
         </article>
 
@@ -833,8 +1013,8 @@ function Dashboard({ canCreate, criticalTickets, dashboard, onCreate, onOpen, on
           <div className="sla-score">
             <div className="score-ring" style={{ "--score": `${slaScore}` }}><span>{slaScore}<small>%</small></span></div>
             <div>
-              <strong>En buen ritmo</strong>
-              <p>La mayor parte de los casos avanza dentro del tiempo acordado.</p>
+              <strong>{ritmo[0]}</strong>
+              <p>{ritmo[1]}</p>
             </div>
           </div>
           <div className="sla-breakdown">
@@ -847,21 +1027,21 @@ function Dashboard({ canCreate, criticalTickets, dashboard, onCreate, onOpen, on
         <article className="panel flow-panel">
           <PanelHeading eyebrow="Pulso operativo" title="Flujo de tickets" action={<span className="legend-label"><i /> Últimas 8 horas</span>} />
           <div className="flow-chart" aria-label="Gráfico de flujo de tickets durante ocho horas">
-            <div className="chart-axis"><span>16</span><span>12</span><span>8</span><span>4</span><span>0</span></div>
+            <div className="chart-axis"><span>{maxHour}</span><span>{Math.ceil(maxHour / 2)}</span><span>0</span></div>
             <div className="chart-area">
-              <svg viewBox="0 0 640 220" preserveAspectRatio="none" role="img" aria-label="Tendencia ascendente de tickets procesados">
+              <svg viewBox="0 0 640 220" preserveAspectRatio="none" role="img" aria-label="Tickets creados por hora">
                 <defs>
                   <linearGradient id="flow-gradient" x1="0" x2="0" y1="0" y2="1">
                     <stop offset="0%" stopColor="currentColor" stopOpacity="0.28" />
                     <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
                   </linearGradient>
                 </defs>
-                <path className="chart-grid" d="M0 20H640M0 72H640M0 124H640M0 176H640" />
-                <path className="area-line" d="M0 164 C40 151, 53 156, 83 143 S126 110, 161 128 S213 142, 245 100 S299 116, 329 83 S377 113, 407 95 S459 42, 493 68 S546 87, 572 40 S614 55, 640 23 V220H0Z" />
-                <path className="line-path" d="M0 164 C40 151, 53 156, 83 143 S126 110, 161 128 S213 142, 245 100 S299 116, 329 83 S377 113, 407 95 S459 42, 493 68 S546 87, 572 40 S614 55, 640 23" />
-                <circle cx="572" cy="40" r="5" className="chart-dot" />
+                <path className="chart-grid" d="M0 20H640M0 110H640M0 200H640" />
+                <path className="area-line" d={`${flowPath} V220H0Z`} />
+                <path className="line-path" d={flowPath} />
+                <circle cx={(peakHour * 640) / 7} cy={200 - (hours[peakHour].total / maxHour) * 170} r="5" className="chart-dot"><title>{`${hours[peakHour].label}: ${hours[peakHour].total}`}</title></circle>
               </svg>
-              <div className="chart-labels"><span>08:00</span><span>10:00</span><span>12:00</span><span>14:00</span><span>16:00</span></div>
+              <div className="chart-labels"><span>{hours[0].label}</span><span>{hours[3].label}</span><span>{hours[7].label}</span></div>
             </div>
           </div>
         </article>
@@ -869,9 +1049,8 @@ function Dashboard({ canCreate, criticalTickets, dashboard, onCreate, onOpen, on
         <article className="panel activity-panel">
           <PanelHeading eyebrow="Actividad reciente" title="Cambios importantes" />
           <div className="activity-list">
-            <Activity icon="checkCircle" tone="green" text={<><b>INC-1046</b> pasó a validación</>} time="Hace 4 min" />
-            <Activity icon="users" tone="blue" text={<><b>Mario R.</b> tomó INC-1048</>} time="Hace 12 min" />
-            <Activity icon="alert" tone="coral" text={<><b>INC-1047</b> está próximo a vencer</>} time="Hace 18 min" />
+            {recentActivity.length === 0 && <p className="detail-empty">Sin actividad reciente.</p>}
+            {recentActivity.map((e, i) => { const [icon, tone] = activityTone(e.event_type); return <Activity key={`${e.ticketRef}-${i}`} icon={icon} tone={tone} text={<><b>{e.ticketRef}</b> {e.event_label}{e.actor?.name ? ` · ${e.actor.name}` : ""}</>} time={formatRelativeDate(e.created_at)} />; })}
           </div>
         </article>
       </section>
@@ -880,15 +1059,14 @@ function Dashboard({ canCreate, criticalTickets, dashboard, onCreate, onOpen, on
 }
 
 function TicketsView({ canCreate, currentUser, filter, filteredTickets, onCreate, onFilterChange, onNotify, onOpen, onResolve, onTake, query, setQuery }) {
-  const filters = currentUser?.role === "SOPORTE" ? ["Trabajables", "Míos", "Asignado", "En proceso", "Validación", "Todos"] : currentUser?.role === "DESPACHADOR" ? ["Míos", "Asignado", "En proceso", "Validación", "Todos"] : ["Todos", "Abierto", "Asignado", "En proceso", "Validación"];
-  const [sort, setSort] = useState("prioridad");
+  const filters = currentUser?.role === "SOPORTE" ? ["Trabajables", "Míos", "Validación", "Escalados", "Todos"] : currentUser?.role === "DESPACHADOR" ? ["Míos", "Validación", "Escalados", "Todos"] : ["Todos", "Abierto", "Asignado", "En proceso", "Validación", "Escalados", "Cerrados"];
+  const [sort, setSort] = useState("recientes");
   const priorityRank = { CRITICA: 0, ALTA: 1, MEDIA: 2, BAJA: 3 };
   const sortedTickets = [...filteredTickets].sort((a, b) => {
     if (sort === "recientes") return new Date(b.createdAt) - new Date(a.createdAt);
     if (sort === "antiguos") return new Date(a.createdAt) - new Date(b.createdAt);
     return (priorityRank[a.priorityCode] ?? 9) - (priorityRank[b.priorityCode] ?? 9) || (new Date(a.createdAt) - new Date(b.createdAt));
   });
-  const cycleSort = () => setSort(sort === "prioridad" ? "antiguos" : sort === "antiguos" ? "recientes" : "prioridad");
 
   return (
     <>
@@ -911,7 +1089,7 @@ function TicketsView({ canCreate, currentUser, filter, filteredTickets, onCreate
             ))}
           </div>
         </div>
-        <div className="table-summary"><span><b>{filteredTickets.length}</b> tickets encontrados</span><button type="button" onClick={cycleSort}>Ordenar: {sort} <Icon name="chevronDown" size={15} /></button></div>
+        <div className="table-summary"><span><b>{filteredTickets.length}</b> tickets encontrados</span><label className="sort-select">Ordenar: <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Ordenar tickets"><option value="recientes">recientes</option><option value="antiguos">antiguos</option><option value="prioridad">prioridad</option></select></label></div>
         <div className="ticket-table-wrap"><TicketTable currentUser={currentUser} onNotify={onNotify} onOpen={onOpen} onResolve={onResolve} onTake={onTake} tickets={sortedTickets} /></div>
         {filteredTickets.length === 0 && <EmptyState />}
       </article>
@@ -944,6 +1122,80 @@ function ValidationsView({ canValidate, tickets, onOpen, onValidate }) {
         {canValidate && tickets.length === 0 ? <EmptyValidation /> : null}
       </section>
     </>
+  );
+}
+
+function EmptyEscalation() {
+  return <article className="empty-validation"><span><Icon name="upload" size={28} /></span><h2>Sin escalamientos</h2><p>No hay tickets en escalamiento en este momento.</p></article>;
+}
+
+function EscalationsView({ canEscalate, tickets, onOpen, onDeescalate }) {
+  return (
+    <>
+      <PageHeader
+        eyebrow="Escalamiento a áreas"
+        title="Tickets escalados"
+        description="Solo lectura para despacho. Soporte continúa el flujo al recibir respuesta."
+      />
+      <section className="validation-grid">
+        {tickets.length === 0 ? <EmptyEscalation /> : tickets.map((ticket) => (
+          <article className="validation-card" key={ticket.id} onClick={() => onOpen && onOpen(ticket)} style={{ cursor: onOpen ? "pointer" : "default" }}>
+            <div className="validation-card-top"><span className="ticket-id">{ticket.id}</span><span className="status-pill status-escalated">Escalado · {ticket.areaEscalada || "—"}</span></div>
+            <h2>{ticket.title}</h2>
+            <div className="solution-note"><Icon name="upload" size={19} /><div><span>Motivo</span><p>{ticket.motivoEscalamiento || "Sin motivo registrado."}</p></div></div>
+            {ticket.instruccionesDespacho && <div className="solution-note" style={{ marginTop: "8px" }}><Icon name="checkCircle" size={19} /><div><span>Instrucciones de despacho</span><p>{ticket.instruccionesDespacho}</p></div></div>}
+            <div className="validation-meta"><span><div className="avatar small-avatar">{initials(ticket.assignee)}</div> {ticket.assignee}</span><span><Icon name="clock" size={16} /> {ticket.tiempoEscaladoMin != null ? `Lleva ${formatDuracion(ticket.tiempoEscaladoMin)} escalado` : ticket.created}</span></div>
+            {canEscalate && <div className="validation-actions" onClick={(e) => e.stopPropagation()}><button className="primary-button" type="button" onClick={() => onDeescalate(ticket)}><Icon name="check" size={17} /> Recibida respuesta · continuar</button></div>}
+            <div style={{ marginTop: "8px", fontSize: "10px", color: "var(--quiet)", textAlign: "center" }}>Clic para ver detalle →</div>
+          </article>
+        ))}
+      </section>
+    </>
+  );
+}
+
+function EscalateModal({ areas, onClose, onEscalate, ticket }) {
+  const [areaId, setAreaId] = useState(ticket.areaEscaladaId ? String(ticket.areaEscaladaId) : "");
+  const [motivo, setMotivo] = useState("");
+  const [instrucciones, setInstrucciones] = useState("");
+  const [contrato, setContrato] = useState(ticket.contrato || "");
+  const [numeroOt, setNumeroOt] = useState(ticket.numeroOt || "");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(event) {
+    event.preventDefault();
+    if (!areaId) { setError("Selecciona el área de escalamiento."); return; }
+    if (motivo.trim().length < 4) { setError("Describe el motivo (mínimo 4 caracteres)."); return; }
+    if (!contrato.trim() && !numeroOt.trim()) { setError("Completa el Contrato o la OT para poder escalar."); return; }
+    if ((contrato.trim() && !/^[0-9]+$/.test(contrato.trim())) || (numeroOt.trim() && !/^[0-9]+$/.test(numeroOt.trim()))) { setError("Contrato y OT solo admiten números."); return; }
+    setSubmitting(true);
+    setError("");
+    try {
+      await onEscalate(ticket, { area_id: Number(areaId), motivo: motivo.trim(), contrato: contrato.trim(), numero_ot: numeroOt.trim(), instrucciones: instrucciones.trim() });
+    } catch (requestError) {
+      setError(requestError.message || "No fue posible escalar.");
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation" style={{ zIndex: 120 }} onMouseDown={onClose}>
+      <section className="ticket-modal" role="dialog" aria-modal="true" aria-labelledby="escalate-title" onMouseDown={(event) => event.stopPropagation()}>
+        <header className="modal-header"><div><p className="eyebrow">Escalamiento</p><h2 id="escalate-title">Escalar {ticket.id}</h2><p>El ticket pasa a ESCALADO y se notifica al despacho.</p></div><button className="icon-button" type="button" aria-label="Cerrar" onClick={onClose}><Icon name="close" /></button></header>
+        <form onSubmit={submit}>
+          <div className="form-grid user-form-grid">
+            <label className="field"><span>Área <b>*</b></span><select required value={areaId} onChange={(e) => setAreaId(e.target.value)}><option value="">Seleccionar</option>{(areas || []).filter((a) => a.is_active).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
+            <label className="field"><span>Contrato</span><input name="contrato" inputMode="numeric" value={contrato} onChange={(e) => setContrato(e.target.value)} placeholder="Solo números" /></label>
+            <label className="field"><span>OT</span><input name="numeroOt" inputMode="numeric" value={numeroOt} onChange={(e) => setNumeroOt(e.target.value)} placeholder="Solo números" /></label>
+            <label className="field field-wide"><span>Motivo <b>*</b></span><textarea required value={motivo} onChange={(e) => setMotivo(e.target.value)} rows="3" placeholder="Ej. Falla de planta externa, se requiere cuadrilla." /></label>
+            <label className="field field-wide"><span>Instrucciones para despacho</span><textarea value={instrucciones} onChange={(e) => setInstrucciones(e.target.value)} rows="2" placeholder="Ej. retirar al técnico y confirmar ventana." /></label>
+          </div>
+          {error && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}
+          <footer className="modal-actions"><button className="secondary-button" disabled={submitting} type="button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={submitting} type="submit"><Icon name="upload" size={18} /> {submitting ? "Escalando..." : "Escalar ticket"}</button></footer>
+        </form>
+      </section>
+    </div>
   );
 }
 
@@ -1025,6 +1277,7 @@ function ReportsView({ groups, onNotify }) {
   }
 
   const kpis = summary?.kpis || {};
+  const porArea = summary?.por_area_escalada || [];
   const daily = summary?.daily || [];
   const maxDaily = Math.max(1, ...daily.map((d) => d.total));
   const maxAhtDay = Math.max(0, ...daily.map((d) => d.aht_minutos || 0));
@@ -1058,15 +1311,20 @@ function ReportsView({ groups, onNotify }) {
         </div>
         <footer className="modal-actions" style={{ margin: "12px 0 0", padding: 0, border: 0 }}><button className="primary-button" type="button" disabled={loading} onClick={load}>{loading ? "Cargando..." : "Aplicar filtros"}</button></footer>
       </article>
-      <section className="report-highlights" style={{ gridTemplateColumns: "repeat(7, minmax(0, 1fr))" }}>
+      <section className="report-highlights" style={{ gridTemplateColumns: "repeat(5, minmax(0, 1fr))" }}>
         <article><span>Entrantes</span><strong>{fmt(kpis.entrantes)}</strong></article>
         <article><span>Resueltos</span><strong>{fmt(kpis.resueltos)}</strong></article>
         <article><span>AHT</span><strong>{fmtDur(kpis.aht_minutos)}</strong><p>Tomado → resuelto</p></article>
-        <article><span>Devueltos a soporte</span><strong>{fmt(kpis.devueltos)}</strong><p>Rechazos de validación</p></article>
         <article><span>% SLA cumplido</span><strong>{fmt(kpis.pct_sla, "%")}</strong><p><b>Meta: 90%</b></p></article>
         <article><span>En proceso</span><strong>{fmt(kpis.en_proceso)}</strong></article>
-        <article><span>Vencidos</span><strong>{fmt(kpis.vencidos)}</strong></article>
       </section>
+      <section className="report-highlights" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
+        <article><span>Vencidos</span><strong>{fmt(kpis.vencidos)}</strong></article>
+        <article><span>Devueltos a soporte</span><strong>{fmt(kpis.devueltos)}</strong><p>Rechazos de validación</p></article>
+        <article><span>Escalados abiertos</span><strong>{fmt(kpis.escalados_abiertos)}</strong><p>En áreas externas</p></article>
+        <article><span>Tiempo prom. escalado</span><strong>{fmtDur(kpis.tiempo_prom_escalado_min)}</strong><p>Contador por ticket</p></article>
+      </section>
+      {porArea.length > 0 && <article className="panel" style={{ padding: "14px 20px", marginBottom: "17px" }}><PanelHeading eyebrow="Escalamiento" title="Por área" /><div style={{ display: "flex", flexWrap: "wrap", gap: "8px 22px" }}>{porArea.map((r) => <span key={r.area} style={{ fontSize: "11px", color: "var(--muted)" }}><b style={{ color: "var(--ink)" }}>{r.total}</b> {r.area}</span>)}</div></article>}
       <section className="reports-grid" style={{ gridTemplateColumns: "1fr" }}>
         <article className="panel channel-panel"><PanelHeading eyebrow="Por día" title="Tráfico entrante" />
           <div style={{ display: "flex", alignItems: "flex-end", gap: "6px", padding: "10px 24px 24px", minHeight: "160px" }}>
@@ -1094,7 +1352,7 @@ function ReportsView({ groups, onNotify }) {
   );
 }
 
-function UsersView({ error, groups, loading, onCreate, onCreateGroup, onCreateTeam, onCreateRequestType, onEdit, onEditGroup, onEditTeam, onEditRequestType, onResetPassword, onRetry, requestTypes, teams, users, currentRole }) {
+function UsersView({ areas, error, groups, loading, onCreate, onCreateArea, onCreateGroup, onCreateTeam, onCreateRequestType, onEdit, onEditArea, onEditGroup, onEditTeam, onEditRequestType, onResetPassword, onRetry, requestTypes, teams, users, currentRole }) {
   const [query, setQuery] = useState("");
   const [role, setRole] = useState("Todos");
   const [tab, setTab] = useState("usuarios");
@@ -1105,12 +1363,13 @@ function UsersView({ error, groups, loading, onCreate, onCreateGroup, onCreateTe
 
   return (
     <>
-      <PageHeader eyebrow="Administración" title="Usuarios y accesos" description="Gestiona personas y grupos. Los roles son asignables por administrador y las credenciales se restablecen desde aquí." action={tab === "usuarios" ? <button className="primary-button" type="button" onClick={onCreate}><Icon name="plus" size={18} /> Nuevo usuario</button> : tab === "tipos" ? <button className="primary-button" type="button" onClick={onCreateRequestType}><Icon name="plus" size={18} /> Nuevo tipo</button> : <button className="primary-button" type="button" onClick={onCreateGroup}><Icon name="plus" size={18} /> Nuevo grupo</button>} />
+      <PageHeader eyebrow="Administración" title="Administración" description="Gestiona personas, grupos, catálogos y accesos. Los roles son asignables por administrador y las credenciales se restablecen desde aquí." action={tab === "usuarios" ? <button className="primary-button" type="button" onClick={onCreate}><Icon name="plus" size={18} /> Nuevo usuario</button> : tab === "tipos" ? <button className="primary-button" type="button" onClick={onCreateRequestType}><Icon name="plus" size={18} /> Nuevo tipo</button> : tab === "areas" ? <button className="primary-button" type="button" onClick={onCreateArea}><Icon name="plus" size={18} /> Nueva área</button> : <button className="primary-button" type="button" onClick={onCreateGroup}><Icon name="plus" size={18} /> Nuevo grupo</button>} />
       {error && <ApiConnectionError message={error} onRetry={onRetry} />}
       {currentRole !== "SUPERVISOR" && <div className="admin-tabs" role="tablist">
         <button className={tab === "usuarios" ? "selected" : ""} type="button" role="tab" aria-selected={tab === "usuarios"} onClick={() => setTab("usuarios")}><Icon name="users" size={16} /> Usuarios <span>{users.length}</span></button>
         <button className={tab === "grupos" ? "selected" : ""} type="button" role="tab" aria-selected={tab === "grupos"} onClick={() => setTab("grupos")}><Icon name="shield" size={16} /> Grupos <span>{groups.length}</span></button>
         <button className={tab === "tipos" ? "selected" : ""} type="button" role="tab" aria-selected={tab === "tipos"} onClick={() => setTab("tipos")}><Icon name="ticket" size={16} /> Tipos <span>{(requestTypes || []).length}</span></button>
+        <button className={tab === "areas" ? "selected" : ""} type="button" role="tab" aria-selected={tab === "areas"} onClick={() => setTab("areas")}><Icon name="upload" size={16} /> Áreas <span>{(areas || []).length}</span></button>
       </div>}
       {loading ? <LoadingState /> : tab === "usuarios" ? <article className="panel users-panel">
         <div className="toolbar users-toolbar">
@@ -1118,7 +1377,7 @@ function UsersView({ error, groups, loading, onCreate, onCreateGroup, onCreateTe
           <div className="filter-row" aria-label="Filtrar usuarios por rol"><Icon name="filter" size={17} />{[["Todos", "Todos"], ["DESPACHADOR", "Despachadores"], ["SOPORTE", "Soporte"], ["SUPERVISOR", "Supervisores"], ["ADMIN", "Administración"]].map(([value, label]) => <button className={role === value ? "selected" : ""} key={value} type="button" onClick={() => setRole(value)}>{label}</button>)}</div>
         </div>
         <div className="table-summary"><span><b>{filteredUsers.length}</b> usuarios encontrados</span><span>Bloqueo tras 5 intentos · Solo desbloquea vía correo</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Usuario</th><th>Rol</th><th>Grupo</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{filteredUsers.map((user) => <tr key={user.id}><td data-label="Usuario"><div className="managed-user"><div className={`avatar ${user.avatarClass}`}>{user.initials}</div><div><strong>{user.name}</strong><small>{user.email}</small></div></div></td><td data-label="Rol"><span className={`role-pill role-${user.role.toLowerCase()}`}>{user.roleLabel}</span></td><td data-label="Grupo"><div className="team-cell"><strong>{user.groupName}</strong></div></td><td data-label="Estado"><span className={`user-status ${user.is_locked ? "locked" : user.is_active ? "active" : "inactive"}`}><i /> {user.is_locked ? `Bloqueada (${user.failed_login_attempts})` : user.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action">{currentRole === "SUPERVISOR" && user.role === "ADMIN" ? <small style={{ color: "var(--quiet)" }}>Solo admin</small> : <><button type="button" onClick={() => onEdit(user)}>Editar</button><button className="reset-link" type="button" onClick={() => onResetPassword(user)}>Contraseña</button></>}</td></tr>)}</tbody></table></div>{filteredUsers.length === 0 && <EmptyState />}
-      </article> : tab === "equipos" ? <article className="panel users-panel"><div className="table-summary"><span><b>{teams.length}</b> equipos registrados</span><span>Agrupados por grupo · Código único</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Equipo</th><th>Grupo</th><th>Código</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{teams.map((team) => <tr key={team.id}><td data-label="Equipo"><strong>{team.name}</strong></td><td data-label="Grupo"><span className="team-label">{team.group_detail?.name || team.group?.name || "-"}</span></td><td data-label="Código"><span className="team-label">{team.code}</span></td><td data-label="Estado"><span className={`user-status ${team.is_active ? "active" : "inactive"}`}><i /> {team.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action"><button type="button" onClick={() => onEditTeam(team)}>Editar</button></td></tr>)}</tbody></table></div>{teams.length === 0 && <EmptyState />}</article> : tab === "tipos" ? <article className="panel users-panel"><div className="table-summary"><span><b>{(requestTypes || []).length}</b> tipos registrados</span><span>Solicitud → Servicio → Tipo</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Tipo</th><th>Solicitud</th><th>Servicio</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{(requestTypes || []).map((rt) => <tr key={rt.id}><td data-label="Tipo"><strong>{rt.name}</strong></td><td data-label="Solicitud"><span className="team-label">{rt.kind_label}</span></td><td data-label="Servicio"><span className="team-label">{rt.service}</span></td><td data-label="Estado"><span className={`user-status ${rt.is_active ? "active" : "inactive"}`}><i /> {rt.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action"><button type="button" onClick={() => onEditRequestType(rt)}>Editar</button></td></tr>)}</tbody></table></div>{(requestTypes || []).length === 0 && <EmptyState />}</article> : <article className="panel users-panel"><div className="table-summary"><span><b>{groups.length}</b> grupos registrados</span><span>Área macro (Tigo, Contrata, BBI N-2, etc.)</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Grupo</th><th>Código</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{groups.map((group) => <tr key={group.id}><td data-label="Grupo"><strong>{group.name}</strong></td><td data-label="Código"><span className="team-label">{group.code}</span></td><td data-label="Estado"><span className={`user-status ${group.is_active ? "active" : "inactive"}`}><i /> {group.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action"><button type="button" onClick={() => onEditGroup(group)}>Editar</button></td></tr>)}</tbody></table></div>{groups.length === 0 && <EmptyState />}</article>}
+      </article> : tab === "equipos" ? <article className="panel users-panel"><div className="table-summary"><span><b>{teams.length}</b> equipos registrados</span><span>Agrupados por grupo · Código único</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Equipo</th><th>Grupo</th><th>Código</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{teams.map((team) => <tr key={team.id}><td data-label="Equipo"><strong>{team.name}</strong></td><td data-label="Grupo"><span className="team-label">{team.group_detail?.name || team.group?.name || "-"}</span></td><td data-label="Código"><span className="team-label">{team.code}</span></td><td data-label="Estado"><span className={`user-status ${team.is_active ? "active" : "inactive"}`}><i /> {team.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action"><button type="button" onClick={() => onEditTeam(team)}>Editar</button></td></tr>)}</tbody></table></div>{teams.length === 0 && <EmptyState />}</article> : tab === "tipos" ? <article className="panel users-panel"><div className="table-summary"><span><b>{(requestTypes || []).length}</b> tipos registrados</span><span>Solicitud → Servicio → Tipo</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Tipo</th><th>Solicitud</th><th>Servicio</th><th>Atiende</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{(requestTypes || []).map((rt) => <tr key={rt.id}><td data-label="Tipo"><strong>{rt.name}</strong></td><td data-label="Solicitud"><span className="team-label">{rt.kind_label}</span></td><td data-label="Servicio"><span className="team-label">{rt.service}</span></td><td data-label="Atiende"><span className="team-label">{rt.equipo_detail?.name || "Automático"}</span></td><td data-label="Estado"><span className={`user-status ${rt.is_active ? "active" : "inactive"}`}><i /> {rt.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action"><button type="button" onClick={() => onEditRequestType(rt)}>Editar</button></td></tr>)}</tbody></table></div>{(requestTypes || []).length === 0 && <EmptyState />}</article> : tab === "areas" ? <article className="panel users-panel"><div className="table-summary"><span><b>{(areas || []).length}</b> áreas registradas</span><span>Catálogo para escalamientos (Tier3, NOC, etc.)</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Área</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{(areas || []).map((a) => <tr key={a.id}><td data-label="Área"><strong>{a.name}</strong></td><td data-label="Estado"><span className={`user-status ${a.is_active ? "active" : "inactive"}`}><i /> {a.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action"><button type="button" onClick={() => onEditArea(a)}>Editar</button></td></tr>)}</tbody></table></div>{(areas || []).length === 0 && <EmptyState />}</article> : <article className="panel users-panel"><div className="table-summary"><span><b>{groups.length}</b> grupos registrados</span><span>Área macro (Tigo, Contrata, BBI N-2, etc.)</span></div><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Grupo</th><th>Código</th><th>Estado</th><th aria-label="Acciones" /></tr></thead><tbody>{groups.map((group) => <tr key={group.id}><td data-label="Grupo"><strong>{group.name}</strong></td><td data-label="Código"><span className="team-label">{group.code}</span></td><td data-label="Estado"><span className={`user-status ${group.is_active ? "active" : "inactive"}`}><i /> {group.is_active ? "Activo" : "Inactivo"}</span></td><td className="user-action"><button type="button" onClick={() => onEditGroup(group)}>Editar</button></td></tr>)}</tbody></table></div>{groups.length === 0 && <EmptyState />}</article>}
     </>
   );
 }
@@ -1229,14 +1488,24 @@ function GroupFormModal({ group, onClose, onSave }) {
   return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="ticket-modal user-modal" role="dialog" aria-modal="true" aria-labelledby="group-form-title" onMouseDown={(e) => e.stopPropagation()}><header className="modal-header"><div><p className="eyebrow">Segmentación organizacional</p><h2 id="group-form-title">{isNew ? "Nuevo grupo" : "Editar grupo"}</h2><p>El grupo es el área macro (Tigo, Contrata, BBI N-2).</p></div><button className="icon-button" type="button" aria-label="Cerrar" onClick={onClose}><Icon name="close" /></button></header><form onSubmit={submit}><div className="form-grid user-form-grid"><label className="field"><span>Nombre <b>*</b></span><input autoFocus required name="name" value={form.name} onChange={updateField} placeholder="Tigo" /></label><label className="field"><span>Código <b>*</b></span><input required name="code" value={form.code} onChange={updateField} placeholder="tigo" /></label></div><label className="active-user-toggle"><input checked={form.isActive} name="isActive" type="checkbox" onChange={updateField} /><span><i /></span><div><strong>Grupo activo</strong><small>Visible para asignación.</small></div></label>{error && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}<footer className="modal-actions"><button className="secondary-button" disabled={submitting} type="button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={submitting} type="submit"><Icon name="check" size={18} /> {submitting ? "Guardando..." : isNew ? "Crear grupo" : "Guardar cambios"}</button></footer></form></section></div>;
 }
 
-function RequestTypeFormModal({ onClose, onSave, requestType }) {
+function RequestTypeFormModal({ onClose, onSave, requestType, teams }) {
   const isNew = !requestType;
-  const [form, setForm] = useState({ kind: requestType?.kind || "CLIENTE", service: requestType?.service || "HFC", name: requestType?.name || "", isActive: requestType?.is_active ?? true });
+  const [form, setForm] = useState({ kind: requestType?.kind || "CLIENTE", service: requestType?.service || "HFC", name: requestType?.name || "", teamId: requestType?.equipo_asignado ? String(requestType.equipo_asignado) : "", isActive: requestType?.is_active ?? true });
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   function updateField(e) { const { name, value, type, checked } = e.target; setForm((c) => ({ ...c, [name]: type === "checkbox" ? checked : value })); }
-  async function submit(e) { e.preventDefault(); if (!form.name.trim()) { setError("Completa el nombre del tipo."); return; } setSubmitting(true); setError(""); try { await onSave(form, requestType); } catch (err) { setError(err.message || "No fue posible guardar el tipo."); setSubmitting(false); } }
-  return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="ticket-modal user-modal" role="dialog" aria-modal="true" aria-labelledby="rt-form-title" onMouseDown={(e) => e.stopPropagation()}><header className="modal-header"><div><p className="eyebrow">Catálogo de solicitudes</p><h2 id="rt-form-title">{isNew ? "Nuevo tipo" : "Editar tipo"}</h2><p>Define a qué solicitud y servicio aplica.</p></div><button className="icon-button" type="button" aria-label="Cerrar" onClick={onClose}><Icon name="close" /></button></header><form onSubmit={submit}><div className="form-grid user-form-grid"><label className="field"><span>Tipo de solicitud <b>*</b></span><select name="kind" value={form.kind} onChange={updateField}><option value="CLIENTE">Solicitud de Soporte Cliente</option><option value="TECNICO">Soporte Al Tecnico</option></select></label><label className="field"><span>Servicio <b>*</b></span><select name="service" value={form.service} onChange={updateField}><option value="HFC">HFC</option><option value="FTTH">FTTH</option><option value="WTTX">WTTX</option><option value="DTH">DTH</option></select></label><label className="field field-wide"><span>Nombre <b>*</b></span><input autoFocus required name="name" value={form.name} onChange={updateField} placeholder="ONT sin VLAN" /></label></div><label className="active-user-toggle"><input checked={form.isActive} name="isActive" type="checkbox" onChange={updateField} /><span><i /></span><div><strong>Tipo activo</strong><small>Visible en el formulario.</small></div></label>{error && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}<footer className="modal-actions"><button className="secondary-button" disabled={submitting} type="button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={submitting} type="submit"><Icon name="check" size={18} /> {submitting ? "Guardando..." : isNew ? "Crear tipo" : "Guardar cambios"}</button></footer></form></section></div>;
+  async function submit(e) { e.preventDefault(); if (!form.name.trim()) { setError("Completa el nombre del tipo."); return; } setSubmitting(true); setError(""); try { await onSave({ ...form, teamId: form.teamId }, requestType); } catch (err) { setError(err.message || "No fue posible guardar el tipo."); setSubmitting(false); } }
+  return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="ticket-modal user-modal" role="dialog" aria-modal="true" aria-labelledby="rt-form-title" onMouseDown={(e) => e.stopPropagation()}><header className="modal-header"><div><p className="eyebrow">Catálogo de solicitudes</p><h2 id="rt-form-title">{isNew ? "Nuevo tipo" : "Editar tipo"}</h2><p>Define a qué solicitud y servicio aplica.</p></div><button className="icon-button" type="button" aria-label="Cerrar" onClick={onClose}><Icon name="close" /></button></header><form onSubmit={submit}><div className="form-grid user-form-grid"><label className="field"><span>Tipo de solicitud <b>*</b></span><select name="kind" value={form.kind} onChange={updateField}><option value="CLIENTE">Solicitud de Soporte Cliente</option><option value="TECNICO">Soporte Al Tecnico</option></select></label><label className="field"><span>Servicio <b>*</b></span><select name="service" value={form.service} onChange={updateField}><option value="HFC">HFC</option><option value="FTTH">FTTH</option><option value="WTTX">WTTX</option><option value="DTH">DTH</option></select></label><label className="field field-wide"><span>Nombre <b>*</b></span><input autoFocus required name="name" value={form.name} onChange={updateField} placeholder="ONT sin VLAN" /></label><label className="field field-wide"><span>Equipo que atiende</span><select name="teamId" value={form.teamId} onChange={updateField}><option value="">Automático (por grupo origen)</option>{(teams || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label></div><label className="active-user-toggle"><input checked={form.isActive} name="isActive" type="checkbox" onChange={updateField} /><span><i /></span><div><strong>Tipo activo</strong><small>Visible en el formulario.</small></div></label>{error && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}<footer className="modal-actions"><button className="secondary-button" disabled={submitting} type="button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={submitting} type="submit"><Icon name="check" size={18} /> {submitting ? "Guardando..." : isNew ? "Crear tipo" : "Guardar cambios"}</button></footer></form></section></div>;
+}
+
+function AreaFormModal({ area, onClose, onSave }) {
+  const isNew = !area;
+  const [form, setForm] = useState({ name: area?.name || "", isActive: area?.is_active ?? true });
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  function updateField(e) { const { name, value, type, checked } = e.target; setForm((c) => ({ ...c, [name]: type === "checkbox" ? checked : value })); }
+  async function submit(e) { e.preventDefault(); if (!form.name.trim()) { setError("Completa el nombre del área."); return; } setSubmitting(true); setError(""); try { await onSave(form, area); } catch (err) { setError(err.message || "No fue posible guardar el área."); setSubmitting(false); } }
+  return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="ticket-modal user-modal" role="dialog" aria-modal="true" aria-labelledby="area-form-title" onMouseDown={(e) => e.stopPropagation()}><header className="modal-header"><div><p className="eyebrow">Catálogo de escalamiento</p><h2 id="area-form-title">{isNew ? "Nueva área" : "Editar área"}</h2><p>Define las áreas externas a las que se puede escalar (Tier3, NOC, etc.).</p></div><button className="icon-button" type="button" aria-label="Cerrar" onClick={onClose}><Icon name="close" /></button></header><form onSubmit={submit}><div className="form-grid user-form-grid"><label className="field field-wide"><span>Nombre <b>*</b></span><input autoFocus required name="name" value={form.name} onChange={updateField} placeholder="NOC" /></label></div><label className="active-user-toggle"><input checked={form.isActive} name="isActive" type="checkbox" onChange={updateField} /><span><i /></span><div><strong>Área activa</strong><small>Visible al escalar.</small></div></label>{error && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}<footer className="modal-actions"><button className="secondary-button" disabled={submitting} type="button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={submitting} type="submit"><Icon name="check" size={18} /> {submitting ? "Guardando..." : isNew ? "Crear área" : "Guardar cambios"}</button></footer></form></section></div>;
 }
 
 function PasswordResetModal({ onClose, onSave, user }) {
@@ -1259,15 +1528,16 @@ function PanelHeading({ eyebrow, title, action }) {
 function TicketTable({ tickets, compact = false, currentUser, onNotify, onOpen, onResolve, onTake }) {
   return (
     <table className={`ticket-table ${compact ? "compact" : ""}`}>
-      <thead><tr><th>Ticket</th><th>Prioridad</th><th>Estado</th><th>Grupo</th><th>SLA restante</th>{!compact && <th aria-label="Acciones" />}</tr></thead>
+      <thead><tr><th>Ticket</th><th>Prioridad</th><th>Estado</th><th>Grupo</th><th>SLA restante</th><th>Tiempo total</th>{!compact && <th aria-label="Acciones" />}</tr></thead>
       <tbody>
         {tickets.map((ticket) => (
           <tr className={onOpen ? "ticket-row-clickable" : ""} key={ticket.id} onClick={() => onOpen?.(ticket)}>
-            <td data-label="Ticket"><div className="ticket-title"><div className="avatar ticket-avatar">{ticket.avatar}</div><div><span>{ticket.id}{ticket.identificador ? ` · ${ticket.identificador}` : ""}</span><strong>{ticket.title}</strong><small>{ticket.category}{ticket.tipoSolicitud ? ` · ${ticket.tipoSolicitud}` : ""} · {ticket.created}</small></div></div></td>
+            <td data-label="Ticket"><div className="ticket-title"><div className="avatar ticket-avatar">{ticket.avatar}</div><div><span>{ticket.id}{ticket.contrato ? ` · Cto ${ticket.contrato}` : ""}{ticket.numeroOt ? ` · OT ${ticket.numeroOt}` : ""}</span><strong>{ticket.title}</strong><small>{ticket.category}{ticket.tipoSolicitud ? ` · ${ticket.tipoSolicitud}` : ""} · {ticket.created}</small></div></div></td>
             <td data-label="Prioridad"><span className={`priority-pill ${priorityClass[ticket.priority]}`}>{ticket.priority}</span></td>
             <td data-label="Estado"><span className={`status-pill ${statusClass[ticket.status]}`}>{ticket.status}</span></td>
             <td data-label="Equipo"><span className="team-label">{ticket.team}</span></td>
             <td data-label="SLA restante"><span className={`sla-time ${ticket.slaTone}`}><i /> {ticket.sla}</span></td>
+            <td data-label="Tiempo total"><span className="team-label">{formatDuracion(((ticket.resolvedAt ? new Date(ticket.resolvedAt) : new Date()) - new Date(ticket.createdAt)) / 60000)}</span></td>
             {!compact && <td className="table-action">
               {currentUser?.role === "SOPORTE" && ["ABIERTO", "ASIGNADO"].includes(ticket.statusCode) ? <button className="quick-action" type="button" onClick={(event) => { event.stopPropagation(); onTake(ticket); }}>Tomar</button> : null}
               {currentUser?.role === "SOPORTE" && ticket.statusCode === "EN_PROCESO" ? <button className="quick-action" type="button" onClick={(event) => { event.stopPropagation(); onResolve(ticket); }}>Resolver</button> : null}
@@ -1340,7 +1610,7 @@ function ResolveTicketModal({ onClose, onResolve, ticket }) {
   );
 }
 
-function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onReassign, onRelease, onResolve, onTake, onValidate, teams, ticket, users }) {
+function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onDeescalate, onEscalate, onInstruct, onReassign, onRelease, onResolve, onTake, onValidate, teams, ticket, users }) {
   const [actionError, setActionError] = useState("");
   const [acting, setActing] = useState(false);
   const [attachFile, setAttachFile] = useState(null);
@@ -1366,6 +1636,11 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onReassi
   const canRelease = ["ASIGNADO", "EN_PROCESO"].includes(ticket.statusCode) && (ticket.assigneeId === currentUser.id || currentUser.role === "ADMIN" || (currentUser.role === "SUPERVISOR" && (currentUser.groups || []).map((g) => g.code).includes(ticket.groupCode)));
   const canResolve = currentUser.role === "SOPORTE" && ticket.statusCode === "EN_PROCESO";
   const canValidate = currentUser.role !== "SOPORTE" && ticket.statusCode === "VALIDACION";
+  const canEscalate = ["SOPORTE", "SUPERVISOR", "ADMIN"].includes(currentUser.role) && ["ABIERTO", "ASIGNADO", "EN_PROCESO"].includes(ticket.statusCode);
+  const canDeescalate = ["SOPORTE", "SUPERVISOR", "ADMIN"].includes(currentUser.role) && ticket.statusCode === "ESCALADO";
+  const canInstruct = ["SOPORTE", "SUPERVISOR", "ADMIN"].includes(currentUser.role) && ticket.statusCode === "ESCALADO" && (ticket.assigneeId === currentUser.id || currentUser.role !== "SOPORTE" || currentUser.is_administrator);
+  const [showInstruct, setShowInstruct] = useState(false);
+  const [instructText, setInstructText] = useState("");
   const canAttach = currentUser.is_administrator || currentUser.role === "ADMIN" || ticket.requester === currentUser.name || (currentUser.role === "SOPORTE" && currentUser.team === ticket.team);
   const canReassign = ticket.statusCode !== "CERRADO" && ["DESPACHADOR", "SOPORTE", "SUPERVISOR", "ADMIN"].includes(currentUser.role) && (currentUser.role === "ADMIN" || (currentUser.groups || []).map((g) => g.code).includes(ticket.groupCode));
   const candidates = (users || []).filter((u) => u.is_active && !u.is_locked && u.role === "SOPORTE" && (u.groupName || "").split(",").map((s) => s.trim()).includes(ticket.team));
@@ -1381,15 +1656,17 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onReassi
     }
   }
 
-  function pickAttachFiles(files, append = false) {
+  async function pickAttachFiles(files, append = false) {
     if (!files.length) return;
     const current = append ? (Array.isArray(attachFile) ? attachFile : attachFile ? [attachFile] : []) : [];
-    const combined = [...current, ...files];
+    const processed = [];
+    for (const f of files) processed.push(await compressImageFile(f));
+    const combined = [...current, ...processed];
     if (ticket.attachments.length + combined.length > 5) {
       setAttachError(`Máximo 5 imágenes por ticket (ya tienes ${ticket.attachments.length}).`);
       return;
     }
-    for (const f of files) {
+    for (const f of processed) {
       if (f.size > 5 * 1024 * 1024) {
         setAttachError(`"${f.name}" supera 5 MB.`);
         return;
@@ -1443,10 +1720,11 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onReassi
         </header>
         {isLoading ? <div className="detail-loading"><span className="loading-mark"><i /><i /><i /></span><p>Cargando historial del ticket...</p></div> : <div className="ticket-detail-content">
           <div className="detail-main">
-            <section className="detail-section"><div className="detail-section-heading"><span className="detail-label">Datos de la solicitud</span><span>{ticket.identificador}</span></div><div className="profile-details" style={{ padding: 0, marginTop: "10px" }}>{ticket.identificador && <div className="profile-row"><span>Contrato / OT</span><span>{ticket.identificador}</span></div>}{ticket.cliente && <div className="profile-row"><span>Cliente</span><span>{ticket.cliente}</span></div>}{ticket.nodo && <div className="profile-row"><span>Nodo</span><span>{ticket.nodo}</span></div>}{ticket.tipoSolicitud && <div className="profile-row"><span>Tipo</span><span>{ticket.tipoSolicitud}</span></div>}</div></section>
+            <section className="detail-section"><div className="detail-section-heading"><span className="detail-label">Datos de la solicitud</span><span>{ticket.contrato || ticket.numeroOt}</span></div><div className="profile-details" style={{ padding: 0, marginTop: "10px" }}>{ticket.contrato && <div className="profile-row"><span>Contrato</span><span>{ticket.contrato}</span></div>}{ticket.numeroOt && <div className="profile-row"><span>OT</span><span>{ticket.numeroOt}</span></div>}{ticket.cliente && <div className="profile-row"><span>Cliente</span><span>{ticket.cliente}</span></div>}{ticket.nodo && <div className="profile-row"><span>Nodo</span><span>{ticket.nodo}</span></div>}{ticket.tipoSolicitud && <div className="profile-row"><span>Tipo</span><span>{ticket.tipoSolicitud}</span></div>}</div></section>
             <section className="detail-section"><span className="detail-label">Descripción reportada</span><p className="detail-description">{ticket.description || "Sin descripción adicional."}</p></section>
             {ticket.resolutionNotes && <section className="detail-section solution-detail"><span className="detail-label"><Icon name="checkCircle" size={15} /> Solución registrada</span><p>{ticket.resolutionNotes}</p></section>}
-            <section className="detail-section"><div className="detail-section-heading"><span className="detail-label">Evidencia adjunta</span><span>{ticket.attachments.length}/5</span></div>{ticket.attachments.length ? <div className="attachment-list">{ticket.attachments.map((attachment) => <a href={attachment.url} key={attachment.id} rel="noreferrer" target="_blank"><img src={attachment.url} alt={attachment.original_name} style={{ width: "52px", height: "52px", objectFit: "cover", borderRadius: "6px", flex: "0 0 auto" }} onError={(e) => { e.target.style.display = "none"; }} /><span><strong>{attachment.original_name}</strong><small>{Math.max(1, Math.round(attachment.size / 1024))} KB · {formatDateTime(attachment.created_at)}</small></span><Icon name="arrowRight" size={15} /></a>)}</div> : <p className="detail-empty">No hay evidencia adjunta.</p>}{canAttach && <form className="detail-attach-form" onSubmit={submitAttach} onPaste={handleAttachPaste}><label className={`upload-box small ${attachError ? "has-error" : ""}`}><input type="file" accept=".jpg,.jpeg,.png" multiple onChange={handleAttach} /><Icon name="upload" size={16} /><span>{attachList.length ? `${attachList.length} ${attachList.length === 1 ? "imagen" : "imágenes"}` : "Adjuntar o pegar (Ctrl+V)"}</span></label><button className="secondary-button" disabled={uploading || !attachFile} type="submit">{uploading ? "Subiendo..." : "Adjuntar"}</button></form>}{attachList.length > 0 && <div className="attach-preview-grid">{attachList.map((f, i) => <div className="attach-preview" key={`${f.name}-${f.size}-${i}`}><img src={attachPreviews[i]} alt={f.name} /><span title={f.name}>{f.name}</span><button type="button" aria-label={`Quitar ${f.name}`} onClick={() => removeAttachFile(i)}>✕</button></div>)}</div>}{attachError && <p className="form-submit-error" role="alert"><Icon name="alert" size={14} /> {attachError}</p>}</section>
+            {ticket.statusCode === "ESCALADO" && <section className="detail-section solution-detail"><span className="detail-label"><Icon name="upload" size={15} /> Escalado a {ticket.areaEscalada || "—"}{ticket.tiempoEscaladoMin != null ? ` · lleva ${formatDuracion(ticket.tiempoEscaladoMin)}` : ""}</span>{ticket.motivoEscalamiento && <p><b>Motivo (soporte):</b> {ticket.motivoEscalamiento}</p>}{ticket.instruccionesDespacho ? <p><b>Instrucciones para despacho:</b> {ticket.instruccionesDespacho}</p> : <p>Soporte aún no deja instrucciones para despacho.</p>}</section>}
+            <section className="detail-section"><div className="detail-section-heading"><span className="detail-label">Evidencia adjunta</span><span>{ticket.attachments.length}/5</span></div>{ticket.attachments.length ? <div className="attachment-list">{ticket.attachments.map((attachment) => <a href={attachment.url} key={attachment.id} rel="noreferrer" target="_blank"><img src={attachment.url} alt={attachment.original_name} style={{ width: "52px", height: "52px", objectFit: "cover", borderRadius: "6px", flex: "0 0 auto" }} onError={(e) => { e.target.style.display = "none"; }} /><span><strong>{attachment.original_name}</strong><small>{Math.max(1, Math.round(attachment.size / 1024))} KB · {formatDateTime(attachment.created_at)}{["PENDIENTE", "PROCESANDO"].includes(attachment.ocr_estado) ? " · Procesando texto…" : attachment.ocr_estado === "FALLIDO" ? " · OCR no disponible" : ""}</small></span><Icon name="arrowRight" size={15} /></a>)}</div> : <p className="detail-empty">No hay evidencia adjunta.</p>}{canAttach && <form className="detail-attach-form" onSubmit={submitAttach} onPaste={handleAttachPaste}><label className={`upload-box small ${attachError ? "has-error" : ""}`}><input type="file" accept=".jpg,.jpeg,.png" multiple onChange={handleAttach} /><Icon name="upload" size={16} /><span>{attachList.length ? `${attachList.length} ${attachList.length === 1 ? "imagen" : "imágenes"}` : "Adjuntar o pegar (Ctrl+V)"}</span></label><button className="secondary-button" disabled={uploading || !attachFile} type="submit">{uploading ? "Subiendo..." : "Adjuntar"}</button></form>}{attachList.length > 0 && <div className="attach-preview-grid">{attachList.map((f, i) => <div className="attach-preview" key={`${f.name}-${f.size}-${i}`}><img src={attachPreviews[i]} alt={f.name} /><span title={f.name}>{f.name}</span><button type="button" aria-label={`Quitar ${f.name}`} onClick={() => removeAttachFile(i)}>✕</button></div>)}</div>}{attachError && <p className="form-submit-error" role="alert"><Icon name="alert" size={14} /> {attachError}</p>}</section>
             <section className="detail-section history-section"><div className="detail-section-heading"><span className="detail-label">Historial del ticket</span><span>{ticket.events.length}</span></div>{ticket.events.length ? <ol className="ticket-history">{ticket.events.map((event) => <li key={event.id}><span className="history-dot" /><div><strong>{event.event_label}</strong><p>{event.comment || `${event.actor?.name || "Sistema"} actualizó el ticket.`}</p><small>{event.actor?.name || "Sistema"} · {formatDateTime(event.created_at)}</small></div></li>)}</ol> : <p className="detail-empty">Aún no hay eventos registrados.</p>}</section>
           </div>
           <aside className="detail-sidebar">
@@ -1454,10 +1732,14 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onReassi
             <div className="detail-meta"><span className="detail-label">SLA restante</span><strong className={`sla-time ${ticket.slaTone}`}><i /> {ticket.sla}</strong><small>Vence: {formatDateTime(ticket.slaDueAt)}</small></div>
             <div className="detail-meta"><span className="detail-label">Despachador</span><strong>{ticket.requester}</strong><small>{ticket.originTeam}</small></div>
             <div className="detail-meta"><span className="detail-label">Atiende</span><strong>{ticket.assignee}</strong><small>{ticket.team}</small></div>
-            {(canTake || canRelease || canResolve || canValidate) && <div className="detail-actions">
+            {(canTake || canRelease || canResolve || canValidate || canEscalate || canDeescalate || canInstruct) && <div className="detail-actions">
               {canTake && <button className="primary-button" disabled={acting} type="button" onClick={() => runAction(onTake)}>Tomar ticket</button>}
               {canRelease && <button className="secondary-button" disabled={acting} type="button" onClick={() => runAction(onRelease)}>Liberar a bandeja</button>}
               {canResolve && <button className="primary-button" type="button" onClick={() => onResolve(ticket)}>Registrar solución</button>}
+              {canEscalate && <button className="secondary-button" type="button" onClick={() => onEscalate(ticket)}><Icon name="upload" size={16} /> Escalar</button>}
+              {canDeescalate && <button className="primary-button" disabled={acting} type="button" onClick={() => runAction(onDeescalate)}>Recibida respuesta · continuar</button>}
+              {canInstruct && !showInstruct && <button className="secondary-button" type="button" onClick={() => { setShowInstruct(true); setInstructText(ticket.instruccionesDespacho || ""); }}>Instruir a despacho</button>}
+              {canInstruct && showInstruct && <div style={{ display: "grid", gap: "6px", marginTop: "8px", width: "100%" }}><textarea value={instructText} onChange={(e) => setInstructText(e.target.value)} placeholder="Instrucciones para despacho (ej. retirar al técnico y confirmar ventana)" rows="3" style={{ width: "100%", border: "1px solid var(--line-strong)", borderRadius: "6px", padding: "8px", fontSize: "11px" }} /><div style={{ display: "flex", gap: "6px" }}><button className="secondary-button" disabled={acting || instructText.trim().length < 4} type="button" onClick={async () => { setActing(true); setActionError(""); try { await onInstruct(ticket, instructText.trim()); setShowInstruct(false); } catch (e) { setActionError(e.message || "No se pudo enviar."); } finally { setActing(false); } }}>Enviar instrucciones</button><button className="secondary-button" type="button" onClick={() => setShowInstruct(false)}>Cancelar</button></div></div>}
               {canValidate && <>
                 <button className="primary-button" disabled={acting} type="button" onClick={() => runAction((t) => onValidate(t, true), true)}><Icon name="check" size={17} /> Aprobar solución</button>
                 {!showReject ? <button className="secondary-button" disabled={acting} type="button" onClick={() => setShowReject(true)}>Rechazar y devolver</button> : <div style={{ display: "grid", gap: "6px", marginTop: "8px", width: "100%" }}><textarea value={rejectComment} onChange={(e) => setRejectComment(e.target.value)} placeholder="Motivo del rechazo (obligatorio) — explica qué falta o por qué se devuelve" rows="3" style={{ width: "100%", border: "1px solid var(--line-strong)", borderRadius: "6px", padding: "8px", fontSize: "11px" }} /><div style={{ display: "flex", gap: "6px" }}><button className="secondary-button" disabled={acting || !rejectComment.trim()} type="button" onClick={async () => { setActing(true); setActionError(""); try { await onValidate(ticket, false, rejectComment); setShowReject(false); setRejectComment(""); } catch (e) { setActionError(e.message || "No se pudo rechazar."); } finally { setActing(false); } }}>Confirmar rechazo</button><button className="secondary-button" type="button" onClick={() => { setShowReject(false); setRejectComment(""); }}>Cancelar</button></div></div>}
@@ -1473,7 +1755,7 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onReassi
 }
 
 function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
-  const [form, setForm] = useState({ kind: "", service: "", tipoId: "", identificador: "", cliente: "", nodo: "", title: "", description: "" });
+  const [form, setForm] = useState({ kind: "", service: "", tipoId: "", contrato: "", numeroOt: "", cliente: "", nodo: "", title: "", description: "" });
   const [catalog, setCatalog] = useState([]);
   const [attachment, setAttachment] = useState(null);
   const [attachmentError, setAttachmentError] = useState("");
@@ -1497,9 +1779,9 @@ function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
     setAttachmentError("");
   }
 
-  function validateIdentificador(value) {
+  function validateNumero(value, label) {
     if (!value.trim()) { setIdError(""); return false; }
-    if (!/^[0-9]+$/.test(value.trim())) { setIdError("Contrato / OT solo admite números."); return false; }
+    if (!/^[0-9]+$/.test(value.trim())) { setIdError(`${label} solo admite números.`); return false; }
     setIdError("");
     return true;
   }
@@ -1533,15 +1815,18 @@ function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
       }
       return next;
     });
-    if (name === "identificador") setDuplicate(null);
+    if (name === "contrato" || name === "numeroOt") setDuplicate(null);
   }
 
+  const idField = form.kind === "TECNICO" ? "numeroOt" : "contrato";
+  const idLabel = form.kind === "TECNICO" ? "OT" : "Contrato";
+
   async function checkDuplicate() {
-    const value = form.identificador.trim();
-    if (!value || !validateIdentificador(value)) return;
+    const value = (form.kind === "TECNICO" ? form.numeroOt : form.contrato).trim();
+    if (!value || !validateNumero(value, idLabel)) return;
     setChecking(true);
     try {
-      const payload = await checkOpenTicket(value);
+      const payload = await checkOpenTicket(form.kind === "TECNICO" ? { numero_ot: value } : { contrato: value });
       const results = payload.results || payload;
       setDuplicate(results.length ? results[0] : null);
     } catch {
@@ -1551,15 +1836,17 @@ function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
     }
   }
 
-  function pickFiles(files, append = false) {
+  async function pickFiles(files, append = false) {
     if (!files.length) return;
     const current = append ? (Array.isArray(attachment) ? attachment : attachment ? [attachment] : []) : [];
-    const combined = [...current, ...files];
+    const processed = [];
+    for (const f of files) processed.push(await compressImageFile(f));
+    const combined = [...current, ...processed];
     if (combined.length > 5) {
       setAttachmentError(`Máximo 5 imágenes (ya tienes ${current.length}).`);
       return;
     }
-    for (const f of files) {
+    for (const f of processed) {
       if (f.size > 5 * 1024 * 1024) {
         setAttachmentError(`"${f.name}" supera 5 MB.`);
         return;
@@ -1586,13 +1873,18 @@ function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
 
   async function submit(event) {
     event.preventDefault();
-    const idOk = validateIdentificador(form.identificador);
+    const idValue = (form.kind === "TECNICO" ? form.numeroOt : form.contrato).trim();
+    const idOk = validateNumero(form.kind === "TECNICO" ? form.numeroOt : form.contrato, idLabel);
     const clientOk = validateCliente(form.cliente);
+    if (!idValue) {
+      setIdError(`Debes indicar ${idLabel === "OT" ? "la OT" : "el Contrato"}.`);
+      setSubmitError("Revisa los campos marcados en rojo.");
+      return;
+    }
     if (!idOk || !clientOk) {
       setSubmitError("Revisa los campos marcados en rojo.");
       return;
     }
-    const idValue = form.identificador.trim();
     const clientValue = form.cliente.trim();
     setSubmitting(true);
     setSubmitError("");
@@ -1602,7 +1894,8 @@ function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
         description: form.description,
         category: form.service,
         priority: "MEDIA",
-        identificador: idValue,
+        contrato: form.kind === "TECNICO" ? "" : form.contrato.trim(),
+        numero_ot: form.kind === "TECNICO" ? form.numeroOt.trim() : "",
         cliente_nombre: clientValue,
         nodo: form.nodo.trim(),
         tipo_solicitud: form.tipoId ? Number(form.tipoId) : null,
@@ -1614,7 +1907,6 @@ function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
     }
   }
 
-  const idLabel = form.kind === "CLIENTE" ? "Contrato" : form.kind === "TECNICO" ? "OT" : "Contrato / OT";
   const canFillDetails = Boolean(form.kind && form.service && form.tipoId);
 
   return (
@@ -1627,7 +1919,7 @@ function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
             <label className="field"><span>Tipo de solicitud <b>*</b></span><select required name="kind" value={form.kind} onChange={updateField}><option value="">Seleccionar</option><option value="CLIENTE">Solicitud de Soporte Cliente</option><option value="TECNICO">Soporte Al Tecnico</option></select></label>
             <label className="field"><span>Tipo de servicio <b>*</b></span><select required name="service" value={form.service} onChange={updateField} disabled={!form.kind}><option value="">Seleccionar</option>{services.map((s) => <option key={s} value={s}>{s}</option>)}</select></label>
             <label className="field field-wide"><span>Solicitud específica <b>*</b></span><select required name="tipoId" value={form.tipoId} onChange={updateField} disabled={!form.service}><option value="">Seleccionar</option>{options.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select></label>
-            <label className="field"><span>{idLabel} <b>*</b></span><input required name="identificador" inputMode="numeric" value={form.identificador} onChange={updateField} onBlur={(e) => { validateIdentificador(e.target.value); checkDuplicate(); }} disabled={!canFillDetails} placeholder={form.kind === "TECNICO" ? "Solo números" : "Solo números"} />{idError && <small className="field-error">{idError}</small>}</label>
+            <label className="field"><span>{idLabel} <b>*</b></span><input required name={idField} inputMode="numeric" value={form[idField]} onChange={updateField} onBlur={() => { checkDuplicate(); }} disabled={!canFillDetails} placeholder="Solo números" />{idError && <small className="field-error">{idError}</small>}</label>
             <label className="field"><span>Prioridad</span><input disabled value="Media (automática)" /></label>
             <label className="field"><span>Nombre Cliente <b>*</b></span><input required name="cliente" value={form.cliente} onChange={updateField} onBlur={(e) => validateCliente(e.target.value)} disabled={!canFillDetails} placeholder="Nombre del cliente" />{clientError && <small className="field-error">{clientError}</small>}</label>
             <label className="field"><span>Nodo <b>*</b></span><input required name="nodo" value={form.nodo} onChange={updateField} disabled={!canFillDetails} placeholder="Nodo" /></label>

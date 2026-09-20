@@ -24,6 +24,7 @@ class RequestType(models.Model):
     service = models.CharField(max_length=10, choices=Service.choices)
     name = models.CharField(max_length=120)
     is_active = models.BooleanField(default=True)
+    equipo_asignado = models.ForeignKey(Team, on_delete=models.SET_NULL, null=True, blank=True, related_name="tipos_asignados")
 
     class Meta:
         ordering = ["kind", "service", "name"]
@@ -33,6 +34,19 @@ class RequestType(models.Model):
 
     def __str__(self):
         return f"{self.get_kind_display()} - {self.service} - {self.name}"
+
+
+class EscalationArea(models.Model):
+    name = models.CharField(max_length=80, unique=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["name"]
+        verbose_name = "área de escalamiento"
+        verbose_name_plural = "áreas de escalamiento"
+
+    def __str__(self):
+        return self.name
 
 
 class Ticket(models.Model):
@@ -76,7 +90,12 @@ class Ticket(models.Model):
     )
     title = models.CharField(max_length=180)
     description = models.TextField()
-    identificador = models.CharField(max_length=60, blank=True, default="")
+    contrato = models.CharField(max_length=60, blank=True, default="")
+    numero_ot = models.CharField(max_length=60, blank=True, default="")
+    area_escalada = models.ForeignKey(EscalationArea, on_delete=models.SET_NULL, null=True, blank=True, related_name="tickets")
+    motivo_escalamiento = models.TextField(blank=True, default="")
+    instrucciones_despacho = models.TextField(blank=True, default="")
+    estado_previo = models.CharField(max_length=20, choices=Status.choices, blank=True, default="")
     cliente_nombre = models.CharField(max_length=180, blank=True, default="")
     nodo = models.CharField(max_length=60, blank=True, default="")
     tipo_solicitud = models.ForeignKey(RequestType, on_delete=models.SET_NULL, null=True, blank=True, related_name="tickets")
@@ -100,7 +119,8 @@ class Ticket(models.Model):
             models.Index(fields=["assigned_team", "status"]),
             models.Index(fields=["creator", "status"]),
             models.Index(fields=["sla_due_at"]),
-            models.Index(fields=["identificador", "status"]),
+            models.Index(fields=["contrato", "status"]),
+            models.Index(fields=["numero_ot", "status"]),
         ]
 
     def __str__(self):
@@ -138,12 +158,19 @@ class Ticket(models.Model):
 
 
 class TicketAttachment(models.Model):
+    class OcrStatus(models.TextChoices):
+        PENDING = "PENDIENTE", "Pendiente de OCR"
+        PROCESSING = "PROCESANDO", "Procesando texto"
+        DONE = "OK", "Texto extraído"
+        FAILED = "FALLIDO", "No se pudo extraer"
+
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="attachments")
     file = models.FileField(upload_to="ticket_attachments/%Y/%m/%d/")
     original_name = models.CharField(max_length=255)
     content_type = models.CharField(max_length=100)
     size = models.PositiveIntegerField()
     uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="ticket_attachments")
+    ocr_estado = models.CharField(max_length=12, choices=OcrStatus.choices, default=OcrStatus.PENDING)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -166,7 +193,9 @@ class TicketEvent(models.Model):
         RESOLVED = "RESUELTO", "Enviado a validación"
         APPROVED = "APROBADO", "Solución aprobada"
         REJECTED = "RECHAZADO", "Solución rechazada"
-        ESCALATED = "ESCALADO", "Escalado por SLA"
+        ESCALATED = "ESCALADO", "Escalado"
+        DEESCALATED = "DESESCALADO", "Vuelto de escalamiento"
+        INSTRUCTION = "INSTRUCCION", "Instrucciones de despacho"
         AUTO_CLOSED = "AUTO_CERRADO", "Cerrado automáticamente"
         ATTACHMENT = "ADJUNTO", "Evidencia adjunta"
         RELEASED = "LIBERADO", "Liberado a bandeja"

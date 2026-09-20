@@ -1,11 +1,18 @@
 from django.contrib import admin
 
-from .models import RequestType, Ticket, TicketAttachment, TicketEvent
+from .models import EscalationArea, RequestType, Ticket, TicketAttachment, TicketEvent
+
+
+@admin.register(EscalationArea)
+class EscalationAreaAdmin(admin.ModelAdmin):
+    list_display = ("name", "is_active")
+    list_filter = ("is_active",)
+    search_fields = ("name",)
 
 
 @admin.register(RequestType)
 class RequestTypeAdmin(admin.ModelAdmin):
-    list_display = ("name", "kind", "service", "is_active")
+    list_display = ("name", "kind", "service", "equipo_asignado", "is_active")
     list_filter = ("kind", "service", "is_active")
     search_fields = ("name",)
 
@@ -25,8 +32,8 @@ class TicketEventInline(admin.TabularInline):
 
 @admin.register(Ticket)
 class TicketAdmin(admin.ModelAdmin):
-    list_display = ("reference", "title", "identificador", "priority", "status", "creator", "assigned_team", "assignee", "sla_due_at")
+    list_display = ("reference", "title", "contrato", "numero_ot", "priority", "status", "creator", "assigned_team", "assignee", "sla_due_at")
     list_filter = ("status", "priority", "category", "assigned_team")
-    search_fields = ("title", "description", "identificador", "cliente_nombre", "nodo", "creator__username", "assignee__username")
+    search_fields = ("title", "description", "contrato", "numero_ot", "cliente_nombre", "nodo", "creator__username", "assignee__username")
     readonly_fields = ("created_at", "updated_at", "assigned_at", "resolved_at", "validation_due_at", "closed_at", "escalated_at")
     inlines = [TicketAttachmentInline, TicketEventInline]

@@ -26,7 +26,7 @@ class Command(BaseCommand):
         )
         escalated = 0
         for ticket in overdue_tickets:
-            escalate_ticket(ticket, comment="Escalado automático por vencimiento del SLA.")
+            escalate_ticket(ticket, motivo="Escalado automático por vencimiento del SLA.")
             escalated += 1
 
         self.stdout.write(self.style.SUCCESS(f"Automatización completada: {escalated} escalados, {auto_closed} cerrados automáticamente."))

@@ -10,10 +10,10 @@ from rest_framework.views import APIView
 from accounts.models import User
 from accounts.permissions import IsAdministrator
 
-from .models import RequestType, Ticket, TicketEvent
+from .models import EscalationArea, RequestType, Ticket, TicketEvent
 from .permissions import require_support_access, require_validation_access, visible_tickets_for
-from .serializers import RequestTypeSerializer, ResolutionSerializer, TicketAttachmentSerializer, TicketCreateSerializer, TicketSerializer, ValidationSerializer
-from .services import escalate_ticket, route_ticket, take_ticket, validate_ticket
+from .serializers import EscalateSerializer, EscalationAreaSerializer, InstructSerializer, RequestTypeSerializer, ResolutionSerializer, TicketAttachmentSerializer, TicketCreateSerializer, TicketSerializer, ValidationSerializer
+from .services import deescalate_ticket, escalate_ticket, instruct_ticket, route_ticket, take_ticket, validate_ticket
 from .services import resolve_ticket as resolve_ticket_service
 
 
@@ -41,6 +41,29 @@ class RequestTypeViewSet(viewsets.ModelViewSet):
         return queryset
 
 
+class EscalationAreaViewSet(viewsets.ModelViewSet):
+    queryset = EscalationArea.objects.all()
+    serializer_class = EscalationAreaSerializer
+    permission_classes = [IsAuthenticated]
+    http_method_names = ["get", "post", "patch", "head", "options"]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        if self.action == "list" and not self.request.user.is_administrator:
+            return queryset.filter(is_active=True)
+        return queryset
+
+    def create(self, request, *args, **kwargs):
+        if not request.user.is_administrator:
+            raise PermissionDenied("Solo administración puede gestionar el catálogo.")
+        return super().create(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        if not request.user.is_administrator:
+            raise PermissionDenied("Solo administración puede gestionar el catálogo.")
+        return super().partial_update(request, *args, **kwargs)
+
+
 class TicketViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     http_method_names = ["get", "post", "patch", "head", "options"]
@@ -58,8 +81,14 @@ class TicketViewSet(viewsets.ModelViewSet):
         if priority:
             queryset = queryset.filter(priority=priority)
         identificador = self.request.query_params.get("identificador")
+        contrato = self.request.query_params.get("contrato")
+        numero_ot = self.request.query_params.get("numero_ot")
         if identificador:
-            queryset = queryset.filter(identificador__iexact=identificador.strip())
+            queryset = queryset.filter(Q(contrato__iexact=identificador.strip()) | Q(numero_ot__iexact=identificador.strip()))
+        if contrato:
+            queryset = queryset.filter(contrato__iexact=contrato.strip())
+        if numero_ot:
+            queryset = queryset.filter(numero_ot__iexact=numero_ot.strip())
         if self.request.query_params.get("abierto") in {"1", "true", "yes"}:
             queryset = queryset.exclude(status=Ticket.Status.CLOSED)
         if team and user.is_administrator:
@@ -202,7 +231,63 @@ class TicketViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], permission_classes=[IsAdministrator])
     def escalate(self, request, pk=None):
         ticket = self.get_object()
-        escalate_ticket(ticket, comment="Escalado manual por administración.")
+        escalate_ticket(ticket, motivo="Escalado manual por administración.")
+        return Response(TicketSerializer(ticket, context={"request": request}).data)
+
+    @action(detail=True, methods=["post"], url_path="escalar")
+    def escalar(self, request, pk=None):
+        ticket = self.get_object()
+        require_support_access(request.user, ticket)
+        if not request.user.is_administrator and request.user.role not in {User.Role.SUPPORT, User.Role.SUPERVISOR}:
+            raise PermissionDenied("Solo soporte, supervisores o administración pueden escalar.")
+        if ticket.status in {Ticket.Status.CLOSED, Ticket.Status.ESCALATED, Ticket.Status.VALIDATION}:
+            raise ValidationError("Este ticket no puede escalarse en su estado actual.")
+        serializer = EscalateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        area = None
+        if data.get("area_id"):
+            try:
+                area = EscalationArea.objects.get(pk=data["area_id"], is_active=True)
+            except EscalationArea.DoesNotExist:
+                raise ValidationError({"area_id": "Área de escalamiento inválida."})
+        if not area:
+            raise ValidationError({"area_id": "Debes indicar el área de escalamiento."})
+        motivo = (data.get("motivo") or "").strip()
+        if len(motivo) < 4:
+            raise ValidationError({"motivo": "Debes indicar el motivo del escalamiento."})
+        contrato = (data.get("contrato") or "").strip()
+        numero_ot = (data.get("numero_ot") or "").strip()
+        for valor, campo in ((contrato, "contrato"), (numero_ot, "numero_ot")):
+            if valor and not valor.isdigit():
+                raise ValidationError({campo: "Solo admite números."})
+        if not (ticket.contrato or ticket.numero_ot or contrato or numero_ot):
+            raise ValidationError({"contrato": "Completa el Contrato o la OT para poder escalar."})
+        escalate_ticket(ticket, actor=request.user, area=area, motivo=motivo, contrato=contrato, numero_ot=numero_ot, instrucciones=(data.get("instrucciones") or "").strip())
+        return Response(TicketSerializer(ticket, context={"request": request}).data)
+
+    @action(detail=True, methods=["post"], url_path="desescalar")
+    def desescalar(self, request, pk=None):
+        ticket = self.get_object()
+        require_support_access(request.user, ticket)
+        if not request.user.is_administrator and request.user.role not in {User.Role.SUPPORT, User.Role.SUPERVISOR}:
+            raise PermissionDenied("Solo soporte, supervisores o administración pueden continuar un escalamiento.")
+        if ticket.status != Ticket.Status.ESCALATED:
+            raise ValidationError("Este ticket no está escalado.")
+        deescalate_ticket(ticket, actor=request.user)
+        return Response(TicketSerializer(ticket, context={"request": request}).data)
+
+    @action(detail=True, methods=["post"], url_path="instruir")
+    def instruir(self, request, pk=None):
+        ticket = self.get_object()
+        require_support_access(request.user, ticket)
+        if not request.user.is_administrator and request.user.role not in {User.Role.SUPPORT, User.Role.SUPERVISOR}:
+            raise PermissionDenied("Solo soporte, supervisores o administración pueden dejar instrucciones.")
+        if ticket.status != Ticket.Status.ESCALATED:
+            raise ValidationError("Solo se puede instruir un ticket escalado.")
+        serializer = InstructSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        instruct_ticket(ticket, actor=request.user, instrucciones=serializer.validated_data["instrucciones"].strip())
         return Response(TicketSerializer(ticket, context={"request": request}).data)
 
     @action(detail=True, methods=["post"], url_path="attachments")
@@ -286,6 +371,19 @@ class ReportsSummaryView(APIView):
         if request.query_params.get("to"):
             rejected = rejected.filter(created_at__date__lte=request.query_params.get("to"))
         devueltos = rejected.count()
+        escalados_qs = tickets.filter(status=Ticket.Status.ESCALATED)
+        escalados_abiertos = escalados_qs.count()
+        tiempos = [
+            (timezone.now() - t.escalated_at).total_seconds() / 60
+            for t in escalados_qs.exclude(escalated_at__isnull=True)
+        ]
+        tiempo_prom_escalado = round(sum(tiempos) / len(tiempos), 1) if tiempos else None
+        por_area = list(
+            escalados_qs.exclude(area_escalada__isnull=True)
+            .values("area_escalada__name")
+            .annotate(total=Count("id"))
+            .order_by("-total")
+        )
         by_service = list(tickets.values("category").annotate(total=Count("id")).order_by("-total"))
         by_group = list(tickets.values("assigned_team__group__name").annotate(total=Count("id")).order_by("-total"))
         return Response({
@@ -297,7 +395,10 @@ class ReportsSummaryView(APIView):
                 "en_proceso": en_proceso,
                 "vencidos": vencidos,
                 "devueltos": devueltos,
+                "escalados_abiertos": escalados_abiertos,
+                "tiempo_prom_escalado_min": tiempo_prom_escalado,
             },
+            "por_area_escalada": [{"area": r["area_escalada__name"], "total": r["total"]} for r in por_area],
             "daily": daily,
             "by_service": [{"service": r["category"], "total": r["total"]} for r in by_service],
             "by_group": [{"group": r["assigned_team__group__name"], "total": r["total"]} for r in by_group],
@@ -320,7 +421,7 @@ class ReportsExportView(APIView):
         response["Content-Disposition"] = 'attachment; filename="reporte_actividades.csv"'
         writer = csv.writer(response, delimiter=";")
         writer.writerow([
-            "Ticket", "Identificador", "Cliente", "Nodo", "Usuario solicitante", "Proceso",
+            "Ticket", "Contrato", "OT", "Cliente", "Nodo", "Usuario solicitante", "Proceso",
             "Area solicitante", "Tipo de solicitud", "Servicio", "Prioridad", "Estado ticket",
             "Actividad", "Fecha actividad", "Minutos desde anterior", "Estado actividad",
             "Participante actividad", "Comentario actividad", "AHT ticket (min)",
@@ -328,7 +429,7 @@ class ReportsExportView(APIView):
         for ticket in tickets:
             aht = _ticket_aht_minutes(ticket)
             base = [
-                ticket.reference, ticket.identificador, ticket.cliente_nombre, ticket.nodo,
+                ticket.reference, ticket.contrato, ticket.numero_ot, ticket.cliente_nombre, ticket.nodo,
                 ticket.creator.display_name if ticket.creator_id else "",
                 "Soporte Despacho",
                 ticket.origin_team.group.name if ticket.origin_team_id else "",
