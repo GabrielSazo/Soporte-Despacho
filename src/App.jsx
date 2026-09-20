@@ -293,6 +293,18 @@ function App() {
   }, [session?.id]);
 
   useEffect(() => {
+    if (!showUserMenu && !showNotifications && !showGroupMenu) return;
+    const closeOnOutside = (event) => {
+      if (event.target.closest?.(".user-menu-wrapper,.notification-wrapper,.user-dropdown,.context-card")) return;
+      setShowUserMenu(false);
+      setShowNotifications(false);
+      setShowGroupMenu(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutside);
+    return () => document.removeEventListener("pointerdown", closeOnOutside);
+  }, [showUserMenu, showNotifications, showGroupMenu]);
+
+  useEffect(() => {
     const closeOnEscape = (event) => {
       if (event.key === "Escape") {
         setSidebarOpen(false);
