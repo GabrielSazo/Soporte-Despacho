@@ -243,6 +243,7 @@ function mapTicket(ticket) {
     originTeam: ticket.origin_team?.group?.name || ticket.origin_team?.name || "Sin asignar",
     attachments: ticket.attachments || [],
     events: ticket.events || [],
+    validationCycle: (ticket.events || []).filter((e) => e.event_type === "RESUELTO").length,
   };
 }
 
@@ -710,7 +711,7 @@ function App() {
   const assignedToMe = tickets.filter((t) => t.assigneeId === session?.id && t.statusCode === "ASIGNADO");
   const notifications = (session?.role === "DESPACHADOR"
     ? [
-        ...myValidation.slice(0, 3).map((t) => ({ key: `val-${t.id}`, type: "warning", title: `Validación pendiente: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
+        ...myValidation.slice(0, 3).map((t) => ({ key: `val-${t.id}-v${t.validationCycle}`, type: "warning", title: `Validación pendiente: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
         ...myEscalated.slice(0, 3).map((t) => ({ key: `esc-${t.id}`, type: "warning", title: `Escalado a ${t.areaEscalada || "escalamiento"}: ${t.id}`, desc: t.motivoEscalamiento || t.title, time: t.created, ticket: t })),
         ...assignedToMe.slice(0, 2).map((t) => ({ key: `asg-${t.id}`, type: "info", title: `Asignado a ti: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
         ...myTickets.filter((t) => t.slaTone === "danger").slice(0, 3).map((t) => ({ key: `sla-${t.id}`, type: "danger", title: `SLA vencido: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
@@ -719,7 +720,7 @@ function App() {
         ...assignedToMe.slice(0, 2).map((t) => ({ key: `asg-${t.id}`, type: "info", title: `Asignado a ti: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
         ...trabajables.slice(0, 3).map((t) => ({ key: `new-${t.id}`, type: "info", title: `Nuevo en bandeja: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
         ...trabajables.filter((t) => t.slaTone === "danger").slice(0, 2).map((t) => ({ key: `sla-${t.id}`, type: "danger", title: `SLA vencido: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
-        ...myValidation.slice(0, 2).map((t) => ({ key: `val-${t.id}`, type: "warning", title: `Validación pendiente: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
+        ...myValidation.slice(0, 2).map((t) => ({ key: `val-${t.id}-v${t.validationCycle}`, type: "warning", title: `Validación pendiente: ${t.id}`, desc: t.title, time: t.created, ticket: t })),
       ].slice(0, 5)
   ).map((n) => ({ ...n, seen: Boolean(seenNotifs[n.key]) }));
   const unseenCount = notifications.filter((n) => !n.seen).length;
