@@ -263,7 +263,7 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-radius: 4px
 .topbar-user { display: flex; align-items: center; gap: 9px; margin-left: 7px; padding-left: 15px; border-left: 1px solid var(--line); cursor: pointer; border-radius: 8px; padding-top: 4px; padding-bottom: 4px; padding-right: 8px; transition: all 150ms ease; border: 1px solid transparent; }
 .topbar-user:hover { background: var(--surface); border-color: var(--line); box-shadow: 0 1px 6px rgba(15,26,74,0.08); }
 .topbar-user:active { background: var(--accent-soft); border-color: var(--accent); }
-.app-shell[data-brand="tigo"] .topbar-user:hover { background: #ffffff; border-color: #cbd5ff; }
+.app-shell[data-brand="tigo"]:not([data-theme="dark"]) .topbar-user:hover { background: #ffffff; border-color: #cbd5ff; }
 .topbar-user .avatar { width: 31px; height: 31px; }
 .topbar-user strong, .topbar-user span { display: block; white-space: nowrap; }
 .topbar-user strong { font-size: 12px; }
