@@ -232,6 +232,7 @@ function mapTicket(ticket) {
     assigneeId: ticket.assignee?.id || null,
     created: formatRelativeDate(ticket.created_at),
     createdAt: ticket.created_at,
+    resolvedAt: ticket.resolved_at || null,
     sla: formatRemaining(ticket.sla?.remaining_seconds),
     slaTone: slaTone[ticket.sla?.state] || "safe",
     slaState: ticket.sla?.state,
@@ -1059,14 +1060,13 @@ function Dashboard({ canCreate, criticalTickets, dashboard, onCreate, onOpen, on
 
 function TicketsView({ canCreate, currentUser, filter, filteredTickets, onCreate, onFilterChange, onNotify, onOpen, onResolve, onTake, query, setQuery }) {
   const filters = currentUser?.role === "SOPORTE" ? ["Trabajables", "Míos", "Asignado", "En proceso", "Validación", "Todos"] : currentUser?.role === "DESPACHADOR" ? ["Míos", "Asignado", "En proceso", "Validación", "Todos"] : ["Todos", "Abierto", "Asignado", "En proceso", "Validación"];
-  const [sort, setSort] = useState("prioridad");
+  const [sort, setSort] = useState("recientes");
   const priorityRank = { CRITICA: 0, ALTA: 1, MEDIA: 2, BAJA: 3 };
   const sortedTickets = [...filteredTickets].sort((a, b) => {
     if (sort === "recientes") return new Date(b.createdAt) - new Date(a.createdAt);
     if (sort === "antiguos") return new Date(a.createdAt) - new Date(b.createdAt);
     return (priorityRank[a.priorityCode] ?? 9) - (priorityRank[b.priorityCode] ?? 9) || (new Date(a.createdAt) - new Date(b.createdAt));
   });
-  const cycleSort = () => setSort(sort === "prioridad" ? "antiguos" : sort === "antiguos" ? "recientes" : "prioridad");
 
   return (
     <>
@@ -1089,7 +1089,7 @@ function TicketsView({ canCreate, currentUser, filter, filteredTickets, onCreate
             ))}
           </div>
         </div>
-        <div className="table-summary"><span><b>{filteredTickets.length}</b> tickets encontrados</span><button type="button" onClick={cycleSort}>Ordenar: {sort} <Icon name="chevronDown" size={15} /></button></div>
+        <div className="table-summary"><span><b>{filteredTickets.length}</b> tickets encontrados</span><label className="sort-select">Ordenar: <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Ordenar tickets"><option value="recientes">recientes</option><option value="antiguos">antiguos</option><option value="prioridad">prioridad</option></select></label></div>
         <div className="ticket-table-wrap"><TicketTable currentUser={currentUser} onNotify={onNotify} onOpen={onOpen} onResolve={onResolve} onTake={onTake} tickets={sortedTickets} /></div>
         {filteredTickets.length === 0 && <EmptyState />}
       </article>
@@ -1528,7 +1528,7 @@ function PanelHeading({ eyebrow, title, action }) {
 function TicketTable({ tickets, compact = false, currentUser, onNotify, onOpen, onResolve, onTake }) {
   return (
     <table className={`ticket-table ${compact ? "compact" : ""}`}>
-      <thead><tr><th>Ticket</th><th>Prioridad</th><th>Estado</th><th>Grupo</th><th>SLA restante</th>{!compact && <th aria-label="Acciones" />}</tr></thead>
+      <thead><tr><th>Ticket</th><th>Prioridad</th><th>Estado</th><th>Grupo</th><th>SLA restante</th><th>Tiempo total</th>{!compact && <th aria-label="Acciones" />}</tr></thead>
       <tbody>
         {tickets.map((ticket) => (
           <tr className={onOpen ? "ticket-row-clickable" : ""} key={ticket.id} onClick={() => onOpen?.(ticket)}>
@@ -1537,6 +1537,7 @@ function TicketTable({ tickets, compact = false, currentUser, onNotify, onOpen, 
             <td data-label="Estado"><span className={`status-pill ${statusClass[ticket.status]}`}>{ticket.status}</span></td>
             <td data-label="Equipo"><span className="team-label">{ticket.team}</span></td>
             <td data-label="SLA restante"><span className={`sla-time ${ticket.slaTone}`}><i /> {ticket.sla}</span></td>
+            <td data-label="Tiempo total"><span className="team-label">{formatDuracion(((ticket.resolvedAt ? new Date(ticket.resolvedAt) : new Date()) - new Date(ticket.createdAt)) / 60000)}</span></td>
             {!compact && <td className="table-action">
               {currentUser?.role === "SOPORTE" && ["ABIERTO", "ASIGNADO"].includes(ticket.statusCode) ? <button className="quick-action" type="button" onClick={(event) => { event.stopPropagation(); onTake(ticket); }}>Tomar</button> : null}
               {currentUser?.role === "SOPORTE" && ticket.statusCode === "EN_PROCESO" ? <button className="quick-action" type="button" onClick={(event) => { event.stopPropagation(); onResolve(ticket); }}>Resolver</button> : null}
