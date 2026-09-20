@@ -724,6 +724,7 @@ function App() {
   ).map((n) => ({ ...n, seen: Boolean(seenNotifs[n.key]) }));
   const unseenCount = notifications.filter((n) => !n.seen).length;
   const BASE_TITLE = "Soporte Despacho Tigo | Centro de control";
+const BASE_FAVICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23001EB4'/%3E%3Ctext x='32' y='44' font-family='Arial' font-size='36' font-weight='bold' fill='white' text-anchor='middle'%3ES%3C/text%3E%3C/svg%3E";
   useEffect(() => {
     if (!session || !unseenCount) {
       document.title = BASE_TITLE;
@@ -739,6 +740,42 @@ function App() {
       clearInterval(timer);
       document.title = BASE_TITLE;
     };
+  }, [unseenCount, session?.id]);
+  useEffect(() => {
+    let link = document.querySelector("link[rel='icon']");
+    if (!link) {
+      link = document.createElement("link");
+      link.rel = "icon";
+      document.head.appendChild(link);
+    }
+    if (!session || !unseenCount) {
+      link.href = BASE_FAVICON;
+      return;
+    }
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = 64;
+      canvas.height = 64;
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#001EB4";
+      ctx.fillRect(0, 0, 64, 64);
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 34px Arial, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("S", 30, 34);
+      const label = unseenCount > 99 ? "99+" : String(unseenCount);
+      ctx.beginPath();
+      ctx.arc(48, 16, 15, 0, Math.PI * 2);
+      ctx.fillStyle = "#d92626";
+      ctx.fill();
+      ctx.fillStyle = "#fff";
+      ctx.font = `bold ${label.length > 2 ? 13 : 17}px Arial, sans-serif`;
+      ctx.fillText(label, 48, 17);
+      link.href = canvas.toDataURL("image/png");
+    } catch {
+      link.href = BASE_FAVICON;
+    }
   }, [unseenCount, session?.id]);
   const prevNotifKeys = useRef(null);
   const ticketDetailRef = useRef(null);
