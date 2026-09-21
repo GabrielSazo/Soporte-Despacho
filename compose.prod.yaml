@@ -45,6 +45,8 @@ services:
       EMAIL_USE_TLS: ${EMAIL_USE_TLS:-true}
       DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-noreply@sestel.local}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost}
+    volumes:
+      - media:/app/media
     depends_on:
       postgres:
         condition: service_healthy
@@ -69,6 +71,8 @@ services:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
       EMAIL_BACKEND: ${EMAIL_BACKEND:-django.core.mail.backends.console.EmailBackend}
+    volumes:
+      - media:/app/media
     depends_on:
       postgres:
         condition: service_healthy
@@ -89,3 +93,4 @@ services:
 
 volumes:
   postgres_data:
+  media:
