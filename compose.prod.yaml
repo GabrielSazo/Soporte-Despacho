@@ -88,6 +88,8 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
+    volumes:
+      - media:/srv/media:ro
     depends_on:
       - api
 
