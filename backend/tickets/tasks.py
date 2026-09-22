@@ -118,16 +118,29 @@ def process_attachment_ocr(attachment_id):
             # fallback to first 2 non-empty lines
             parts.extend([l for l in text_top.splitlines() if l.strip()][:2])
         parts.extend(barcode_lines)
+
+        def es_basura(texto):
+            t = (texto or "").strip()
+            if len(t) < 8:
+                return True
+            if re.search(r"[=~_\-]{5,}", t):
+                return True
+            letras = len(re.findall(r"[A-Za-z0-9]", t))
+            return letras < len(t) * 0.4
+
         if parts:
             snippet = "\n".join(parts)[:800]
-            record_event(ticket, TicketEvent.EventType.ATTACHMENT, actor=None, comment=f"OCR:\n{snippet}")
         elif text_top.strip():
             snippet = " ".join(text_top.split())[:500]
-            record_event(ticket, TicketEvent.EventType.ATTACHMENT, actor=None, comment=f"OCR: {snippet}")
+        else:
+            snippet = ""
+        needs_ai = not snippet or es_basura(snippet)
+        if snippet and not needs_ai:
+            record_event(ticket, TicketEvent.EventType.ATTACHMENT, actor=None, comment=f"OCR:\n{snippet}")
         attachment.ocr_estado = TicketAttachment.OcrStatus.DONE
         attachment.save(update_fields=["ocr_estado"])
         broadcast_ticket_update(ticket.id, "ocr_done")
-        if not parts and not text_top.strip() and settings.IA_VISION_ENABLED and not getattr(settings, "CELERY_TASK_ALWAYS_EAGER", False):
+        if needs_ai and settings.IA_VISION_ENABLED and not getattr(settings, "CELERY_TASK_ALWAYS_EAGER", False):
             try:
                 analyze_attachment_ai.delay(attachment.id)
             except Exception:
