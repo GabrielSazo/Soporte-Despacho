@@ -94,15 +94,15 @@ def process_attachment_ocr(attachment_id):
         try:
             from pyzbar.pyzbar import decode
             barcodes = decode(img0)
-                if barcodes:
-                    # sort by y (top to bottom)
-                    barcodes = sorted(barcodes, key=lambda b: b.rect.top)
-                    vals = [b.data.decode(errors="ignore").strip() for b in barcodes if b.data]
-                    for i, v in enumerate(vals[:3]):
-                        if re.fullmatch(r"[0-9A-Fa-f]{2}([:-][0-9A-Fa-f]{2}){5}", v):
-                            barcode_lines.append(f"MAC {v}")
-                        else:
-                            barcode_lines.append(f"CODIGO{i + 1} {v}")
+            if barcodes:
+                # sort by y (top to bottom)
+                barcodes = sorted(barcodes, key=lambda b: b.rect.top)
+                vals = [b.data.decode(errors="ignore").strip() for b in barcodes if b.data]
+                for i, v in enumerate(vals[:3]):
+                    if re.fullmatch(r"[0-9A-Fa-f]{2}([:-][0-9A-Fa-f]{2}){5}", v):
+                        barcode_lines.append(f"MAC {v}")
+                    else:
+                        barcode_lines.append(f"CODIGO{i + 1} {v}")
         except Exception:
             pass
         # Combine
