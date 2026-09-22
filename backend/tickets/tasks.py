@@ -94,13 +94,15 @@ def process_attachment_ocr(attachment_id):
         try:
             from pyzbar.pyzbar import decode
             barcodes = decode(img0)
-            if barcodes:
-                # sort by y (top to bottom)
-                barcodes = sorted(barcodes, key=lambda b: b.rect.top)
-                vals = [b.data.decode(errors="ignore").strip() for b in barcodes if b.data]
-                labels = ["SN", "MAC", "EMTA MAC"]
-                for i, v in enumerate(vals[:3]):
-                    barcode_lines.append(f"{labels[i] if i < len(labels) else f'BARCODE{i+1}'} {v}")
+                if barcodes:
+                    # sort by y (top to bottom)
+                    barcodes = sorted(barcodes, key=lambda b: b.rect.top)
+                    vals = [b.data.decode(errors="ignore").strip() for b in barcodes if b.data]
+                    for i, v in enumerate(vals[:3]):
+                        if re.fullmatch(r"[0-9A-Fa-f]{2}([:-][0-9A-Fa-f]{2}){5}", v):
+                            barcode_lines.append(f"MAC {v}")
+                        else:
+                            barcode_lines.append(f"CODIGO{i + 1} {v}")
         except Exception:
             pass
         # Combine
@@ -125,6 +127,11 @@ def process_attachment_ocr(attachment_id):
         attachment.ocr_estado = TicketAttachment.OcrStatus.DONE
         attachment.save(update_fields=["ocr_estado"])
         broadcast_ticket_update(ticket.id, "ocr_done")
+        if not parts and not text_top.strip() and settings.IA_VISION_ENABLED and not getattr(settings, "CELERY_TASK_ALWAYS_EAGER", False):
+            try:
+                analyze_attachment_ai.delay(attachment.id)
+            except Exception:
+                pass
         return "ok"
     except Exception:
         try:
@@ -146,9 +153,12 @@ def analyze_attachment_ai(attachment_id, prompt=""):
         return "disabled"
     ticket = attachment.ticket
     prompt = (prompt or "").strip() or (
-        "Describe lo que se ve en esta foto de una instalación de telecomunicaciones "
-        "y transcribe el texto visible (etiquetas, seriales, SSID, contraseñas). "
-        "Responde en español y solo con datos observados en la imagen."
+        "Analiza esta foto de telecomunicaciones. Primero identifica qué es: "
+        "etiqueta de equipo, pantalla de error, instalación física u otro. "
+        "Luego extrae los datos con su etiqueta CORRECTA según lo que veas "
+        "(serial, MAC solo si tiene formato con : o -, contrato, OT, SSID, passwords, "
+        "códigos y valores de error). Si es pantalla de error, describe el error y sus valores. "
+        "Responde en español, solo datos observados, sin inventar."
     )
     try:
         import urllib.request
