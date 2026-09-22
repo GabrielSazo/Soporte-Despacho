@@ -1,6 +1,8 @@
+import base64
 import re
 
 from celery import shared_task
+from django.conf import settings
 
 from .models import TicketAttachment, TicketEvent
 from .services import broadcast_ticket_update, record_event
@@ -131,4 +133,49 @@ def process_attachment_ocr(attachment_id):
             broadcast_ticket_update(ticket.id, "ocr_failed")
         except Exception:
             pass
+        return "failed"
+
+
+@shared_task
+def analyze_attachment_ai(attachment_id, prompt=""):
+    try:
+        attachment = TicketAttachment.objects.select_related("ticket").get(pk=attachment_id)
+    except TicketAttachment.DoesNotExist:
+        return "missing"
+    if not settings.IA_VISION_ENABLED:
+        return "disabled"
+    ticket = attachment.ticket
+    prompt = (prompt or "").strip() or (
+        "Describe lo que se ve en esta foto de una instalación de telecomunicaciones "
+        "y transcribe el texto visible (etiquetas, seriales, SSID, contraseñas). "
+        "Responde en español y solo con datos observados en la imagen."
+    )
+    try:
+        import urllib.request
+        import json
+
+        with open(attachment.file.path, "rb") as fh:
+            image_b64 = base64.b64encode(fh.read()).decode()
+        payload = json.dumps({
+            "model": settings.OLLAMA_MODEL,
+            "prompt": prompt,
+            "images": [image_b64],
+            "stream": False,
+        }).encode()
+        request = urllib.request.Request(
+            f"{settings.OLLAMA_HOST.rstrip('/')}/api/generate",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(request, timeout=settings.OLLAMA_TIMEOUT) as response:
+            data = json.loads(response.read().decode())
+        texto = (data.get("response") or "").strip()[:2000]
+        if not texto:
+            return "empty"
+        record_event(ticket, TicketEvent.EventType.ATTACHMENT, actor=None, comment=f"IA ({settings.OLLAMA_MODEL}):\n{texto}")
+        broadcast_ticket_update(ticket.id, "ai_done")
+        return "ok"
+    except Exception as exc:
+        record_event(ticket, TicketEvent.EventType.ATTACHMENT, actor=None, comment=f"IA no disponible: {exc}")
+        broadcast_ticket_update(ticket.id, "ai_failed")
         return "failed"

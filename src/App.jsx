@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
+  analyzeAttachment as analyzeAttachmentRequest,
   createGroup as createGroupRequest,
   createTeam as createTeamRequest,
   createTicket as createTicketRequest,
@@ -655,6 +656,11 @@ function App() {
     notify(`Contraseña de ${user.name} restablecida correctamente.`);
   }
 
+  async function analyzeImage(ticket, attachmentId) {
+    await analyzeAttachmentRequest(ticket.apiId, attachmentId);
+    notify("Análisis IA en curso. El resultado aparecerá en el historial.");
+  }
+
   async function attachToTicket(ticket, file) {
     const uploaded = await uploadAttachment(ticket.apiId, file);
     const detail = await getTicket(ticket.apiId);
@@ -929,7 +935,7 @@ const BASE_FAVICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/sv
       {newTicketOpen && canCreateTickets && <NewTicketModal onClose={() => setNewTicketOpen(false)} onCreate={createTicket} onOpenTicket={async (id) => { setNewTicketOpen(false); const t = tickets.find((x) => x.apiId === id); if (t) openTicketDetail(t); }} session={session} />}
       {ticketToResolve && <ResolveTicketModal onClose={() => setTicketToResolve(null)} onResolve={resolveTicket} ticket={ticketToResolve} />}
       {ticketToEscalate && <EscalateModal areas={escalationAreas} onClose={() => setTicketToEscalate(null)} onEscalate={escalateTicket} ticket={ticketToEscalate} />}
-      {ticketDetail && <TicketDetailModal currentUser={session} isLoading={isDetailLoading} onAttach={attachToTicket} onClose={() => setTicketDetail(null)} onDeescalate={deescalateTicket} onEscalate={(ticket) => setTicketToEscalate(ticket)} onInstruct={instructTicket} onReassign={reassignTicket} onResolve={(ticket) => { setTicketDetail(null); setTicketToResolve(ticket); }} onTake={async (ticket) => { const updated = await takeTicket(ticket); const detail = await getTicket(ticket.apiId); setTicketDetail(mapTicket(detail)); }} onRelease={releaseTicket} onValidate={async (ticket, accepted, comment) => { await validateTicket(ticket, accepted, comment); setTicketDetail(null); }} teams={teams} ticket={ticketDetail} users={users} />}
+      {ticketDetail && <TicketDetailModal currentUser={session} isLoading={isDetailLoading} onAnalyze={analyzeImage} onAttach={attachToTicket} onClose={() => setTicketDetail(null)} onDeescalate={deescalateTicket} onEscalate={(ticket) => setTicketToEscalate(ticket)} onInstruct={instructTicket} onReassign={reassignTicket} onResolve={(ticket) => { setTicketDetail(null); setTicketToResolve(ticket); }} onTake={async (ticket) => { const updated = await takeTicket(ticket); const detail = await getTicket(ticket.apiId); setTicketDetail(mapTicket(detail)); }} onRelease={releaseTicket} onValidate={async (ticket, accepted, comment) => { await validateTicket(ticket, accepted, comment); setTicketDetail(null); }} teams={teams} ticket={ticketDetail} users={users} />}
       {userModal && <UserFormModal onClose={() => setUserModal(null)} onSave={saveUser} teams={teams} groups={groups} user={userModal === "new" ? null : userModal} />}
       {teamModal && <TeamFormModal groups={groups} onClose={() => setTeamModal(null)} onSave={saveTeam} team={teamModal === "new" ? null : teamModal} />}
       {groupModal && <GroupFormModal onClose={() => setGroupModal(null)} onSave={saveGroup} group={groupModal === "new" ? null : groupModal} />}
@@ -1610,7 +1616,7 @@ function ResolveTicketModal({ onClose, onResolve, ticket }) {
   );
 }
 
-function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onDeescalate, onEscalate, onInstruct, onReassign, onRelease, onResolve, onTake, onValidate, teams, ticket, users }) {
+function TicketDetailModal({ currentUser, isLoading, onAnalyze, onAttach, onClose, onDeescalate, onEscalate, onInstruct, onReassign, onRelease, onResolve, onTake, onValidate, teams, ticket, users }) {
   const [actionError, setActionError] = useState("");
   const [acting, setActing] = useState(false);
   const [attachFile, setAttachFile] = useState(null);
@@ -1628,6 +1634,20 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onDeesca
     const list = attachList.filter((_, i) => i !== index);
     setAttachFile(list.length === 0 ? null : list.length === 1 ? list[0] : list);
     setAttachError("");
+  }
+  const canAnalyze = ["SOPORTE", "SUPERVISOR", "ADMIN"].includes(currentUser.role);
+  const [analyzingId, setAnalyzingId] = useState(null);
+
+  async function runAnalyze(attachment) {
+    setAnalyzingId(attachment.id);
+    setActionError("");
+    try {
+      await onAnalyze(ticket, attachment.id);
+    } catch (error) {
+      setActionError(error.message || "No se pudo iniciar el análisis.");
+    } finally {
+      setAnalyzingId(null);
+    }
   }
   const [reassignTeam, setReassignTeam] = useState("");
   const [rejectComment, setRejectComment] = useState("");
@@ -1724,7 +1744,7 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onDeesca
             <section className="detail-section"><span className="detail-label">Descripción reportada</span><p className="detail-description">{ticket.description || "Sin descripción adicional."}</p></section>
             {ticket.resolutionNotes && <section className="detail-section solution-detail"><span className="detail-label"><Icon name="checkCircle" size={15} /> Solución registrada</span><p>{ticket.resolutionNotes}</p></section>}
             {ticket.statusCode === "ESCALADO" && <section className="detail-section solution-detail"><span className="detail-label"><Icon name="upload" size={15} /> Escalado a {ticket.areaEscalada || "—"}{ticket.tiempoEscaladoMin != null ? ` · lleva ${formatDuracion(ticket.tiempoEscaladoMin)}` : ""}</span>{ticket.motivoEscalamiento && <p><b>Motivo (soporte):</b> {ticket.motivoEscalamiento}</p>}{ticket.instruccionesDespacho ? <p><b>Instrucciones para despacho:</b> {ticket.instruccionesDespacho}</p> : <p>Soporte aún no deja instrucciones para despacho.</p>}</section>}
-            <section className="detail-section"><div className="detail-section-heading"><span className="detail-label">Evidencia adjunta</span><span>{ticket.attachments.length}/5</span></div>{ticket.attachments.length ? <div className="attachment-list">{ticket.attachments.map((attachment) => <a href={attachment.url} key={attachment.id} rel="noreferrer" target="_blank"><img src={attachment.url} alt={attachment.original_name} style={{ width: "52px", height: "52px", objectFit: "cover", borderRadius: "6px", flex: "0 0 auto" }} onError={(e) => { e.target.style.display = "none"; }} /><span><strong>{attachment.original_name}</strong><small>{Math.max(1, Math.round(attachment.size / 1024))} KB · {formatDateTime(attachment.created_at)}{["PENDIENTE", "PROCESANDO"].includes(attachment.ocr_estado) ? " · Procesando texto…" : attachment.ocr_estado === "FALLIDO" ? " · OCR no disponible" : ""}</small></span><Icon name="arrowRight" size={15} /></a>)}</div> : <p className="detail-empty">No hay evidencia adjunta.</p>}{canAttach && <form className="detail-attach-form" onSubmit={submitAttach} onPaste={handleAttachPaste}><label className={`upload-box small ${attachError ? "has-error" : ""}`}><input type="file" accept=".jpg,.jpeg,.png" multiple onChange={handleAttach} /><Icon name="upload" size={16} /><span>{attachList.length ? `${attachList.length} ${attachList.length === 1 ? "imagen" : "imágenes"}` : "Adjuntar o pegar (Ctrl+V)"}</span></label><button className="secondary-button" disabled={uploading || !attachFile} type="submit">{uploading ? "Subiendo..." : "Adjuntar"}</button></form>}{attachList.length > 0 && <div className="attach-preview-grid">{attachList.map((f, i) => <div className="attach-preview" key={`${f.name}-${f.size}-${i}`}><img src={attachPreviews[i]} alt={f.name} /><span title={f.name}>{f.name}</span><button type="button" aria-label={`Quitar ${f.name}`} onClick={() => removeAttachFile(i)}>✕</button></div>)}</div>}{attachError && <p className="form-submit-error" role="alert"><Icon name="alert" size={14} /> {attachError}</p>}</section>
+            <section className="detail-section"><div className="detail-section-heading"><span className="detail-label">Evidencia adjunta</span><span>{ticket.attachments.length}/5</span></div>{ticket.attachments.length ? <div className="attachment-list">{ticket.attachments.map((attachment) => <div key={attachment.id} className="attachment-item"><a href={attachment.url} rel="noreferrer" target="_blank"><img src={attachment.url} alt={attachment.original_name} style={{ width: "52px", height: "52px", objectFit: "cover", borderRadius: "6px", flex: "0 0 auto" }} onError={(e) => { e.target.style.display = "none"; }} /><span><strong>{attachment.original_name}</strong><small>{Math.max(1, Math.round(attachment.size / 1024))} KB · {formatDateTime(attachment.created_at)}{attachment.ocr_estado === "PROCESANDO" || attachment.ocr_estado === "PENDIENTE" ? " · Procesando texto…" : attachment.ocr_estado === "FALLIDO" ? " · OCR no disponible" : ""}</small></span><Icon name="arrowRight" size={15} /></a>{canAnalyze && <button type="button" className="text-button attachment-ai-button" disabled={analyzingId === attachment.id} onClick={() => runAnalyze(attachment)}>{analyzingId === attachment.id ? "Analizando…" : "Analizar con IA"}</button>}</div>)}</div> : <p className="detail-empty">No hay evidencia adjunta.</p>}{canAttach && <form className="detail-attach-form" onSubmit={submitAttach} onPaste={handleAttachPaste}><label className={`upload-box small ${attachError ? "has-error" : ""}`}><input type="file" accept=".jpg,.jpeg,.png" multiple onChange={handleAttach} /><Icon name="upload" size={16} /><span>{attachList.length ? `${attachList.length} ${attachList.length === 1 ? "imagen" : "imágenes"}` : "Adjuntar o pegar (Ctrl+V)"}</span></label><button className="secondary-button" disabled={uploading || !attachFile} type="submit">{uploading ? "Subiendo..." : "Adjuntar"}</button></form>}{attachList.length > 0 && <div className="attach-preview-grid">{attachList.map((f, i) => <div className="attach-preview" key={`${f.name}-${f.size}-${i}`}><img src={attachPreviews[i]} alt={f.name} /><span title={f.name}>{f.name}</span><button type="button" aria-label={`Quitar ${f.name}`} onClick={() => removeAttachFile(i)}>✕</button></div>)}</div>}{attachError && <p className="form-submit-error" role="alert"><Icon name="alert" size={14} /> {attachError}</p>}</section>
             <section className="detail-section history-section"><div className="detail-section-heading"><span className="detail-label">Historial del ticket</span><span>{ticket.events.length}</span></div>{ticket.events.length ? <ol className="ticket-history">{ticket.events.map((event) => <li key={event.id}><span className="history-dot" /><div><strong>{event.event_label}</strong><p>{event.comment || `${event.actor?.name || "Sistema"} actualizó el ticket.`}</p><small>{event.actor?.name || "Sistema"} · {formatDateTime(event.created_at)}</small></div></li>)}</ol> : <p className="detail-empty">Aún no hay eventos registrados.</p>}</section>
           </div>
           <aside className="detail-sidebar">

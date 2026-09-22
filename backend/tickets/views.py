@@ -277,6 +277,29 @@ class TicketViewSet(viewsets.ModelViewSet):
         deescalate_ticket(ticket, actor=request.user)
         return Response(TicketSerializer(ticket, context={"request": request}).data)
 
+    @action(detail=True, methods=["post"], url_path="analizar-imagen")
+    def analizar_imagen(self, request, pk=None):
+        from django.conf import settings as dj_settings
+
+        ticket = self.get_object()
+        require_support_access(request.user, ticket)
+        if not request.user.is_administrator and request.user.role not in {User.Role.SUPPORT, User.Role.SUPERVISOR}:
+            raise PermissionDenied("Solo soporte, supervisores o administración pueden usar el análisis IA.")
+        if not dj_settings.IA_VISION_ENABLED:
+            raise ValidationError("El análisis IA está desactivado en este ambiente.")
+        attachment_id = request.data.get("attachment_id")
+        try:
+            attachment = ticket.attachments.get(pk=attachment_id)
+        except Exception:
+            raise ValidationError({"attachment_id": "Adjunto inválido."})
+        prompt = (request.data.get("prompt") or "").strip()
+        try:
+            from .tasks import analyze_attachment_ai
+            analyze_attachment_ai.delay(attachment.id, prompt)
+        except Exception:
+            analyze_attachment_ai(attachment.id, prompt)
+        return Response({"detail": "Análisis IA en curso. El resultado aparecerá en el historial."})
+
     @action(detail=True, methods=["post"], url_path="instruir")
     def instruir(self, request, pk=None):
         ticket = self.get_object()
