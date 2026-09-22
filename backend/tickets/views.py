@@ -300,6 +300,19 @@ class TicketViewSet(viewsets.ModelViewSet):
             analyze_attachment_ai(attachment.id, prompt)
         return Response({"detail": "Análisis IA en curso. El resultado aparecerá en el historial."})
 
+    @action(detail=True, methods=["post"], url_path="revisar")
+    def revisar(self, request, pk=None):
+        ticket = self.get_object()
+        require_support_access(request.user, ticket)
+        if not request.user.is_administrator and request.user.role not in {User.Role.SUPPORT, User.Role.SUPERVISOR}:
+            raise PermissionDenied("Solo soporte, supervisores o administración pueden pedir revisión IA.")
+        try:
+            from .tasks import review_ticket_ai
+            review_ticket_ai.delay(ticket.id, True)
+        except Exception:
+            review_ticket_ai(ticket.id, True)
+        return Response({"detail": "Revisión IA en curso. El resultado aparecerá en el historial."})
+
     @action(detail=True, methods=["post"], url_path="instruir")
     def instruir(self, request, pk=None):
         ticket = self.get_object()

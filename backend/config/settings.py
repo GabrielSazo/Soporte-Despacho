@@ -172,5 +172,6 @@ CELERY_TASK_ALWAYS_EAGER = environment_flag("CELERY_TASK_ALWAYS_EAGER", "test" i
 
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://host.docker.internal:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5vl:3b")
+OLLAMA_REASON_MODEL = os.getenv("OLLAMA_REASON_MODEL", "qwen3:4b")
 OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "180") or "180")
 IA_VISION_ENABLED = environment_flag("IA_VISION_ENABLED", True)

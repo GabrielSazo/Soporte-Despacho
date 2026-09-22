@@ -132,6 +132,7 @@ def process_attachment_ocr(attachment_id):
                 analyze_attachment_ai.delay(attachment.id)
             except Exception:
                 pass
+        maybe_schedule_review(ticket.id)
         return "ok"
     except Exception:
         try:
@@ -183,6 +184,93 @@ def analyze_attachment_ai(attachment_id, prompt=""):
         if not texto:
             return "empty"
         record_event(ticket, TicketEvent.EventType.ATTACHMENT, actor=None, comment=f"IA ({settings.OLLAMA_MODEL}):\n{texto}")
+        broadcast_ticket_update(ticket.id, "ai_done")
+        maybe_schedule_review(ticket.id)
+        return "ok"
+    except Exception as exc:
+        record_event(ticket, TicketEvent.EventType.ATTACHMENT, actor=None, comment=f"IA no disponible: {exc}")
+        broadcast_ticket_update(ticket.id, "ai_failed")
+        return "failed"
+
+
+REVIEW_MARKER = "IA-Revisor:"
+
+
+def maybe_schedule_review(ticket_id):
+    if getattr(settings, "CELERY_TASK_ALWAYS_EAGER", False):
+        return
+    try:
+        from .models import Ticket
+        ticket = Ticket.objects.prefetch_related("attachments").get(pk=ticket_id)
+    except Exception:
+        return
+    attachments = list(ticket.attachments.all())
+    if not attachments:
+        return
+    if any(a.ocr_estado in {TicketAttachment.OcrStatus.PENDING, TicketAttachment.OcrStatus.PROCESSING} for a in attachments):
+        return
+    if ticket.events.filter(comment__startswith=REVIEW_MARKER).exists():
+        return
+    try:
+        review_ticket_ai.apply_async(args=[ticket_id], countdown=60)
+    except Exception:
+        pass
+
+
+@shared_task
+def review_ticket_ai(ticket_id, force=False):
+    from .models import Ticket
+    try:
+        ticket = Ticket.objects.prefetch_related("attachments", "events").get(pk=ticket_id)
+    except Ticket.DoesNotExist:
+        return "missing"
+    if not settings.IA_VISION_ENABLED:
+        return "disabled"
+    if not force and ticket.events.filter(comment__startswith=REVIEW_MARKER).exists():
+        return "done"
+    evidencias = []
+    for event in ticket.events.order_by("created_at"):
+        if (event.comment or "").startswith(("OCR:", "IA (")):
+            evidencias.append(f"- {event.comment[:500]}")
+    datos = {
+        "referencia": ticket.reference,
+        "titulo": ticket.title,
+        "descripcion": ticket.description,
+        "categoria": ticket.category,
+        "prioridad_actual": ticket.priority,
+        "estado": ticket.status,
+        "contrato": ticket.contrato,
+        "ot": ticket.numero_ot,
+    }
+    import json as jsonlib
+    prompt = (
+        "Eres supervisor de soporte telecom. Analiza este ticket y su evidencia. "
+        "Responde EXACTAMENTE en 3 líneas: 1) Resumen de evidencia (1 línea). "
+        "2) Prioridad sugerida: CRITICA, ALTA, MEDIA o BAJA. "
+        "3) Motivo (1 línea). "
+        f"Ticket: {jsonlib.dumps(datos, ensure_ascii=False)} "
+        f"Evidencia: {chr(10).join(evidencias[:6]) or 'sin evidencia procesada'}"
+    )
+    try:
+        import urllib.request
+        import json
+
+        payload = json.dumps({
+            "model": settings.OLLAMA_REASON_MODEL,
+            "prompt": prompt,
+            "stream": False,
+        }).encode()
+        request = urllib.request.Request(
+            f"{settings.OLLAMA_HOST.rstrip('/')}/api/generate",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(request, timeout=settings.OLLAMA_TIMEOUT) as response:
+            data = json.loads(response.read().decode())
+        texto = (data.get("response") or "").strip()[:1500]
+        if not texto:
+            return "empty"
+        record_event(ticket, TicketEvent.EventType.ATTACHMENT, actor=None, comment=f"{REVIEW_MARKER}\n{texto}")
         broadcast_ticket_update(ticket.id, "ai_done")
         return "ok"
     except Exception as exc:

@@ -205,6 +205,10 @@ export function analyzeAttachment(ticketId, attachmentId, prompt = "") {
   return request(`/tickets/${ticketId}/analizar-imagen/`, { method: "POST", body: { attachment_id: attachmentId, prompt } });
 }
 
+export function reviewTicket(ticketId) {
+  return request(`/tickets/${ticketId}/revisar/`, { method: "POST" });
+}
+
 export function takeTicket(ticketId) {
   return request(`/tickets/${ticketId}/take/`, { method: "POST" });
 }

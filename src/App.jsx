@@ -27,6 +27,7 @@ import {
   requestPasswordReset,
   resetPassword,
   resolveTicket as resolveTicketRequest,
+  reviewTicket as reviewTicketRequest,
   releaseTicket as releaseTicketRequest,
   signIn,
   signOut,
@@ -661,6 +662,11 @@ function App() {
     notify("Análisis IA en curso. El resultado aparecerá en el historial.");
   }
 
+  async function reviewTicket(ticket) {
+    await reviewTicketRequest(ticket.apiId);
+    notify("Revisión IA en curso. El resultado aparecerá en el historial.");
+  }
+
   async function attachToTicket(ticket, file) {
     const uploaded = await uploadAttachment(ticket.apiId, file);
     const detail = await getTicket(ticket.apiId);
@@ -935,7 +941,7 @@ const BASE_FAVICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/sv
       {newTicketOpen && canCreateTickets && <NewTicketModal onClose={() => setNewTicketOpen(false)} onCreate={createTicket} onOpenTicket={async (id) => { setNewTicketOpen(false); const t = tickets.find((x) => x.apiId === id); if (t) openTicketDetail(t); }} session={session} />}
       {ticketToResolve && <ResolveTicketModal onClose={() => setTicketToResolve(null)} onResolve={resolveTicket} ticket={ticketToResolve} />}
       {ticketToEscalate && <EscalateModal areas={escalationAreas} onClose={() => setTicketToEscalate(null)} onEscalate={escalateTicket} ticket={ticketToEscalate} />}
-      {ticketDetail && <TicketDetailModal currentUser={session} isLoading={isDetailLoading} onAnalyze={analyzeImage} onAttach={attachToTicket} onClose={() => setTicketDetail(null)} onDeescalate={deescalateTicket} onEscalate={(ticket) => setTicketToEscalate(ticket)} onInstruct={instructTicket} onReassign={reassignTicket} onResolve={(ticket) => { setTicketDetail(null); setTicketToResolve(ticket); }} onTake={async (ticket) => { const updated = await takeTicket(ticket); const detail = await getTicket(ticket.apiId); setTicketDetail(mapTicket(detail)); }} onRelease={releaseTicket} onValidate={async (ticket, accepted, comment) => { await validateTicket(ticket, accepted, comment); setTicketDetail(null); }} teams={teams} ticket={ticketDetail} users={users} />}
+      {ticketDetail && <TicketDetailModal currentUser={session} isLoading={isDetailLoading} onAnalyze={analyzeImage} onAttach={attachToTicket} onReview={reviewTicket} onClose={() => setTicketDetail(null)} onDeescalate={deescalateTicket} onEscalate={(ticket) => setTicketToEscalate(ticket)} onInstruct={instructTicket} onReassign={reassignTicket} onResolve={(ticket) => { setTicketDetail(null); setTicketToResolve(ticket); }} onTake={async (ticket) => { const updated = await takeTicket(ticket); const detail = await getTicket(ticket.apiId); setTicketDetail(mapTicket(detail)); }} onRelease={releaseTicket} onValidate={async (ticket, accepted, comment) => { await validateTicket(ticket, accepted, comment); setTicketDetail(null); }} teams={teams} ticket={ticketDetail} users={users} />}
       {userModal && <UserFormModal onClose={() => setUserModal(null)} onSave={saveUser} teams={teams} groups={groups} user={userModal === "new" ? null : userModal} />}
       {teamModal && <TeamFormModal groups={groups} onClose={() => setTeamModal(null)} onSave={saveTeam} team={teamModal === "new" ? null : teamModal} />}
       {groupModal && <GroupFormModal onClose={() => setGroupModal(null)} onSave={saveGroup} group={groupModal === "new" ? null : groupModal} />}
@@ -1616,7 +1622,7 @@ function ResolveTicketModal({ onClose, onResolve, ticket }) {
   );
 }
 
-function TicketDetailModal({ currentUser, isLoading, onAnalyze, onAttach, onClose, onDeescalate, onEscalate, onInstruct, onReassign, onRelease, onResolve, onTake, onValidate, teams, ticket, users }) {
+function TicketDetailModal({ currentUser, isLoading, onAnalyze, onAttach, onClose, onDeescalate, onEscalate, onInstruct, onReassign, onRelease, onResolve, onReview, onTake, onValidate, teams, ticket, users }) {
   const [actionError, setActionError] = useState("");
   const [acting, setActing] = useState(false);
   const [attachFile, setAttachFile] = useState(null);
@@ -1636,7 +1642,9 @@ function TicketDetailModal({ currentUser, isLoading, onAnalyze, onAttach, onClos
     setAttachError("");
   }
   const canAnalyze = ["SOPORTE", "SUPERVISOR", "ADMIN"].includes(currentUser.role);
+  const canReview = canAnalyze && ticket.attachments.length > 0;
   const [analyzingId, setAnalyzingId] = useState(null);
+  const [reviewing, setReviewing] = useState(false);
 
   async function runAnalyze(attachment) {
     setAnalyzingId(attachment.id);
@@ -1758,6 +1766,7 @@ function TicketDetailModal({ currentUser, isLoading, onAnalyze, onAttach, onClos
               {canResolve && <button className="primary-button" type="button" onClick={() => onResolve(ticket)}>Registrar solución</button>}
               {canEscalate && <button className="secondary-button" type="button" onClick={() => onEscalate(ticket)}><Icon name="upload" size={16} /> Escalar</button>}
               {canDeescalate && <button className="primary-button" disabled={acting} type="button" onClick={() => runAction(onDeescalate)}>Recibida respuesta · continuar</button>}
+              {canReview && <button className="secondary-button" disabled={reviewing} type="button" onClick={async () => { setReviewing(true); setActionError(""); try { await onReview(ticket); } catch (e) { setActionError(e.message || "No se pudo iniciar la revisión."); } finally { setReviewing(false); } }}>{reviewing ? "Revisando…" : "Revisión IA"}</button>}
               {canInstruct && !showInstruct && <button className="secondary-button" type="button" onClick={() => { setShowInstruct(true); setInstructText(ticket.instruccionesDespacho || ""); }}>Instruir a despacho</button>}
               {canInstruct && showInstruct && <div style={{ display: "grid", gap: "6px", marginTop: "8px", width: "100%" }}><textarea value={instructText} onChange={(e) => setInstructText(e.target.value)} placeholder="Instrucciones para despacho (ej. retirar al técnico y confirmar ventana)" rows="3" style={{ width: "100%", border: "1px solid var(--line-strong)", borderRadius: "6px", padding: "8px", fontSize: "11px" }} /><div style={{ display: "flex", gap: "6px" }}><button className="secondary-button" disabled={acting || instructText.trim().length < 4} type="button" onClick={async () => { setActing(true); setActionError(""); try { await onInstruct(ticket, instructText.trim()); setShowInstruct(false); } catch (e) { setActionError(e.message || "No se pudo enviar."); } finally { setActing(false); } }}>Enviar instrucciones</button><button className="secondary-button" type="button" onClick={() => setShowInstruct(false)}>Cancelar</button></div></div>}
               {canValidate && <>
