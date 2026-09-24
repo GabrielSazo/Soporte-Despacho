@@ -107,11 +107,13 @@ def create_ticket(*, creator, **data):
 @transaction.atomic
 def take_ticket(ticket, actor):
     previous_status = ticket.status
+    ya_asignado = ticket.assignee_id == actor.id
     ticket.assignee = actor
     ticket.status = Ticket.Status.IN_PROGRESS
     ticket.assigned_at = ticket.assigned_at or timezone.now()
     ticket.save(update_fields=["assignee", "status", "assigned_at", "updated_at"])
-    record_event(ticket, TicketEvent.EventType.TAKEN, actor=actor, from_status=previous_status, to_status=ticket.status)
+    event_type = TicketEvent.EventType.STARTED if ya_asignado and previous_status == Ticket.Status.ASSIGNED else TicketEvent.EventType.TAKEN
+    record_event(ticket, event_type, actor=actor, from_status=previous_status, to_status=ticket.status)
     broadcast_ticket_update(ticket.id, "taken")
     return ticket
 

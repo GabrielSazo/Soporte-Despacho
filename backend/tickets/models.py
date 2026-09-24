@@ -190,6 +190,7 @@ class TicketEvent(models.Model):
         CREATED = "CREADO", "Creado"
         ASSIGNED = "ASIGNADO", "Asignado"
         TAKEN = "TOMADO", "Tomado por soporte"
+        STARTED = "INICIADO", "Atención iniciada"
         RESOLVED = "RESUELTO", "Enviado a validación"
         APPROVED = "APROBADO", "Solución aprobada"
         REJECTED = "RECHAZADO", "Solución rechazada"
