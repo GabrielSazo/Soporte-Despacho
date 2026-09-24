@@ -1340,6 +1340,11 @@ function ReportsView({ groups, onNotify }) {
         <article><span>Escalados abiertos</span><strong>{fmt(kpis.escalados_abiertos)}</strong><p>En áreas externas</p></article>
         <article><span>Tiempo prom. escalado</span><strong>{fmtDur(kpis.tiempo_prom_escalado_min)}</strong><p>Contador por ticket</p></article>
       </section>
+      <section className="report-highlights" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
+        <article><span>Respuesta soporte</span><strong>{fmtDur(kpis.t_respuesta_min)}</strong><p>Creado → tomado</p></article>
+        <article><span>Atención soporte</span><strong>{fmtDur(kpis.aht_minutos)}</strong><p>Tomado → resuelto</p></article>
+        <article><span>Cierre despacho</span><strong>{fmtDur(kpis.t_cierre_min)}</strong><p>Validación → cierre</p></article>
+      </section>
       {porArea.length > 0 && <article className="panel" style={{ padding: "14px 20px", marginBottom: "17px" }}><PanelHeading eyebrow="Escalamiento" title="Por área" /><div style={{ display: "flex", flexWrap: "wrap", gap: "8px 22px" }}>{porArea.map((r) => <span key={r.area} style={{ fontSize: "11px", color: "var(--muted)" }}><b style={{ color: "var(--ink)" }}>{r.total}</b> {r.area}</span>)}</div></article>}
       <section className="reports-grid" style={{ gridTemplateColumns: "1fr" }}>
         <article className="panel channel-panel"><PanelHeading eyebrow="Por día" title="Tráfico entrante" />

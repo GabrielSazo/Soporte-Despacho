@@ -351,6 +351,14 @@ class ReportsSummaryView(APIView):
         vencidos = sum(1 for t in tickets.exclude(status=Ticket.Status.CLOSED) if t.sla_state == "VENCIDO")
         ahts = [_ticket_aht_minutes(t) for t in tickets.filter(resolved_at__isnull=False, assigned_at__isnull=False)]
         aht = round(sum(ahts) / len(ahts), 1) if ahts else None
+        creados = {t["id"]: t["created_at"] for t in tickets.values("id", "created_at")}
+        first_taken = {}
+        for e in TicketEvent.objects.filter(ticket__in=tickets, event_type=TicketEvent.EventType.TAKEN).order_by("created_at").values("ticket_id", "created_at"):
+            first_taken.setdefault(e["ticket_id"], e["created_at"])
+        resp = [(first_taken[tid] - creados[tid]).total_seconds() / 60 for tid in first_taken if tid in creados and first_taken[tid] >= creados[tid]]
+        t_respuesta = round(sum(resp) / len(resp), 1) if resp else None
+        cierres = [(t.closed_at - t.resolved_at).total_seconds() / 60 for t in cerrados.filter(resolved_at__isnull=False, closed_at__isnull=False) if t.closed_at >= t.resolved_at]
+        t_cierre = round(sum(cierres) / len(cierres), 1) if cierres else None
         sla_ok = cerrados.filter(closed_at__lte=F("sla_due_at")).count()
         pct_sla = round(sla_ok / cerrados.count() * 100, 1) if cerrados.count() else None
 
@@ -398,6 +406,8 @@ class ReportsSummaryView(APIView):
                 "devueltos": devueltos,
                 "escalados_abiertos": escalados_abiertos,
                 "tiempo_prom_escalado_min": tiempo_prom_escalado,
+                "t_respuesta_min": t_respuesta,
+                "t_cierre_min": t_cierre,
             },
             "por_area_escalada": [{"area": r["area_escalada__name"], "total": r["total"]} for r in por_area],
             "daily": daily,
