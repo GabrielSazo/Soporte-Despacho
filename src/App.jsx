@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
+  bulkCreateUsers as bulkCreateUsersRequest,
   createGroup as createGroupRequest,
   createTeam as createTeamRequest,
   createTicket as createTicketRequest,
@@ -637,15 +638,6 @@ function App() {
       : await createUserRequest(payload);
     setUserModal(null);
     await refreshUsers();
-
-  async function bulkCreateUsers(file) {
-    const result = await bulkCreateUsersRequest(file);
-    setBulkModal(false);
-    await refreshUsers();
-    await refreshWorkspace(true);
-    notify(`Carga masiva: ${result.creados.length} creados, ${result.errores.length} con error.`);
-    return result;
-  }
     notify(existingUser ? `${savedUser.name} fue actualizado.` : `${savedUser.name} fue creado.`);
   }
 
