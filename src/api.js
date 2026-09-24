@@ -88,6 +88,38 @@ async function request(path, { body, headers = {}, method = "GET", retry = true,
   return payload;
 }
 
+function toLocalPath(next) {
+  try {
+    const u = new URL(next, "http://local");
+    let p = u.pathname + u.search;
+    let base = "/api";
+    try {
+      base = new URL(apiUrl, "http://local").pathname;
+    } catch {
+      base = "/api";
+    }
+    if (base !== "/" && p.startsWith(base)) p = p.slice(base.length);
+    return p || "/";
+  } catch {
+    return next;
+  }
+}
+
+async function requestAll(path, { maxPages = 20 } = {}) {
+  const all = [];
+  let url = path;
+  let total = 0;
+  for (let page = 0; page < maxPages && url; page++) {
+    const payload = await request(url);
+    if (Array.isArray(payload)) return payload;
+    const results = payload.results || [];
+    total = payload.count ?? total;
+    all.push(...results);
+    url = payload.next ? toLocalPath(payload.next) : null;
+  }
+  return { results: all, count: total || all.length };
+}
+
 export async function signIn(email, password) {
   const payload = await request("/auth/token/", {
     method: "POST",
@@ -144,7 +176,7 @@ export function updateMyTeams(teams, managedGroups) {
 }
 
 export function getTickets() {
-  return request("/tickets/");
+  return requestAll("/tickets/");
 }
 
 export function getTicket(ticketId) {
@@ -246,7 +278,7 @@ export function checkOpenTicket({ identificador = "", contrato = "", numero_ot =
   if (contrato) params.contrato = contrato;
   if (numero_ot) params.numero_ot = numero_ot;
   const qs = new URLSearchParams(params).toString();
-  return request(`/tickets/?${qs}`);
+  return requestAll(`/tickets/?${qs}`, { maxPages: 5 });
 }
 
 export function escalateTicket(ticketId, { area_id, motivo, contrato = "", numero_ot = "", instrucciones = "" }) {
