@@ -210,6 +210,7 @@ class TicketViewSet(viewsets.ModelViewSet):
         from .services import record_event
         from .models import TicketEvent
         previous_assignee = ticket.assignee.display_name if ticket.assignee_id else "Sin asignar"
+        previous_status = ticket.status
         new_team = new_assignee.teams.filter(group__code=group_code).first() or ticket.assigned_team
         ticket.assigned_team = new_team
         ticket.assignee = new_assignee
@@ -217,7 +218,7 @@ class TicketViewSet(viewsets.ModelViewSet):
         if ticket.status == Ticket.Status.OPEN:
             ticket.status = Ticket.Status.ASSIGNED
         ticket.save(update_fields=["assigned_team", "assignee", "assigned_at", "status", "updated_at"])
-        record_event(ticket, TicketEvent.EventType.ASSIGNED, actor=request.user, from_status=previous_assignee, to_status=new_assignee.display_name, comment=f"Reasignado a {new_assignee.display_name}.")
+        record_event(ticket, TicketEvent.EventType.ASSIGNED, actor=request.user, from_status=previous_status, to_status=ticket.status, comment=f"Reasignado de {previous_assignee} a {new_assignee.display_name}.")
         try:
             from channels.layers import get_channel_layer
             from asgiref.sync import async_to_sync
