@@ -1789,7 +1789,7 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onDeesca
             <div className="detail-meta"><span className="detail-label">Despachador</span><strong>{ticket.requester}</strong><small>{ticket.originTeam}</small></div>
             <div className="detail-meta"><span className="detail-label">Atiende</span><strong>{ticket.assignee}</strong><small>{ticket.team}</small></div>
             {(canTake || canRelease || canResolve || canValidate || canEscalate || canDeescalate || canInstruct) && <div className="detail-actions">
-              {canTake && <button className="primary-button" disabled={acting} type="button" onClick={() => runAction(onTake)}>Tomar ticket</button>}
+              {canTake && <button className="primary-button" disabled={acting} type="button" onClick={() => runAction(onTake)}>{ticket.assigneeId === currentUser.id ? "Iniciar atención" : "Tomar ticket"}</button>}
               {canRelease && <button className="secondary-button" disabled={acting} type="button" onClick={() => runAction(onRelease)}>Liberar a bandeja</button>}
               {canResolve && <button className="primary-button" type="button" onClick={() => onResolve(ticket)}>Registrar solución</button>}
               {canEscalate && <button className="secondary-button" type="button" onClick={() => onEscalate(ticket)}><Icon name="upload" size={16} /> Escalar</button>}
