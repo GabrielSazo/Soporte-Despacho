@@ -935,7 +935,7 @@ const BASE_FAVICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/sv
           {isLoading ? <LoadingState /> : <>
             {activeView === "Resumen" && <Dashboard canCreate={canCreateTickets} criticalTickets={criticalTickets} dashboard={dashboard} onCreate={() => setNewTicketOpen(true)} onOpen={openTicketDetail} onShowTickets={() => setActiveView("Tickets")} tickets={tickets} validationTickets={validationTickets} />}
             {activeView === "Tickets" && <TicketsView canCreate={canCreateTickets} currentUser={session} filter={filter} filteredTickets={filteredTickets} onCreate={() => setNewTicketOpen(true)} onFilterChange={setFilter} onNotify={notify} onOpen={openTicketDetail} onResolve={setTicketToResolve} onTake={takeTicket} query={query} setQuery={setQuery} />}
-            {activeView === "Validaciones" && <ValidationsView canValidate={session.role !== "SOPORTE"} tickets={validationTickets} onOpen={openTicketDetail} onValidate={validateTicket} />}
+            {activeView === "Validaciones" && <ValidationsView canValidate={["DESPACHADOR", "ADMIN"].includes(session.role)} tickets={validationTickets} onOpen={openTicketDetail} onValidate={validateTicket} />}
             {activeView === "Escalados" && <EscalationsView canEscalate={["SOPORTE", "SUPERVISOR", "ADMIN"].includes(session.role)} tickets={escalatedTickets} onOpen={openTicketDetail} onDeescalate={deescalateTicket} />}
             {activeView === "Mi grupo" && <TeamView currentUser={session} onlineIds={onlineIds} onNotify={notify} tickets={tickets} users={users} />}
             {activeView === "Informes" && <ReportsView groups={groups} onNotify={notify} />}
@@ -1126,18 +1126,16 @@ function ValidationsView({ canValidate, tickets, onOpen, onValidate }) {
         description=""
       />
       <section className="validation-grid">
-        {!canValidate ? <EmptyValidation /> : null}
-        {canValidate && tickets.length > 0 ? tickets.map((ticket) => (
+        {tickets.length === 0 ? <EmptyValidation /> : tickets.map((ticket) => (
           <article className="validation-card" key={ticket.id} onClick={() => onOpen && onOpen(ticket)} style={{ cursor: onOpen ? "pointer" : "default" }}>
             <div className="validation-card-top"><span className="ticket-id">{ticket.id}</span><span className="status-pill status-validation">Validación</span></div>
             <h2>{ticket.title}</h2>
             <div className="solution-note"><Icon name="checkCircle" size={19} /><div><span>Solución de Soporte</span><p>{ticket.resolutionNotes || "Soporte marcó este caso como resuelto. Confirma el resultado en campo."}</p></div></div>
             <div className="validation-meta"><span><div className="avatar small-avatar">{initials(ticket.assignee)}</div> {ticket.assignee}</span><span><Icon name="clock" size={16} /> {ticket.created}</span></div>
-            {rejectId === ticket.apiId ? <div style={{ display: "grid", gap: "8px", marginTop: "10px" }} onClick={(e) => e.stopPropagation()}><textarea value={rejectComment} onChange={(e) => setRejectComment(e.target.value)} placeholder="Motivo del rechazo (obligatorio)" rows="3" style={{ width: "100%", border: "1px solid var(--line-strong)", borderRadius: "6px", padding: "8px", fontSize: "11px" }} /><div style={{ display: "flex", gap: "6px" }}><button className="secondary-button" disabled={!rejectComment.trim()} type="button" onClick={() => { onValidate(ticket, false, rejectComment); setRejectId(null); setRejectComment(""); }}>Confirmar rechazo</button><button className="secondary-button" type="button" onClick={() => { setRejectId(null); setRejectComment(""); }}>Cancelar</button></div></div> : <div className="validation-actions" onClick={(e) => e.stopPropagation()}><button className="secondary-button" type="button" onClick={() => setRejectId(ticket.apiId)}>Rechazar y devolver</button><button className="primary-button" type="button" onClick={() => onValidate(ticket, true)}><Icon name="check" size={17} /> Aprobar solución</button></div>}
+            {rejectId === ticket.apiId && canValidate ? <div style={{ display: "grid", gap: "8px", marginTop: "10px" }} onClick={(e) => e.stopPropagation()}><textarea value={rejectComment} onChange={(e) => setRejectComment(e.target.value)} placeholder="Motivo del rechazo (obligatorio)" rows="3" style={{ width: "100%", border: "1px solid var(--line-strong)", borderRadius: "6px", padding: "8px", fontSize: "11px" }} /><div style={{ display: "flex", gap: "6px" }}><button className="secondary-button" disabled={!rejectComment.trim()} type="button" onClick={() => { onValidate(ticket, false, rejectComment); setRejectId(null); setRejectComment(""); }}>Confirmar rechazo</button><button className="secondary-button" type="button" onClick={() => { setRejectId(null); setRejectComment(""); }}>Cancelar</button></div></div> : canValidate ? <div className="validation-actions" onClick={(e) => e.stopPropagation()}><button className="secondary-button" type="button" onClick={() => setRejectId(ticket.apiId)}>Rechazar y devolver</button><button className="primary-button" type="button" onClick={() => onValidate(ticket, true)}><Icon name="check" size={17} /> Aprobar solución</button></div> : null}
             <div style={{ marginTop: "8px", fontSize: "10px", color: "var(--quiet)", textAlign: "center" }}>Clic para ver detalle →</div>
           </article>
-        )) : null}
-        {canValidate && tickets.length === 0 ? <EmptyValidation /> : null}
+        ))}
       </section>
     </>
   );
@@ -1689,7 +1687,7 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onDeesca
   const canTake = currentUser.role === "SOPORTE" && ["ABIERTO", "ASIGNADO"].includes(ticket.statusCode);
   const canRelease = ["ASIGNADO", "EN_PROCESO"].includes(ticket.statusCode) && (ticket.assigneeId === currentUser.id || currentUser.role === "ADMIN" || (currentUser.role === "SUPERVISOR" && (currentUser.groups || []).map((g) => g.code).includes(ticket.groupCode)));
   const canResolve = currentUser.role === "SOPORTE" && ticket.statusCode === "EN_PROCESO";
-  const canValidate = currentUser.role !== "SOPORTE" && ticket.statusCode === "VALIDACION";
+  const canValidate = ((currentUser.role === "DESPACHADOR" && ticket.creatorId === currentUser.id) || currentUser.role === "ADMIN") && ticket.statusCode === "VALIDACION";
   const canEscalate = ["SOPORTE", "SUPERVISOR", "ADMIN"].includes(currentUser.role) && ["ABIERTO", "ASIGNADO", "EN_PROCESO"].includes(ticket.statusCode);
   const canDeescalate = ["SOPORTE", "SUPERVISOR", "ADMIN"].includes(currentUser.role) && ticket.statusCode === "ESCALADO";
   const canInstruct = ["SOPORTE", "SUPERVISOR", "ADMIN"].includes(currentUser.role) && ticket.statusCode === "ESCALADO" && (ticket.assigneeId === currentUser.id || currentUser.role !== "SOPORTE" || currentUser.is_administrator);
