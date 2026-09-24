@@ -205,15 +205,11 @@ class TicketCreateSerializer(serializers.ModelSerializer):
         if not contrato and not numero_ot:
             raise serializers.ValidationError({"contrato": "Debes indicar el Contrato o la OT."})
         cliente = (attrs.get("cliente_nombre") or "").strip()
-        if not cliente:
-            raise serializers.ValidationError({"cliente_nombre": "Debes indicar el nombre del cliente."})
-        if not re.fullmatch(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9\s.\-,&()']+", cliente):
+        if cliente and not re.fullmatch(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9\s.\-,&()']+", cliente):
             raise serializers.ValidationError({"cliente_nombre": "Nombre inválido: solo letras, números, espacios y . , - & ( )."})
-        attrs["contrato"] = contrato
-        attrs["numero_ot"] = numero_ot
         attrs["cliente_nombre"] = cliente
-        if not (attrs.get("nodo") or "").strip():
-            raise serializers.ValidationError({"nodo": "Debes indicar el nodo."})
+        nodo = (attrs.get("nodo") or "").strip()
+        attrs["nodo"] = nodo
         abiertos = Ticket.objects.exclude(status=Ticket.Status.CLOSED)
         if contrato:
             existing = abiertos.filter(contrato=contrato).order_by("-created_at").first()

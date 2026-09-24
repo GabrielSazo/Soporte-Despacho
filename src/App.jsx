@@ -271,6 +271,7 @@ function App() {
   const [usersLoading, setUsersLoading] = useState(false);
   const [usersError, setUsersError] = useState("");
   const [userModal, setUserModal] = useState(null);
+  const [bulkModal, setBulkModal] = useState(false);
   const [teamModal, setTeamModal] = useState(null);
   const [groupModal, setGroupModal] = useState(null);
   const [requestTypeModal, setRequestTypeModal] = useState(null);
@@ -282,6 +283,7 @@ function App() {
   const [showProfile, setShowProfile] = useState(false);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("Todos");
+  const [onlineIds, setOnlineIds] = useState([]);
   const [toast, setToast] = useState("");
 
   useEffect(() => {
@@ -316,6 +318,7 @@ function App() {
         setAreaModal(null);
         setTicketDetail(null);
         setUserModal(null);
+        setBulkModal(null);
         setTeamModal(null);
         setGroupModal(null);
         setPasswordModal(null);
@@ -330,11 +333,11 @@ function App() {
   }, []);
 
   useEffect(() => {
-    document.body.style.overflow = sidebarOpen || newTicketOpen || ticketToResolve || ticketToEscalate || areaModal || ticketDetail || userModal || teamModal || groupModal || passwordModal || showProfile ? "hidden" : "";
+    document.body.style.overflow = sidebarOpen || newTicketOpen || ticketToResolve || ticketToEscalate || areaModal || ticketDetail || userModal || bulkModal || teamModal || groupModal || passwordModal || showProfile ? "hidden" : "";
     return () => {
       document.body.style.overflow = "";
     };
-  }, [sidebarOpen, newTicketOpen, ticketToResolve, ticketToEscalate, areaModal, ticketDetail, userModal, teamModal, groupModal, passwordModal, showProfile]);
+  }, [sidebarOpen, newTicketOpen, ticketToResolve, ticketToEscalate, areaModal, ticketDetail, userModal, bulkModal, teamModal, groupModal, passwordModal, showProfile]);
 
   useEffect(() => {
     if (session) {
@@ -364,6 +367,10 @@ function App() {
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
+          if (data.type === "presence" && Array.isArray(data.user_ids)) {
+            setOnlineIds(data.user_ids.map(Number));
+            return;
+          }
           if (data.type === "ticket_update" || data.type === "connected") {
             if (data.type === "ticket_update") {
               refreshWorkspace(true);
@@ -575,6 +582,15 @@ function App() {
     notify(`${ticket.id} escalado a ${mapped.areaEscalada || "escalamiento"}.`);
   }
 
+  async function bulkCreateUsers(file) {
+    const result = await bulkCreateUsersRequest(file);
+    setBulkModal(false);
+    await refreshUsers();
+    await refreshWorkspace(true);
+    notify(`Carga masiva: ${result.creados.length} creados, ${result.errores.length} con error.`);
+    return result;
+  }
+
   async function deescalateTicket(ticket) {
     const updated = await deescalateTicketRequest(ticket.apiId);
     const mapped = mapTicket(updated);
@@ -621,6 +637,15 @@ function App() {
       : await createUserRequest(payload);
     setUserModal(null);
     await refreshUsers();
+
+  async function bulkCreateUsers(file) {
+    const result = await bulkCreateUsersRequest(file);
+    setBulkModal(false);
+    await refreshUsers();
+    await refreshWorkspace(true);
+    notify(`Carga masiva: ${result.creados.length} creados, ${result.errores.length} con error.`);
+    return result;
+  }
     notify(existingUser ? `${savedUser.name} fue actualizado.` : `${savedUser.name} fue creado.`);
   }
 
@@ -920,9 +945,9 @@ const BASE_FAVICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/sv
             {activeView === "Tickets" && <TicketsView canCreate={canCreateTickets} currentUser={session} filter={filter} filteredTickets={filteredTickets} onCreate={() => setNewTicketOpen(true)} onFilterChange={setFilter} onNotify={notify} onOpen={openTicketDetail} onResolve={setTicketToResolve} onTake={takeTicket} query={query} setQuery={setQuery} />}
             {activeView === "Validaciones" && <ValidationsView canValidate={session.role !== "SOPORTE"} tickets={validationTickets} onOpen={openTicketDetail} onValidate={validateTicket} />}
             {activeView === "Escalados" && <EscalationsView canEscalate={["SOPORTE", "SUPERVISOR", "ADMIN"].includes(session.role)} tickets={escalatedTickets} onOpen={openTicketDetail} onDeescalate={deescalateTicket} />}
-            {activeView === "Mi grupo" && <TeamView currentUser={session} onNotify={notify} tickets={tickets} users={users} />}
+            {activeView === "Mi grupo" && <TeamView currentUser={session} onlineIds={onlineIds} onNotify={notify} tickets={tickets} users={users} />}
             {activeView === "Informes" && <ReportsView groups={groups} onNotify={notify} />}
-            {activeView === "Administración" && ["ADMIN","SUPERVISOR"].includes(session.role) && <UsersView areas={escalationAreas} currentRole={session.role} error={usersError} groups={groups} loading={usersLoading} onCreate={() => setUserModal("new")} onCreateArea={() => setAreaModal("new")} onCreateGroup={() => setGroupModal("new")} onCreateTeam={() => setTeamModal("new")} onCreateRequestType={() => setRequestTypeModal("new")} onEdit={setUserModal} onEditArea={setAreaModal} onEditGroup={setGroupModal} onEditTeam={setTeamModal} onEditRequestType={setRequestTypeModal} onResetPassword={setPasswordModal} onRetry={refreshUsers} requestTypes={requestTypes} teams={teams} users={users} />}
+            {activeView === "Administración" && ["ADMIN","SUPERVISOR"].includes(session.role) && <UsersView areas={escalationAreas} currentRole={session.role} error={usersError} groups={groups} loading={usersLoading} onBulk={() => setBulkModal(true)} onCreate={() => setUserModal("new")} onCreateArea={() => setAreaModal("new")} onCreateGroup={() => setGroupModal("new")} onCreateTeam={() => setTeamModal("new")} onCreateRequestType={() => setRequestTypeModal("new")} onEdit={setUserModal} onEditArea={setAreaModal} onEditGroup={setGroupModal} onEditTeam={setTeamModal} onEditRequestType={setRequestTypeModal} onResetPassword={setPasswordModal} onRetry={refreshUsers} requestTypes={requestTypes} teams={teams} users={users} />}
           </>}
         </section>
       </main>
@@ -931,6 +956,7 @@ const BASE_FAVICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/sv
       {ticketToEscalate && <EscalateModal areas={escalationAreas} onClose={() => setTicketToEscalate(null)} onEscalate={escalateTicket} ticket={ticketToEscalate} />}
       {ticketDetail && <TicketDetailModal currentUser={session} isLoading={isDetailLoading} onAttach={attachToTicket} onClose={() => setTicketDetail(null)} onDeescalate={deescalateTicket} onEscalate={(ticket) => setTicketToEscalate(ticket)} onInstruct={instructTicket} onReassign={reassignTicket} onResolve={(ticket) => { setTicketDetail(null); setTicketToResolve(ticket); }} onTake={async (ticket) => { const updated = await takeTicket(ticket); const detail = await getTicket(ticket.apiId); setTicketDetail(mapTicket(detail)); }} onRelease={releaseTicket} onValidate={async (ticket, accepted, comment) => { await validateTicket(ticket, accepted, comment); setTicketDetail(null); }} teams={teams} ticket={ticketDetail} users={users} />}
       {userModal && <UserFormModal onClose={() => setUserModal(null)} onSave={saveUser} teams={teams} groups={groups} user={userModal === "new" ? null : userModal} />}
+      {bulkModal && <BulkUserModal onClose={() => setBulkModal(false)} onUpload={bulkCreateUsers} />}
       {teamModal && <TeamFormModal groups={groups} onClose={() => setTeamModal(null)} onSave={saveTeam} team={teamModal === "new" ? null : teamModal} />}
       {groupModal && <GroupFormModal onClose={() => setGroupModal(null)} onSave={saveGroup} group={groupModal === "new" ? null : groupModal} />}
       {requestTypeModal && <RequestTypeFormModal onClose={() => setRequestTypeModal(null)} onSave={saveRequestType} requestType={requestTypeModal === "new" ? null : requestTypeModal} teams={teams} />}
@@ -1199,20 +1225,20 @@ function EscalateModal({ areas, onClose, onEscalate, ticket }) {
   );
 }
 
-function TeamView({ currentUser, onNotify, tickets, users }) {
+function TeamView({ currentUser, onlineIds, onNotify, tickets, users }) {
   const [showRules, setShowRules] = useState(false);
   const peopleByName = new Map();
   const memberUsers = (users || []).filter((u) => u.is_active && !u.is_locked);
   if (memberUsers.length) {
     memberUsers.forEach((u) => {
-      peopleByName.set(u.name, { initials: u.initials, name: u.name, role: u.roleLabel, load: 0, status: u.name === currentUser.name ? "En línea" : "En atención", className: u.avatarClass });
+      peopleByName.set(u.name, { initials: u.initials, name: u.name, role: u.roleLabel, load: 0, status: (onlineIds || []).map(Number).includes(Number(u.id)) ? "En línea" : "Ausente", className: u.avatarClass });
     });
   } else if (currentUser.role === "SOPORTE") {
     peopleByName.set(currentUser.name, { initials: currentUser.initials, name: currentUser.name, role: currentUser.roleLabel, load: 0, status: "En línea", className: currentUser.avatarClass });
   }
   tickets.forEach((ticket) => {
     if (ticket.assignee === "Sin asignar") return;
-    const person = peopleByName.get(ticket.assignee) || { initials: initials(ticket.assignee), name: ticket.assignee, role: "Soporte", load: 0, status: "En atención", className: avatarClass(ticket.assignee) };
+    const person = peopleByName.get(ticket.assignee) || { initials: initials(ticket.assignee), name: ticket.assignee, role: "Soporte", load: 0, status: "Ausente", className: avatarClass(ticket.assignee) };
     if (ticket.statusCode !== "CERRADO") person.load += 1;
     peopleByName.set(ticket.assignee, person);
   });
@@ -1225,7 +1251,7 @@ function TeamView({ currentUser, onNotify, tickets, users }) {
         {people.length ? people.map((person) => (
           <article className="team-card" key={person.name}>
             <div className={`avatar team-avatar ${person.className}`}>{person.initials}</div>
-            <div className="team-card-title"><h2>{person.name}</h2><span className="online-status"><i /> {person.status}</span></div>
+            <div className="team-card-title"><h2>{person.name}</h2><span className="online-status" style={person.status === "En línea" ? undefined : { color: "var(--quiet)" }}><i /> {person.status}</span></div>
             <p>{person.role}</p>
             <div className="capacity"><div><span>Carga activa</span><strong>{person.load} <small>tickets</small></strong></div><div className="capacity-bars"><i /><i /><i /><i /><i className={person.load < 5 ? "off" : ""} /></div></div>
             <button type="button" onClick={() => onNotify(`Se abrió el perfil de ${person.name}.`)}>Ver carga <Icon name="arrowRight" size={16} /></button>
@@ -1352,7 +1378,7 @@ function ReportsView({ groups, onNotify }) {
   );
 }
 
-function UsersView({ areas, error, groups, loading, onCreate, onCreateArea, onCreateGroup, onCreateTeam, onCreateRequestType, onEdit, onEditArea, onEditGroup, onEditTeam, onEditRequestType, onResetPassword, onRetry, requestTypes, teams, users, currentRole }) {
+function UsersView({ areas, error, groups, loading, onBulk, onCreate, onCreateArea, onCreateGroup, onCreateTeam, onCreateRequestType, onEdit, onEditArea, onEditGroup, onEditTeam, onEditRequestType, onResetPassword, onRetry, requestTypes, teams, users, currentRole }) {
   const [query, setQuery] = useState("");
   const [role, setRole] = useState("Todos");
   const [tab, setTab] = useState("usuarios");
@@ -1363,7 +1389,7 @@ function UsersView({ areas, error, groups, loading, onCreate, onCreateArea, onCr
 
   return (
     <>
-      <PageHeader eyebrow="Administración" title="Administración" description="Gestiona personas, grupos, catálogos y accesos. Los roles son asignables por administrador y las credenciales se restablecen desde aquí." action={tab === "usuarios" ? <button className="primary-button" type="button" onClick={onCreate}><Icon name="plus" size={18} /> Nuevo usuario</button> : tab === "tipos" ? <button className="primary-button" type="button" onClick={onCreateRequestType}><Icon name="plus" size={18} /> Nuevo tipo</button> : tab === "areas" ? <button className="primary-button" type="button" onClick={onCreateArea}><Icon name="plus" size={18} /> Nueva área</button> : <button className="primary-button" type="button" onClick={onCreateGroup}><Icon name="plus" size={18} /> Nuevo grupo</button>} />
+      <PageHeader eyebrow="Administración" title="Administración" description="Gestiona personas, grupos, catálogos y accesos. Los roles son asignables por administrador y las credenciales se restablecen desde aquí." action={tab === "usuarios" ? <div style={{ display: "flex", gap: "8px" }}><button className="secondary-button" type="button" onClick={onBulk}><Icon name="upload" size={18} /> Carga masiva</button><button className="primary-button" type="button" onClick={onCreate}><Icon name="plus" size={18} /> Nuevo usuario</button></div> : tab === "tipos" ? <button className="primary-button" type="button" onClick={onCreateRequestType}><Icon name="plus" size={18} /> Nuevo tipo</button> : tab === "areas" ? <button className="primary-button" type="button" onClick={onCreateArea}><Icon name="plus" size={18} /> Nueva área</button> : <button className="primary-button" type="button" onClick={onCreateGroup}><Icon name="plus" size={18} /> Nuevo grupo</button>} />
       {error && <ApiConnectionError message={error} onRetry={onRetry} />}
       {currentRole !== "SUPERVISOR" && <div className="admin-tabs" role="tablist">
         <button className={tab === "usuarios" ? "selected" : ""} type="button" role="tab" aria-selected={tab === "usuarios"} onClick={() => setTab("usuarios")}><Icon name="users" size={16} /> Usuarios <span>{users.length}</span></button>
@@ -1508,6 +1534,41 @@ function AreaFormModal({ area, onClose, onSave }) {
   return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="ticket-modal user-modal" role="dialog" aria-modal="true" aria-labelledby="area-form-title" onMouseDown={(e) => e.stopPropagation()}><header className="modal-header"><div><p className="eyebrow">Catálogo de escalamiento</p><h2 id="area-form-title">{isNew ? "Nueva área" : "Editar área"}</h2><p>Define las áreas externas a las que se puede escalar (Tier3, NOC, etc.).</p></div><button className="icon-button" type="button" aria-label="Cerrar" onClick={onClose}><Icon name="close" /></button></header><form onSubmit={submit}><div className="form-grid user-form-grid"><label className="field field-wide"><span>Nombre <b>*</b></span><input autoFocus required name="name" value={form.name} onChange={updateField} placeholder="NOC" /></label></div><label className="active-user-toggle"><input checked={form.isActive} name="isActive" type="checkbox" onChange={updateField} /><span><i /></span><div><strong>Área activa</strong><small>Visible al escalar.</small></div></label>{error && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}<footer className="modal-actions"><button className="secondary-button" disabled={submitting} type="button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={submitting} type="submit"><Icon name="check" size={18} /> {submitting ? "Guardando..." : isNew ? "Crear área" : "Guardar cambios"}</button></footer></form></section></div>;
 }
 
+function BulkUserModal({ onClose, onUpload }) {
+  const [file, setFile] = useState(null);
+  const [error, setError] = useState("");
+  const [result, setResult] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  function downloadTemplate() {
+    const csv = "email,first_name,last_name,role,teams\nana@tigo.com.gt,Ana,Perez,SOPORTE,soporte-a;soporte-b\njuan@tigo.com.gt,Juan,Lopez,DESPACHADOR,tigo\n";
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "plantilla_usuarios.csv";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async function submit(e) {
+    e.preventDefault();
+    if (!file) { setError("Selecciona el archivo CSV."); return; }
+    setSubmitting(true);
+    setError("");
+    try {
+      const res = await onUpload(file);
+      setResult(res);
+    } catch (err) {
+      setError(err.message || "No fue posible procesar el archivo.");
+      setSubmitting(false);
+    }
+  }
+
+  return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="ticket-modal user-modal" role="dialog" aria-modal="true" aria-labelledby="bulk-title" onMouseDown={(e) => e.stopPropagation()}><header className="modal-header"><div><p className="eyebrow">Carga masiva</p><h2 id="bulk-title">Crear usuarios por CSV</h2><p>Columnas: email,first_name,last_name,role,teams (códigos separados por ;). Se envía invitación por correo para definir contraseña.</p></div><button className="icon-button" type="button" aria-label="Cerrar" onClick={onClose}><Icon name="close" /></button></header>{!result ? <form onSubmit={submit}><div className="form-grid user-form-grid"><label className="field field-wide"><span>Archivo CSV <b>*</b></span><input type="file" accept=".csv,text/csv" onChange={(e) => setFile(e.target.files?.[0] || null)} /></label></div><div style={{ display: "flex", gap: "8px", marginTop: "12px" }}><button className="secondary-button" type="button" onClick={downloadTemplate}>Descargar plantilla</button></div>{error && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}<footer className="modal-actions"><button className="secondary-button" disabled={submitting} type="button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={submitting} type="submit"><Icon name="upload" size={18} /> {submitting ? "Procesando..." : "Cargar"}</button></footer></form> : <div style={{ padding: "19px 25px" }}><p className="form-success" role="status"><Icon name="checkCircle" size={16} /> {result.creados.length} creados, {result.errores.length} con error.</p>{result.creados.length > 0 && <div className="table-summary"><span><b>{result.creados.length}</b> invitaciones enviadas</span></div>}{result.errores.length > 0 && <div className="users-table-wrap"><table className="users-table"><thead><tr><th>Fila</th><th>Correo</th><th>Error</th></tr></thead><tbody>{result.errores.map((r, i) => <tr key={i}><td>{r.fila}</td><td>{r.email}</td><td>{r.error}</td></tr>)}</tbody></table></div>}<footer className="modal-actions"><button className="primary-button" type="button" onClick={onClose}>Cerrar</button></footer></div>}</section></div>;
+}
+
 function PasswordResetModal({ onClose, onSave, user }) {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -1630,6 +1691,7 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onDeesca
     setAttachError("");
   }
   const [reassignTeam, setReassignTeam] = useState("");
+  const [draggingAttach, setDraggingAttach] = useState(false);
   const [rejectComment, setRejectComment] = useState("");
   const [showReject, setShowReject] = useState(false);
   const canTake = currentUser.role === "SOPORTE" && ["ABIERTO", "ASIGNADO"].includes(ticket.statusCode);
@@ -1687,7 +1749,10 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onDeesca
   function handleAttachPaste(event) {
     const files = Array.from(event.clipboardData?.files || []).filter((f) => f.type.startsWith("image/"));
     if (!files.length) return;
+    const tag = (event.target?.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea") return;
     event.preventDefault();
+    event.stopPropagation();
     pickAttachFiles(files, true);
   }
 
@@ -1713,7 +1778,7 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onDeesca
 
   return (
     <div className="modal-backdrop detail-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="ticket-detail-modal" role="dialog" aria-modal="true" aria-labelledby="ticket-detail-title" onMouseDown={(event) => event.stopPropagation()}>
+      <section className="ticket-detail-modal" role="dialog" aria-modal="true" aria-labelledby="ticket-detail-title" onMouseDown={(event) => event.stopPropagation()} onPaste={handleAttachPaste}>
         <header className="detail-header">
           <div><span className="ticket-id">{ticket.id}</span><h2 id="ticket-detail-title">{ticket.title}</h2><p>{ticket.category} · Creado {ticket.created}</p></div>
           <div className="detail-header-actions"><span className={`status-pill ${statusClass[ticket.status]}`}>{ticket.status}</span><button className="icon-button" type="button" aria-label="Cerrar detalle" onClick={onClose}><Icon name="close" /></button></div>
@@ -1724,7 +1789,7 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onDeesca
             <section className="detail-section"><span className="detail-label">Descripción reportada</span><p className="detail-description">{ticket.description || "Sin descripción adicional."}</p></section>
             {ticket.resolutionNotes && <section className="detail-section solution-detail"><span className="detail-label"><Icon name="checkCircle" size={15} /> Solución registrada</span><p>{ticket.resolutionNotes}</p></section>}
             {ticket.statusCode === "ESCALADO" && <section className="detail-section solution-detail"><span className="detail-label"><Icon name="upload" size={15} /> Escalado a {ticket.areaEscalada || "—"}{ticket.tiempoEscaladoMin != null ? ` · lleva ${formatDuracion(ticket.tiempoEscaladoMin)}` : ""}</span>{ticket.motivoEscalamiento && <p><b>Motivo (soporte):</b> {ticket.motivoEscalamiento}</p>}{ticket.instruccionesDespacho ? <p><b>Instrucciones para despacho:</b> {ticket.instruccionesDespacho}</p> : <p>Soporte aún no deja instrucciones para despacho.</p>}</section>}
-            <section className="detail-section"><div className="detail-section-heading"><span className="detail-label">Evidencia adjunta</span><span>{ticket.attachments.length}/5</span></div>{ticket.attachments.length ? <div className="attachment-list">{ticket.attachments.map((attachment) => <a href={attachment.url} key={attachment.id} rel="noreferrer" target="_blank"><img src={attachment.url} alt={attachment.original_name} style={{ width: "52px", height: "52px", objectFit: "cover", borderRadius: "6px", flex: "0 0 auto" }} onError={(e) => { e.target.style.display = "none"; }} /><span><strong>{attachment.original_name}</strong><small>{Math.max(1, Math.round(attachment.size / 1024))} KB · {formatDateTime(attachment.created_at)}{["PENDIENTE", "PROCESANDO"].includes(attachment.ocr_estado) ? " · Procesando texto…" : attachment.ocr_estado === "FALLIDO" ? " · OCR no disponible" : ""}</small></span><Icon name="arrowRight" size={15} /></a>)}</div> : <p className="detail-empty">No hay evidencia adjunta.</p>}{canAttach && <form className="detail-attach-form" onSubmit={submitAttach} onPaste={handleAttachPaste}><label className={`upload-box small ${attachError ? "has-error" : ""}`}><input type="file" accept=".jpg,.jpeg,.png" multiple onChange={handleAttach} /><Icon name="upload" size={16} /><span>{attachList.length ? `${attachList.length} ${attachList.length === 1 ? "imagen" : "imágenes"}` : "Adjuntar o pegar (Ctrl+V)"}</span></label><button className="secondary-button" disabled={uploading || !attachFile} type="submit">{uploading ? "Subiendo..." : "Adjuntar"}</button></form>}{attachList.length > 0 && <div className="attach-preview-grid">{attachList.map((f, i) => <div className="attach-preview" key={`${f.name}-${f.size}-${i}`}><img src={attachPreviews[i]} alt={f.name} /><span title={f.name}>{f.name}</span><button type="button" aria-label={`Quitar ${f.name}`} onClick={() => removeAttachFile(i)}>✕</button></div>)}</div>}{attachError && <p className="form-submit-error" role="alert"><Icon name="alert" size={14} /> {attachError}</p>}</section>
+            <section className="detail-section"><div className="detail-section-heading"><span className="detail-label">Evidencia adjunta</span><span>{ticket.attachments.length}/5</span></div>{ticket.attachments.length ? <div className="attachment-list">{ticket.attachments.map((attachment) => <a href={attachment.url} key={attachment.id} rel="noreferrer" target="_blank"><img src={attachment.url} alt={attachment.original_name} style={{ width: "52px", height: "52px", objectFit: "cover", borderRadius: "6px", flex: "0 0 auto" }} onError={(e) => { e.target.style.display = "none"; }} /><span><strong>{attachment.original_name}</strong><small>{Math.max(1, Math.round(attachment.size / 1024))} KB · {formatDateTime(attachment.created_at)}{["PENDIENTE", "PROCESANDO"].includes(attachment.ocr_estado) ? " · Procesando texto…" : attachment.ocr_estado === "FALLIDO" ? " · OCR no disponible" : ""}</small></span><Icon name="arrowRight" size={15} /></a>)}</div> : <p className="detail-empty">No hay evidencia adjunta.</p>}{canAttach && <form className="detail-attach-form" onSubmit={submitAttach} onPaste={handleAttachPaste}><label className={`upload-box small ${draggingAttach ? "dragging" : ""} ${attachError ? "has-error" : ""}`} onDragOver={(e) => { e.preventDefault(); setDraggingAttach(true); }} onDragLeave={() => setDraggingAttach(false)} onDrop={(e) => { e.preventDefault(); setDraggingAttach(false); const files = Array.from(e.dataTransfer?.files || []).filter((f) => f.type.startsWith("image/") || /\.(jpe?g|png)$/i.test(f.name)); if (files.length) pickAttachFiles(files, true); }}><input type="file" accept=".jpg,.jpeg,.png" multiple onChange={handleAttach} /><Icon name="upload" size={16} /><span>{attachList.length ? `${attachList.length} ${attachList.length === 1 ? "imagen" : "imágenes"}` : "Adjuntar, arrastrar o pegar (Ctrl+V)"}</span></label><button className="secondary-button" disabled={uploading || !attachFile} type="submit">{uploading ? "Subiendo..." : "Adjuntar"}</button></form>}{attachList.length > 0 && <div className="attach-preview-grid">{attachList.map((f, i) => <div className="attach-preview" key={`${f.name}-${f.size}-${i}`}><img src={attachPreviews[i]} alt={f.name} /><span title={f.name}>{f.name}</span><button type="button" aria-label={`Quitar ${f.name}`} onClick={() => removeAttachFile(i)}>✕</button></div>)}</div>}{attachError && <p className="form-submit-error" role="alert"><Icon name="alert" size={14} /> {attachError}</p>}</section>
             <section className="detail-section history-section"><div className="detail-section-heading"><span className="detail-label">Historial del ticket</span><span>{ticket.events.length}</span></div>{ticket.events.length ? <ol className="ticket-history">{ticket.events.map((event) => <li key={event.id}><span className="history-dot" /><div><strong>{event.event_label}</strong><p>{event.comment || `${event.actor?.name || "Sistema"} actualizó el ticket.`}</p><small>{event.actor?.name || "Sistema"} · {formatDateTime(event.created_at)}</small></div></li>)}</ol> : <p className="detail-empty">Aún no hay eventos registrados.</p>}</section>
           </div>
           <aside className="detail-sidebar">
@@ -1766,6 +1831,7 @@ function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
   const [idError, setIdError] = useState("");
   const [clientError, setClientError] = useState("");
   const attachList = attachment ? (Array.isArray(attachment) ? attachment : [attachment]) : [];
+  const [dragging, setDragging] = useState(false);
   const [previews, setPreviews] = useState([]);
   useEffect(() => {
     const urls = attachList.map((f) => URL.createObjectURL(f));
@@ -1867,15 +1933,26 @@ function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
   function handlePaste(event) {
     const files = Array.from(event.clipboardData?.files || []).filter((f) => f.type.startsWith("image/"));
     if (!files.length) return;
+    const tag = (event.target?.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea") return;
     event.preventDefault();
+    event.stopPropagation();
     pickFiles(files, true);
+  }
+
+  function handleDropZone(event, append) {
+    event.preventDefault();
+    setDragging(false);
+    const files = Array.from(event.dataTransfer?.files || []).filter((f) => f.type.startsWith("image/") || /\.(jpe?g|png)$/i.test(f.name));
+    if (files.length) pickFiles(files, append);
   }
 
   async function submit(event) {
     event.preventDefault();
     const idValue = (form.kind === "TECNICO" ? form.numeroOt : form.contrato).trim();
     const idOk = validateNumero(form.kind === "TECNICO" ? form.numeroOt : form.contrato, idLabel);
-    const clientOk = validateCliente(form.cliente);
+    const needsClient = form.kind !== "TECNICO";
+    const clientOk = !needsClient || validateCliente(form.cliente);
     if (!idValue) {
       setIdError(`Debes indicar ${idLabel === "OT" ? "la OT" : "el Contrato"}.`);
       setSubmitError("Revisa los campos marcados en rojo.");
@@ -1911,7 +1988,7 @@ function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="ticket-modal" role="dialog" aria-modal="true" aria-labelledby="new-ticket-title" onMouseDown={(event) => event.stopPropagation()}>
+      <section className="ticket-modal" role="dialog" aria-modal="true" aria-labelledby="new-ticket-title" onMouseDown={(event) => event.stopPropagation()} onPaste={handlePaste}>
         <header className="modal-header"><div><p className="eyebrow">Nueva solicitud</p><h2 id="new-ticket-title">Crear ticket de soporte</h2><p>Elige el tipo de solicitud y completa los campos.</p></div><button className="icon-button" type="button" aria-label="Cerrar formulario" onClick={onClose}><Icon name="close" /></button></header>
         <form onSubmit={submit}>
           <div className="auto-assignment"><Icon name="shield" size={19} /><div><span>Enrutamiento automático</span><strong>{session.groupsLabel || session.group} · Soporte Despacho</strong></div></div>
@@ -1920,14 +1997,13 @@ function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
             <label className="field"><span>Tipo de servicio <b>*</b></span><select required name="service" value={form.service} onChange={updateField} disabled={!form.kind}><option value="">Seleccionar</option>{services.map((s) => <option key={s} value={s}>{s}</option>)}</select></label>
             <label className="field field-wide"><span>Solicitud específica <b>*</b></span><select required name="tipoId" value={form.tipoId} onChange={updateField} disabled={!form.service}><option value="">Seleccionar</option>{options.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select></label>
             <label className="field"><span>{idLabel} <b>*</b></span><input required name={idField} inputMode="numeric" value={form[idField]} onChange={updateField} onBlur={() => { checkDuplicate(); }} disabled={!canFillDetails} placeholder="Solo números" />{idError && <small className="field-error">{idError}</small>}</label>
-            <label className="field"><span>Prioridad</span><input disabled value="Media (automática)" /></label>
-            <label className="field"><span>Nombre Cliente <b>*</b></span><input required name="cliente" value={form.cliente} onChange={updateField} onBlur={(e) => validateCliente(e.target.value)} disabled={!canFillDetails} placeholder="Nombre del cliente" />{clientError && <small className="field-error">{clientError}</small>}</label>
-            <label className="field"><span>Nodo <b>*</b></span><input required name="nodo" value={form.nodo} onChange={updateField} disabled={!canFillDetails} placeholder="Nodo" /></label>
+            {form.kind !== "TECNICO" && <label className="field"><span>Nombre Cliente <b>*</b></span><input required name="cliente" value={form.cliente} onChange={updateField} onBlur={(e) => validateCliente(e.target.value)} disabled={!canFillDetails} placeholder="Nombre del cliente" />{clientError && <small className="field-error">{clientError}</small>}</label>}
+            {form.kind !== "TECNICO" && <label className="field"><span>Nodo <b>*</b></span><input required name="nodo" value={form.nodo} onChange={updateField} disabled={!canFillDetails} placeholder="Nodo" /></label>}
             <label className="field field-wide"><span>Comentarios <b>*</b></span><textarea required name="description" value={form.description} onChange={updateField} disabled={!canFillDetails} rows="4" placeholder="Detalle del caso, síntomas, ubicación o pasos ya realizados." /></label>
           </div>
           {checking && <p className="form-info" role="status">Verificando {idLabel}...</p>}
           {duplicate && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> Ya existe {duplicate.reference} abierto con este {idLabel} ({duplicate.status_label}). <button type="button" className="text-button" onClick={() => onOpenTicket && onOpenTicket(duplicate.id)}>Ver ticket y documentarlo ahí</button></p>}
-          <div className="attachment-section" onPaste={handlePaste}><div><span>Adjuntar evidencia</span><small>JPG o PNG, máximo 5 MB, hasta 5 imágenes — o pega con Ctrl+V</small></div><label className={`upload-box ${attachmentError ? "has-error" : ""}`}><input type="file" accept=".jpg,.jpeg,.png" multiple onChange={handleAttachment} /><Icon name="upload" size={20} /><span>{attachList.length ? `${attachList.length} ${attachList.length === 1 ? "imagen" : "imágenes"}` : "Seleccionar o pegar imagen"}</span></label>{attachmentError && <p className="field-error">{attachmentError}</p>}</div>
+          <div className="attachment-section"><div><span>Adjuntar evidencia</span><small>JPG o PNG, máximo 5 MB, hasta 5 imágenes — clic, arrastra aquí o pega con Ctrl+V en el formulario</small></div><label className={`upload-box ${dragging ? "dragging" : ""} ${attachmentError ? "has-error" : ""}`} onDragOver={(e) => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={(e) => handleDropZone(e, attachList.length > 0)}><input type="file" accept=".jpg,.jpeg,.png" multiple onChange={handleAttachment} /><Icon name="upload" size={20} /><span>{attachList.length ? `${attachList.length} ${attachList.length === 1 ? "imagen" : "imágenes"}` : "Seleccionar, arrastrar o pegar imagen"}</span></label>{attachmentError && <p className="field-error">{attachmentError}</p>}</div>
           {attachList.length > 0 && <div className="attach-preview-grid">{attachList.map((f, i) => <div className="attach-preview" key={`${f.name}-${f.size}-${i}`}><img src={previews[i]} alt={f.name} /><span title={f.name}>{f.name}</span><button type="button" aria-label={`Quitar ${f.name}`} onClick={() => removeAttachment(i)}>✕</button></div>)}</div>}
           {submitError && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> {submitError}</p>}
           <footer className="modal-actions"><button className="secondary-button" disabled={submitting} type="button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={submitting} type="submit"><Icon name="ticket" size={18} /> {submitting ? "Enviando..." : "Enviar a soporte"}</button></footer>

@@ -22,6 +22,26 @@ from .serializers import CurrentUserSerializer, TeamSerializer, UserSerializer, 
 password_reset_token_generator = PasswordResetTokenGenerator()
 
 
+def send_invitation_email(user):
+    uid = urlsafe_base64_encode(force_bytes(user.pk))
+    token = password_reset_token_generator.make_token(user)
+    reset_link = f"{settings.FRONTEND_URL.rstrip('/')}/reset-password?uid={uid}&token={token}"
+    subject = "Soporte Despacho Tigo - Activa tu cuenta"
+    html_message = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; background: #f3f6ff; border-radius: 12px;">
+      <h2 style="color: #001eb4; margin: 0 0 12px;">Hola {user.display_name},</h2>
+      <p style="color: #0f1a4a; font-size: 14px; line-height: 1.6;">Se creó tu cuenta en <b>Soporte Despacho Tigo</b>. Define tu contraseña para iniciar sesión.</p>
+      <p style="text-align: center; margin: 28px 0;">
+        <a href="{reset_link}" style="display: inline-block; padding: 12px 28px; background: #001eb4; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 700; font-size: 14px;">Definir mi contraseña</a>
+      </p>
+      <p style="color: #5a658d; font-size: 12px;">Este botón es válido por 1 hora. Si vence, pide un nuevo enlace con "¿Olvidaste tu contraseña?".</p>
+    </div>
+    """
+    message = f"Hola {user.display_name},\n\nDefine tu contraseña aquí: {reset_link}\n\nVálido por 1 hora."
+    send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [user.email], fail_silently=False, html_message=html_message)
+    return reset_link
+
+
 class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
     username_field = "email"
 
@@ -255,3 +275,65 @@ class UserViewSet(viewsets.ModelViewSet):
             if new_mgroups is not None and new_mgroups:
                 raise ValidationError({"managed_groups": "Solo un administrador puede asignar grupos supervisados."})
         serializer.save()
+
+
+class BulkUserUploadView(APIView):
+    permission_classes = [IsAdministrator]
+
+    def post(self, request):
+        import csv
+        import io
+        import re
+
+        upload = request.FILES.get("file")
+        if not upload:
+            raise ValidationError({"file": "Adjunta el archivo CSV."})
+        if upload.size > 1024 * 1024:
+            raise ValidationError({"file": "El archivo supera 1 MB."})
+        try:
+            content = upload.read().decode("utf-8-sig")
+        except Exception:
+            raise ValidationError({"file": "El archivo debe ser CSV en UTF-8."})
+        reader = csv.DictReader(io.StringIO(content))
+        required = {"email", "first_name", "last_name", "role", "teams"}
+        if not reader.fieldnames or not required.issubset({h.strip().lower() for h in reader.fieldnames if h}):
+            raise ValidationError({"file": "Columnas requeridas: email,first_name,last_name,role,teams (teams = códigos separados por ;)."})
+        creados, errores = [], []
+        for i, row in enumerate(reader, start=2):
+            row = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
+            email = row.get("email", "").lower()
+            try:
+                if not email or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+                    raise ValueError("Correo inválido.")
+                if User.objects.filter(email__iexact=email).exists():
+                    raise ValueError("El correo ya existe.")
+                role = (row.get("role") or "").upper()
+                if role not in dict(User.Role.choices):
+                    raise ValueError(f"Rol inválido ({role}). Usa DESPACHADOR, SOPORTE, SUPERVISOR o ADMIN.")
+                team_codes = [c.strip() for c in (row.get("teams") or "").replace("|", ";").split(";") if c.strip()]
+                teams = list(Team.objects.filter(code__in=team_codes)) if team_codes else []
+                if team_codes and len(teams) != len(set(team_codes)):
+                    faltan = sorted(set(team_codes) - {t.code for t in teams})
+                    raise ValueError(f"Equipos inexistentes: {', '.join(faltan)}.")
+                if role in {User.Role.DISPATCHER, User.Role.SUPPORT} and not teams:
+                    raise ValueError("Despachador/Soporte requiere al menos un equipo.")
+                user = User(
+                    username=email,
+                    email=email,
+                    first_name=row.get("first_name", "")[:30],
+                    last_name=row.get("last_name", "")[:30],
+                    role=role,
+                    is_active=True,
+                )
+                user.set_unusable_password()
+                user.save()
+                if teams:
+                    user.teams.set(teams)
+                try:
+                    send_invitation_email(user)
+                    creados.append({"fila": i, "email": email, "invitacion": "enviada"})
+                except Exception:
+                    creados.append({"fila": i, "email": email, "invitacion": "falló el correo"})
+            except Exception as exc:
+                errores.append({"fila": i, "email": email or "—", "error": str(exc)})
+        return Response({"creados": creados, "errores": errores, "total": len(creados) + len(errores)})

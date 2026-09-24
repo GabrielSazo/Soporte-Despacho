@@ -2,7 +2,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
 
-from .views import CurrentUserView, EmailTokenObtainPairView, LogoutView, PasswordResetConfirmView, PasswordResetRequestView, PublicPasswordResetView, TeamViewSet, UserViewSet, WorkGroupViewSet
+from .views import BulkUserUploadView, CurrentUserView, EmailTokenObtainPairView, LogoutView, PasswordResetConfirmView, PasswordResetRequestView, PublicPasswordResetView, TeamViewSet, UserViewSet, WorkGroupViewSet
 
 
 router = DefaultRouter()
@@ -17,5 +17,6 @@ urlpatterns = [
     path("auth/logout/", LogoutView.as_view(), name="logout"),
     path("auth/password-reset/", PasswordResetRequestView.as_view(), name="password_reset"),
     path("auth/password-reset/confirm/", PasswordResetConfirmView.as_view(), name="password_reset_confirm"),
+    path("users/bulk/", BulkUserUploadView.as_view(), name="users_bulk"),
     path("", include(router.urls)),
 ]

@@ -159,6 +159,12 @@ export function getUsers() {
   return request("/users/");
 }
 
+export function bulkCreateUsers(file) {
+  const form = new FormData();
+  form.append("file", file);
+  return request("/users/bulk/", { method: "POST", body: form });
+}
+
 export function getTeams() {
   return request("/teams/");
 }
