@@ -291,10 +291,21 @@ class BulkUserUploadView(APIView):
         if upload.size > 1024 * 1024:
             raise ValidationError({"file": "El archivo supera 1 MB."})
         try:
-            content = upload.read().decode("utf-8-sig")
+            raw = upload.read()
         except Exception:
+            raise ValidationError({"file": "No se pudo leer el archivo."})
+        content = None
+        for encoding in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+            try:
+                content = raw.decode(encoding)
+                break
+            except Exception:
+                continue
+        if content is None:
             raise ValidationError({"file": "El archivo debe ser CSV en UTF-8."})
-        reader = csv.DictReader(io.StringIO(content))
+        first_line = (content.splitlines() or [""])[0]
+        delimiter = ";" if first_line.count(";") > first_line.count(",") else ","
+        reader = csv.DictReader(io.StringIO(content), delimiter=delimiter)
         required = {"email", "first_name", "last_name", "role", "teams"}
         if not reader.fieldnames or not required.issubset({h.strip().lower() for h in reader.fieldnames if h}):
             raise ValidationError({"file": "Columnas requeridas: email,first_name,last_name,role,teams (teams = códigos separados por ;)."})
