@@ -1377,6 +1377,7 @@ function TeamView({ currentUser, onlineIds, onNotify, tickets, users }) {
 
 function ReportsView({ groups, onNotify }) {
   const [filters, setFilters] = useState({ group: "", service: "", from: "", to: "" });
+  const [range, setRange] = useState("todo");
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -1413,6 +1414,23 @@ function ReportsView({ groups, onNotify }) {
 
   function update(name, value) {
     setFilters((f) => ({ ...f, [name]: value }));
+    if (name === "from" || name === "to") setRange("custom");
+  }
+
+  const toISO = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+  function applyRange(value) {
+    setRange(value);
+    const now = new Date();
+    if (value === "todo") {
+      setFilters((f) => ({ ...f, from: "", to: "" }));
+    } else {
+      const from = new Date(now);
+      if (value === "hoy") from.setHours(0, 0, 0, 0);
+      if (value === "semana") from.setDate(from.getDate() - 7);
+      if (value === "mes") from.setMonth(from.getMonth() - 1);
+      setFilters((f) => ({ ...f, from: toISO(from), to: toISO(now) }));
+    }
   }
 
   const kpis = summary?.kpis || {};
@@ -1443,6 +1461,7 @@ function ReportsView({ groups, onNotify }) {
       <PageHeader eyebrow="Indicadores operativos" title="El turno en cifras" description="Filtra por grupo, servicio y fecha. AHT = tiempo promedio de atención (tomado → resuelto)." action={<button className="primary-button" type="button" disabled={downloading} onClick={download}><Icon name="upload" size={18} /> {downloading ? "Descargando..." : "Descargar CSV"}</button>} />
       <article className="panel" style={{ padding: "16px 20px", marginBottom: "17px" }}>
         <div className="form-grid" style={{ marginTop: 0 }}>
+          <label className="field"><span>Rango</span><select value={range} onChange={(e) => applyRange(e.target.value)} aria-label="Rango de fechas"><option value="todo">Todo</option><option value="hoy">Hoy</option><option value="semana">Esta semana</option><option value="mes">Este mes</option><option value="custom">Personalizado</option></select></label>
           <label className="field"><span>Grupo</span><select value={filters.group} onChange={(e) => update("group", e.target.value)}><option value="">Todos</option>{(groups || []).map((g) => <option key={g.id} value={g.code}>{g.name}</option>)}</select></label>
           <label className="field"><span>Tipo servicio</span><select value={filters.service} onChange={(e) => update("service", e.target.value)}><option value="">Todos</option><option value="HFC">HFC</option><option value="FTTH">FTTH</option><option value="WTTX">WTTX</option><option value="DTH">DTH</option></select></label>
           <label className="field"><span>Desde</span><input type="date" value={filters.from} onChange={(e) => update("from", e.target.value)} /></label>
