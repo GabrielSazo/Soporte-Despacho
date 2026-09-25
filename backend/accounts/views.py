@@ -278,7 +278,8 @@ class UserViewSet(viewsets.ModelViewSet):
             return qs
         if user.is_supervisor:
             codes = user.group_codes
-            return qs.filter(teams__group__code__in=codes).distinct() | qs.filter(managed_groups__code__in=codes).distinct() | qs.filter(pk=user.pk).distinct()
+            base = qs.filter(teams__group__code__in=codes).distinct() | qs.filter(managed_groups__code__in=codes).distinct()
+            return base.exclude(role__in=[User.Role.ADMIN, User.Role.SUPERVISOR]).exclude(is_superuser=True)
         codes = user.group_codes
         if codes:
             return qs.filter(teams__group__code__in=codes).distinct() | qs.filter(pk=user.pk).distinct()
