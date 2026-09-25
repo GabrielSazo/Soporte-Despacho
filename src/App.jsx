@@ -1309,6 +1309,7 @@ function TeamView({ currentUser, onlineIds, onNotify, tickets, users }) {
     return null;
   })();
   const inRange = (t) => !rangeFrom || new Date(t.createdAt) >= rangeFrom;
+  const peopleByName = new Map();
   const isSupView = currentUser.role === "SUPERVISOR";
   const myCodes = new Set([...(currentUser.groups || []).map((g) => g.code), ...((currentUser.teams || []).map((t) => t.group?.code || t.group))].filter(Boolean));
   const inScope = (u) => {
