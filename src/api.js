@@ -197,6 +197,12 @@ export function bulkCreateUsers(file) {
   return request("/users/bulk/", { method: "POST", body: form });
 }
 
+export function getAuditLogs(params = {}) {
+  const cleaned = Object.fromEntries(Object.entries(params).filter(([, v]) => v));
+  const qs = new URLSearchParams(cleaned).toString();
+  return requestAll(`/audit-logs/${qs ? `?${qs}` : ""}`, { maxPages: 4 });
+}
+
 export function getTeams() {
   return request("/teams/");
 }

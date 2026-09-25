@@ -47,6 +47,7 @@ services:
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost}
     volumes:
       - media:/app/media
+      - static:/app/staticfiles
     depends_on:
       postgres:
         condition: service_healthy
@@ -90,9 +91,11 @@ services:
       - "80:80"
     volumes:
       - media:/srv/media:ro
+      - static:/srv/static:ro
     depends_on:
       - api
 
 volumes:
   postgres_data:
   media:
+  static:

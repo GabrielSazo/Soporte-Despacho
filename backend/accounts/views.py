@@ -15,9 +15,9 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 
-from .models import Team, User, WorkGroup
+from .models import AuditLog, Team, User, WorkGroup
 from .permissions import IsAdministrator, IsAdminOrSupervisor
-from .serializers import CurrentUserSerializer, TeamSerializer, UserSerializer, WorkGroupSerializer
+from .serializers import AuditLogSerializer, CurrentUserSerializer, TeamSerializer, UserSerializer, WorkGroupSerializer
 
 password_reset_token_generator = PasswordResetTokenGenerator()
 
@@ -138,6 +138,18 @@ class WorkGroupViewSet(viewsets.ModelViewSet):
             return [IsAuthenticated()]
         return [IsAdministrator()]
 
+    def perform_create(self, serializer):
+        obj = serializer.save()
+        from .audit import audit
+        from .models import AuditLog
+        audit(self.request.user, AuditLog.Action.CATALOG_CREATED, entidad="grupo", entidad_id=str(obj.pk), detalle=obj.name, request=self.request)
+
+    def perform_update(self, serializer):
+        obj = serializer.save()
+        from .audit import audit
+        from .models import AuditLog
+        audit(self.request.user, AuditLog.Action.CATALOG_EDITED, entidad="grupo", entidad_id=str(obj.pk), detalle=obj.name, request=self.request)
+
 
 class TeamViewSet(viewsets.ModelViewSet):
     queryset = Team.objects.select_related("group").all()
@@ -147,6 +159,18 @@ class TeamViewSet(viewsets.ModelViewSet):
         if self.action in ["list", "retrieve"]:
             return [IsAuthenticated()]
         return [IsAdministrator()]
+
+    def perform_create(self, serializer):
+        obj = serializer.save()
+        from .audit import audit
+        from .models import AuditLog
+        audit(self.request.user, AuditLog.Action.CATALOG_CREATED, entidad="equipo", entidad_id=str(obj.pk), detalle=obj.name, request=self.request)
+
+    def perform_update(self, serializer):
+        obj = serializer.save()
+        from .audit import audit
+        from .models import AuditLog
+        audit(self.request.user, AuditLog.Action.CATALOG_EDITED, entidad="equipo", entidad_id=str(obj.pk), detalle=obj.name, request=self.request)
 
 
 class PasswordResetRequestView(APIView):
@@ -183,6 +207,9 @@ class PasswordResetRequestView(APIView):
         message = f"Hola {user.display_name},\n\nRestablece tu contraseña aquí: {reset_link}\n\nVálido por 1 hora."
         send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [user.email], fail_silently=False, html_message=html_message)
 
+        from .audit import audit
+        from .models import AuditLog
+        audit(None, AuditLog.Action.PASSWORD_RESET_REQUESTED, entidad="usuario", entidad_id=str(user.pk), detalle=user.email, request=request)
         response_data = {"detail": "Se envió un correo con instrucciones para restablecer tu contraseña. Revisa tu bandeja de entrada."}
         if settings.DEBUG:
             response_data["debug_token"] = token
@@ -216,6 +243,9 @@ class PasswordResetConfirmView(APIView):
         user.set_password(new_password)
         user.save(update_fields=["password"])
         user.unlock_via_password_reset()
+        from .audit import audit
+        from .models import AuditLog
+        audit(None, AuditLog.Action.PASSWORD_RESET_DONE, entidad="usuario", entidad_id=str(user.pk), detalle=user.email, request=request)
         return Response({"detail": "Contraseña restablecida correctamente. Cuenta desbloqueada. Ya puedes iniciar sesión."})
 
 
@@ -234,6 +264,12 @@ class UserViewSet(viewsets.ModelViewSet):
         if self.action in ["partial_update", "update"]:
             return [IsAdminOrSupervisor()]
         return [IsAdministrator()]
+
+    def perform_create(self, serializer):
+        from .audit import audit
+        from .models import AuditLog
+        obj = serializer.save()
+        audit(self.request.user, AuditLog.Action.USER_CREATED, entidad="usuario", entidad_id=str(obj.pk), detalle=f"{obj.email} ({obj.get_role_display()})", request=self.request)
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -274,7 +310,19 @@ class UserViewSet(viewsets.ModelViewSet):
             new_mgroups = serializer.validated_data.get("managed_groups")
             if new_mgroups is not None and new_mgroups:
                 raise ValidationError({"managed_groups": "Solo un administrador puede asignar grupos supervisados."})
+        old_role, old_active = target.role, target.is_active
         serializer.save()
+        from .audit import audit
+        from .models import AuditLog
+        new_role, new_active = target.role, target.is_active
+        if old_role != new_role:
+            audit(self.request.user, AuditLog.Action.ROLE_CHANGED, entidad="usuario", entidad_id=str(target.pk), detalle=f"{target.email}: {old_role} → {new_role}", request=self.request)
+        elif old_active and not new_active:
+            audit(self.request.user, AuditLog.Action.USER_DEACTIVATED, entidad="usuario", entidad_id=str(target.pk), detalle=target.email, request=self.request)
+        elif not old_active and new_active:
+            audit(self.request.user, AuditLog.Action.USER_ACTIVATED, entidad="usuario", entidad_id=str(target.pk), detalle=target.email, request=self.request)
+        else:
+            audit(self.request.user, AuditLog.Action.USER_EDITED, entidad="usuario", entidad_id=str(target.pk), detalle=target.email, request=self.request)
 
 
 class BulkUserUploadView(APIView):
@@ -347,4 +395,30 @@ class BulkUserUploadView(APIView):
                     creados.append({"fila": i, "email": email, "invitacion": "falló el correo"})
             except Exception as exc:
                 errores.append({"fila": i, "email": email or "—", "error": str(exc)})
+        from .audit import audit
+        from .models import AuditLog
+        audit(request.user, AuditLog.Action.BULK_UPLOAD, entidad="usuarios", detalle=f"Carga masiva: {len(creados)} creados, {len(errores)} con error.", request=request)
         return Response({"creados": creados, "errores": errores, "total": len(creados) + len(errores)})
+
+
+class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = AuditLog.objects.select_related("actor").all()
+    serializer_class = AuditLogSerializer
+    permission_classes = [IsAdministrator]
+    http_method_names = ["get", "head", "options"]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        action = self.request.query_params.get("action")
+        search = self.request.query_params.get("search")
+        date_from = self.request.query_params.get("from")
+        date_to = self.request.query_params.get("to")
+        if action:
+            queryset = queryset.filter(action=action)
+        if date_from:
+            queryset = queryset.filter(created_at__date__gte=date_from)
+        if date_to:
+            queryset = queryset.filter(created_at__date__lte=date_to)
+        if search:
+            queryset = queryset.filter(detalle__icontains=search) | queryset.filter(actor__email__icontains=search)
+        return queryset.distinct()

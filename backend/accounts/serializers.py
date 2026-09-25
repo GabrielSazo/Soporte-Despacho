@@ -1,6 +1,15 @@
 from rest_framework import serializers
 
-from .models import Team, User, WorkGroup
+from .models import AuditLog, Team, User, WorkGroup
+
+
+class AuditLogSerializer(serializers.ModelSerializer):
+    actor_name = serializers.CharField(source="actor.display_name", read_only=True, default="")
+    action_label = serializers.CharField(source="get_action_display", read_only=True)
+
+    class Meta:
+        model = AuditLog
+        fields = ["id", "actor", "actor_name", "action", "action_label", "entidad", "entidad_id", "detalle", "ip", "created_at"]
 
 
 class WorkGroupSerializer(serializers.ModelSerializer):

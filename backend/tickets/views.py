@@ -40,6 +40,18 @@ class RequestTypeViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(is_active=active.lower() in {"1", "true", "yes"})
         return queryset
 
+    def perform_create(self, serializer):
+        from accounts.audit import audit
+        from accounts.models import AuditLog
+        obj = serializer.save()
+        audit(self.request.user, AuditLog.Action.CATALOG_CREATED, entidad="tipo", entidad_id=str(obj.pk), detalle=obj.name, request=self.request)
+
+    def perform_update(self, serializer):
+        from accounts.audit import audit
+        from accounts.models import AuditLog
+        obj = serializer.save()
+        audit(self.request.user, AuditLog.Action.CATALOG_EDITED, entidad="tipo", entidad_id=str(obj.pk), detalle=obj.name, request=self.request)
+
 
 class EscalationAreaViewSet(viewsets.ModelViewSet):
     queryset = EscalationArea.objects.all()
@@ -56,13 +68,20 @@ class EscalationAreaViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         if not request.user.is_administrator:
             raise PermissionDenied("Solo administración puede gestionar el catálogo.")
-        return super().create(request, *args, **kwargs)
+        response = super().create(request, *args, **kwargs)
+        from accounts.audit import audit
+        from accounts.models import AuditLog
+        audit(request.user, AuditLog.Action.CATALOG_CREATED, entidad="area", detalle="Área de escalamiento creada", request=request)
+        return response
 
     def partial_update(self, request, *args, **kwargs):
         if not request.user.is_administrator:
             raise PermissionDenied("Solo administración puede gestionar el catálogo.")
-        return super().partial_update(request, *args, **kwargs)
-
+        response = super().partial_update(request, *args, **kwargs)
+        from accounts.audit import audit
+        from accounts.models import AuditLog
+        audit(request.user, AuditLog.Action.CATALOG_EDITED, entidad="area", detalle="Área de escalamiento editada", request=request)
+        return response
 
 class TicketViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
@@ -425,6 +444,9 @@ class ReportsExportView(APIView):
         import csv
         from django.http import HttpResponse
 
+        from accounts.audit import audit
+        from accounts.models import AuditLog
+        audit(request.user, AuditLog.Action.REPORT_EXPORTED, entidad="reporte", detalle=f"Filtros: grupo={request.query_params.get('group', '')} servicio={request.query_params.get('service', '')} desde={request.query_params.get('from', '')} hasta={request.query_params.get('to', '')}", request=request)
         tickets = _filter_reports(request, visible_tickets_for(request.user)).select_related(
             "creator", "origin_team__group", "assigned_team__group", "assignee", "tipo_solicitud"
         ).prefetch_related("events__actor").order_by("created_at", "id")
