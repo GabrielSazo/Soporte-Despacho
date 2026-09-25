@@ -153,6 +153,21 @@ function compressImageFile(file, maxSide = 1600, quality = 0.82) {
   });
 }
 
+function extractClipboardImages(event) {
+  const clipboard = event.clipboardData;
+  if (!clipboard) return [];
+  const fromItems = Array.from(clipboard.items || [])
+    .filter((item) => item.type && item.type.startsWith("image/"))
+    .map((item) => item.getAsFile())
+    .filter(Boolean);
+  const fromFiles = Array.from(clipboard.files || []).filter((f) => f.type && f.type.startsWith("image/"));
+  const all = [...fromItems];
+  for (const f of fromFiles) {
+    if (!all.some((x) => x.name === f.name && x.size === f.size && x.lastModified === f.lastModified)) all.push(f);
+  }
+  return all;
+}
+
 function mapUser(user) {
   const teams = user.teams || (user.team ? [user.team] : []);
   const firstTeam = teams[0];
@@ -216,6 +231,7 @@ function mapTicket(ticket) {
     team: ticket.assigned_team?.group?.name || ticket.assigned_team?.name || "Sin asignar",
     teamId: ticket.assigned_team?.id || null,
     groupCode: ticket.assigned_team?.group?.code || null,
+    originGroupCode: ticket.origin_team?.group?.code || null,
     identificador: ticket.contrato || ticket.numero_ot || "",
     contrato: ticket.contrato || "",
     numeroOt: ticket.numero_ot || "",
@@ -547,10 +563,27 @@ function App() {
     notify(`${ticket.id} quedó asignado a tu atención.`);
   }
 
-  async function resolveTicket(ticket, resolutionNotes) {
-    const updatedTicket = await resolveTicketRequest(ticket.apiId, resolutionNotes);
+  async function resolveTicket(ticket, resolutionNotes, solutionFiles = []) {
+    const notes = (resolutionNotes || "").trim();
+    const files = Array.isArray(solutionFiles) ? solutionFiles : solutionFiles ? [solutionFiles] : [];
+    const updatedTicket = await resolveTicketRequest(ticket.apiId, notes);
     replaceTicket(updatedTicket);
     setTicketToResolve(null);
+    if (files.length) {
+      const remaining = Math.max(0, 5 - (ticket.attachments?.length || 0));
+      let uploaded = 0;
+      for (const f of files.slice(0, remaining)) {
+        try {
+          await uploadAttachment(ticket.apiId, f);
+          uploaded += 1;
+        } catch {
+          break;
+        }
+      }
+      await refreshWorkspace(true);
+      notify(uploaded ? `${ticket.id} fue enviado a validación con ${uploaded} imagen${uploaded === 1 ? "" : "es"} de evidencia.` : `${ticket.id} fue enviado al despachador para validación.`);
+      return;
+    }
     await refreshWorkspace(true);
     notify(`${ticket.id} fue enviado al despachador para validación.`);
   }
@@ -936,7 +969,7 @@ const BASE_FAVICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/sv
             {activeView === "Resumen" && <Dashboard canCreate={canCreateTickets} criticalTickets={criticalTickets} dashboard={dashboard} onCreate={() => setNewTicketOpen(true)} onOpen={openTicketDetail} onShowTickets={() => setActiveView("Tickets")} tickets={tickets} validationTickets={validationTickets} />}
             {activeView === "Tickets" && <TicketsView canCreate={canCreateTickets} currentUser={session} filter={filter} filteredTickets={filteredTickets} onCreate={() => setNewTicketOpen(true)} onFilterChange={setFilter} onNotify={notify} onOpen={openTicketDetail} onResolve={setTicketToResolve} onTake={takeTicket} query={query} setQuery={setQuery} />}
             {activeView === "Validaciones" && <ValidationsView canValidate={["DESPACHADOR", "ADMIN"].includes(session.role)} tickets={validationTickets} onOpen={openTicketDetail} onValidate={validateTicket} />}
-            {activeView === "Escalados" && <EscalationsView canEscalate={["SOPORTE", "SUPERVISOR", "ADMIN"].includes(session.role)} tickets={escalatedTickets} onOpen={openTicketDetail} onDeescalate={deescalateTicket} />}
+            {activeView === "Escalados" && <EscalationsView currentUser={session} tickets={escalatedTickets} onOpen={openTicketDetail} onDeescalate={deescalateTicket} />}
             {activeView === "Mi grupo" && <TeamView currentUser={session} onlineIds={onlineIds} onNotify={notify} tickets={tickets} users={users} />}
             {activeView === "Informes" && <ReportsView groups={groups} onNotify={notify} />}
             {activeView === "Administración" && ["ADMIN","SUPERVISOR"].includes(session.role) && <UsersView areas={escalationAreas} currentRole={session.role} error={usersError} groups={groups} loading={usersLoading} onBulk={() => setBulkModal(true)} onCreate={() => setUserModal("new")} onCreateArea={() => setAreaModal("new")} onCreateGroup={() => setGroupModal("new")} onCreateTeam={() => setTeamModal("new")} onCreateRequestType={() => setRequestTypeModal("new")} onEdit={setUserModal} onEditArea={setAreaModal} onEditGroup={setGroupModal} onEditTeam={setTeamModal} onEditRequestType={setRequestTypeModal} onResetPassword={setPasswordModal} onRetry={refreshUsers} requestTypes={requestTypes} teams={teams} users={users} />}
@@ -1131,6 +1164,7 @@ function ValidationsView({ canValidate, tickets, onOpen, onValidate }) {
             <div className="validation-card-top"><span className="ticket-id">{ticket.id}</span><span className="status-pill status-validation">Validación</span></div>
             <h2>{ticket.title}</h2>
             <div className="solution-note"><Icon name="checkCircle" size={19} /><div><span>Solución de Soporte</span><p>{ticket.resolutionNotes || "Soporte marcó este caso como resuelto. Confirma el resultado en campo."}</p></div></div>
+            {ticket.attachments?.length > 0 && <div className="validation-evidence" onClick={(e) => e.stopPropagation()}><span>Evidencia de solución · {ticket.attachments.length} imagen{ticket.attachments.length === 1 ? "" : "es"}</span><div className="validation-thumbs">{ticket.attachments.map((a) => <a key={a.id} href={a.url} target="_blank" rel="noreferrer" title={a.original_name}><img src={a.url} alt={a.original_name} loading="lazy" onError={(e) => { e.target.style.display = "none"; }} /></a>)}</div></div>}
             <div className="validation-meta"><span><div className="avatar small-avatar">{initials(ticket.assignee)}</div> {ticket.assignee}</span><span><Icon name="clock" size={16} /> {ticket.created}</span></div>
             {rejectId === ticket.apiId && canValidate ? <div style={{ display: "grid", gap: "8px", marginTop: "10px" }} onClick={(e) => e.stopPropagation()}><textarea value={rejectComment} onChange={(e) => setRejectComment(e.target.value)} placeholder="Motivo del rechazo (obligatorio)" rows="3" style={{ width: "100%", border: "1px solid var(--line-strong)", borderRadius: "6px", padding: "8px", fontSize: "11px" }} /><div style={{ display: "flex", gap: "6px" }}><button className="secondary-button" disabled={!rejectComment.trim()} type="button" onClick={() => { onValidate(ticket, false, rejectComment); setRejectId(null); setRejectComment(""); }}>Confirmar rechazo</button><button className="secondary-button" type="button" onClick={() => { setRejectId(null); setRejectComment(""); }}>Cancelar</button></div></div> : canValidate ? <div className="validation-actions" onClick={(e) => e.stopPropagation()}><button className="secondary-button" type="button" onClick={() => setRejectId(ticket.apiId)}>Rechazar y devolver</button><button className="primary-button" type="button" onClick={() => onValidate(ticket, true)}><Icon name="check" size={17} /> Aprobar solución</button></div> : null}
             <div style={{ marginTop: "8px", fontSize: "10px", color: "var(--quiet)", textAlign: "center" }}>Clic para ver detalle →</div>
@@ -1145,7 +1179,14 @@ function EmptyEscalation() {
   return <article className="empty-validation"><span><Icon name="upload" size={28} /></span><h2>Sin escalamientos</h2><p>No hay tickets en escalamiento en este momento.</p></article>;
 }
 
-function EscalationsView({ canEscalate, tickets, onOpen, onDeescalate }) {
+function EscalationsView({ currentUser, tickets, onOpen, onDeescalate }) {
+  const myGroups = [...new Set([...((currentUser || {}).groups || []).map((g) => g.code), ...(((currentUser || {}).teams || []).map((t) => t.group?.code || t.group))])].filter(Boolean);
+  const canAct = (ticket) => {
+    if (!currentUser) return false;
+    if (currentUser.role === "ADMIN") return true;
+    if (currentUser.role !== "SOPORTE" && currentUser.role !== "SUPERVISOR") return false;
+    return [ticket.groupCode, ticket.originGroupCode].filter(Boolean).some((c) => myGroups.includes(c));
+  };
   return (
     <>
       <PageHeader
@@ -1161,7 +1202,7 @@ function EscalationsView({ canEscalate, tickets, onOpen, onDeescalate }) {
             <div className="solution-note"><Icon name="upload" size={19} /><div><span>Motivo</span><p>{ticket.motivoEscalamiento || "Sin motivo registrado."}</p></div></div>
             {ticket.instruccionesDespacho && <div className="solution-note" style={{ marginTop: "8px" }}><Icon name="checkCircle" size={19} /><div><span>Instrucciones de despacho</span><p>{ticket.instruccionesDespacho}</p></div></div>}
             <div className="validation-meta"><span><div className="avatar small-avatar">{initials(ticket.assignee)}</div> {ticket.assignee}</span><span><Icon name="clock" size={16} /> {ticket.tiempoEscaladoMin != null ? `Lleva ${formatDuracion(ticket.tiempoEscaladoMin)} escalado` : ticket.created}</span></div>
-            {canEscalate && <div className="validation-actions" onClick={(e) => e.stopPropagation()}><button className="primary-button" type="button" onClick={() => onDeescalate(ticket)}><Icon name="check" size={17} /> Recibida respuesta · continuar</button></div>}
+            {canAct(ticket) && <div className="validation-actions" onClick={(e) => e.stopPropagation()}><button className="primary-button" type="button" onClick={() => onDeescalate(ticket)}><Icon name="check" size={17} /> Recibida respuesta · continuar</button></div>}
             <div style={{ marginTop: "8px", fontSize: "10px", color: "var(--quiet)", textAlign: "center" }}>Clic para ver detalle →</div>
           </article>
         ))}
@@ -1636,15 +1677,67 @@ function ApiConnectionError({ message, onRetry }) {
 
 function ResolveTicketModal({ onClose, onResolve, ticket }) {
   const [resolutionNotes, setResolutionNotes] = useState("");
+  const [solutionFiles, setSolutionFiles] = useState([]);
+  const [solutionError, setSolutionError] = useState("");
+  const [draggingSolution, setDraggingSolution] = useState(false);
+  const [solutionPreviews, setSolutionPreviews] = useState([]);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  useEffect(() => {
+    const urls = solutionFiles.map((f) => URL.createObjectURL(f));
+    setSolutionPreviews(urls);
+    return () => urls.forEach((u) => URL.revokeObjectURL(u));
+  }, [solutionFiles]);
+
+  async function pickSolutionFiles(files, append = false) {
+    if (!files.length) return;
+    const current = append ? solutionFiles : solutionFiles;
+    const processed = [];
+    for (const f of files) processed.push(await compressImageFile(f));
+    const combined = [...current, ...processed];
+    const existing = ticket.attachments?.length || 0;
+    if (existing + combined.length > 5) {
+      setSolutionError(`Máximo 5 imágenes por ticket (este caso ya tiene ${existing}).`);
+      return;
+    }
+    for (const f of processed) {
+      if (f.size > 5 * 1024 * 1024) {
+        setSolutionError(`"${f.name}" supera 5 MB.`);
+        return;
+      }
+      if (!["image/jpeg", "image/jpg", "image/png"].includes(f.type) && !/\.jpe?g$|\.png$/i.test(f.name)) {
+        setSolutionError(`"${f.name}" no es JPG/PNG.`);
+        return;
+      }
+    }
+    setSolutionError("");
+    setSolutionFiles(combined.slice(0, Math.max(0, 5 - existing)));
+  }
+
+  function removeSolutionFile(index) {
+    setSolutionFiles((list) => list.filter((_, i) => i !== index));
+    setSolutionError("");
+  }
+
+  function handleSolutionPaste(event) {
+    const files = extractClipboardImages(event);
+    if (!files.length) return;
+    event.preventDefault();
+    event.stopPropagation();
+    pickSolutionFiles(files, true);
+  }
+
   async function submit(event) {
     event.preventDefault();
+    if (resolutionNotes.trim().length < 8) {
+      setError("Describe la solución con al menos 8 caracteres.");
+      return;
+    }
     setSubmitting(true);
     setError("");
     try {
-      await onResolve(ticket, resolutionNotes);
+      await onResolve(ticket, resolutionNotes.trim(), solutionFiles);
     } catch (requestError) {
       setError(requestError.message || "No fue posible enviar la solución.");
       setSubmitting(false);
@@ -1653,11 +1746,20 @@ function ResolveTicketModal({ onClose, onResolve, ticket }) {
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="ticket-modal resolution-modal" role="dialog" aria-modal="true" aria-labelledby="resolve-ticket-title" onMouseDown={(event) => event.stopPropagation()}>
+      <section className="ticket-modal resolution-modal" role="dialog" aria-modal="true" aria-labelledby="resolve-ticket-title" onMouseDown={(event) => event.stopPropagation()} onPaste={handleSolutionPaste}>
         <header className="modal-header"><div><p className="eyebrow">Resolución técnica</p><h2 id="resolve-ticket-title">Enviar a validación</h2><p>{ticket.id} volverá al despachador para confirmar la solución.</p></div><button className="icon-button" type="button" aria-label="Cerrar formulario" onClick={onClose}><Icon name="close" /></button></header>
         <form onSubmit={submit}>
           <div className="resolution-ticket"><span>{ticket.id}</span><strong>{ticket.title}</strong></div>
           <label className="field"><span>Solución aplicada <b>*</b></span><textarea autoFocus required minLength="8" name="resolutionNotes" value={resolutionNotes} onChange={(event) => setResolutionNotes(event.target.value)} rows="5" placeholder="Describe el diagnóstico, la acción aplicada y el resultado verificado." /></label>
+          <div className="field resolution-attach-field"><span>Evidencia fotográfica <small>(opcional · JPG/PNG · máx. 5 por ticket)</small></span>
+            <label className={`upload-box ${draggingSolution ? "dragging" : ""} ${solutionError ? "has-error" : ""}`} onDragOver={(e) => { e.preventDefault(); setDraggingSolution(true); }} onDragLeave={() => setDraggingSolution(false)} onDrop={(e) => { e.preventDefault(); setDraggingSolution(false); const files = Array.from(e.dataTransfer?.files || []).filter((f) => f.type.startsWith("image/") || /\.(jpe?g|png)$/i.test(f.name)); if (files.length) pickSolutionFiles(files, true); }}>
+              <input type="file" accept=".jpg,.jpeg,.png" multiple onChange={(e) => { pickSolutionFiles(Array.from(e.target.files || []), true); e.target.value = ""; }} />
+              <Icon name="upload" size={16} /><span>{solutionFiles.length ? `${solutionFiles.length} imagen${solutionFiles.length === 1 ? "" : "es"} lista${solutionFiles.length === 1 ? "" : "s"} para validación` : "Adjuntar, arrastrar o pegar (Ctrl+V)"}</span>
+            </label>
+            {solutionPreviews.length > 0 && <div className="attach-preview-grid">{solutionPreviews.map((url, i) => <div className="attach-preview" key={url}><img src={url} alt={solutionFiles[i]?.name || `evidencia ${i + 1}`} /><span>{solutionFiles[i]?.name}</span><button type="button" aria-label="Quitar imagen" onClick={() => removeSolutionFile(i)}>×</button></div>)}</div>}
+            {solutionError && <p className="field-error" role="alert">{solutionError}</p>}
+            <small className="field-hint">El asesor de despacho la verá en Validaciones y en el detalle del ticket.</small>
+          </div>
           {error && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}
           <footer className="modal-actions"><button className="secondary-button" disabled={submitting} type="button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={submitting} type="submit"><Icon name="checkCircle" size={18} /> {submitting ? "Enviando..." : "Enviar a validación"}</button></footer>
         </form>
@@ -1694,9 +1796,11 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onDeesca
   const canRelease = ["ASIGNADO", "EN_PROCESO"].includes(ticket.statusCode) && (ticket.assigneeId === currentUser.id || currentUser.role === "ADMIN" || (currentUser.role === "SUPERVISOR" && (currentUser.groups || []).map((g) => g.code).includes(ticket.groupCode)));
   const canResolve = currentUser.role === "SOPORTE" && ticket.statusCode === "EN_PROCESO";
   const canValidate = ((currentUser.role === "DESPACHADOR" && ticket.creatorId === currentUser.id) || currentUser.role === "ADMIN") && ticket.statusCode === "VALIDACION";
-  const canEscalate = ["SOPORTE", "SUPERVISOR", "ADMIN"].includes(currentUser.role) && ["ABIERTO", "ASIGNADO", "EN_PROCESO"].includes(ticket.statusCode);
-  const canDeescalate = ["SOPORTE", "SUPERVISOR", "ADMIN"].includes(currentUser.role) && ticket.statusCode === "ESCALADO";
-  const canInstruct = ["SOPORTE", "SUPERVISOR", "ADMIN"].includes(currentUser.role) && ticket.statusCode === "ESCALADO" && (ticket.assigneeId === currentUser.id || currentUser.role !== "SOPORTE" || currentUser.is_administrator);
+  const myGroupCodes = [...new Set([...(currentUser.groups || []).map((g) => g.code), ...((currentUser.teams || []).map((t) => t.group?.code || t.group))])].filter(Boolean);
+  const inTicketGroups = [ticket.groupCode, ticket.originGroupCode].filter(Boolean).some((c) => myGroupCodes.includes(c));
+  const canEscalate = (currentUser.role === "ADMIN" || ((currentUser.role === "SOPORTE" || currentUser.role === "SUPERVISOR") && inTicketGroups)) && ["ABIERTO", "ASIGNADO", "EN_PROCESO"].includes(ticket.statusCode);
+  const canDeescalate = (currentUser.role === "ADMIN" || ((currentUser.role === "SOPORTE" || currentUser.role === "SUPERVISOR") && inTicketGroups)) && ticket.statusCode === "ESCALADO";
+  const canInstruct = (currentUser.role === "ADMIN" || ((currentUser.role === "SOPORTE" || currentUser.role === "SUPERVISOR") && inTicketGroups)) && ticket.statusCode === "ESCALADO" && (ticket.assigneeId === currentUser.id || currentUser.role !== "SOPORTE" || currentUser.is_administrator);
   const [showInstruct, setShowInstruct] = useState(false);
   const [instructText, setInstructText] = useState("");
   const canAttach = currentUser.is_administrator || currentUser.role === "ADMIN" || ticket.requester === currentUser.name || (currentUser.role === "SOPORTE" && currentUser.team === ticket.team);
@@ -1743,10 +1847,8 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onDeesca
   }
 
   function handleAttachPaste(event) {
-    const files = Array.from(event.clipboardData?.files || []).filter((f) => f.type.startsWith("image/"));
+    const files = extractClipboardImages(event);
     if (!files.length) return;
-    const tag = (event.target?.tagName || "").toLowerCase();
-    if (tag === "input" || tag === "textarea") return;
     event.preventDefault();
     event.stopPropagation();
     pickAttachFiles(files, true);
@@ -1783,7 +1885,7 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onDeesca
           <div className="detail-main">
             <section className="detail-section"><div className="detail-section-heading"><span className="detail-label">Datos de la solicitud</span><span>{ticket.contrato || ticket.numeroOt}</span></div><div className="profile-details" style={{ padding: 0, marginTop: "10px" }}>{ticket.contrato && <div className="profile-row"><span>Contrato</span><span>{ticket.contrato}</span></div>}{ticket.numeroOt && <div className="profile-row"><span>OT</span><span>{ticket.numeroOt}</span></div>}{ticket.cliente && <div className="profile-row"><span>Cliente</span><span>{ticket.cliente}</span></div>}{ticket.nodo && <div className="profile-row"><span>Nodo</span><span>{ticket.nodo}</span></div>}{ticket.tipoSolicitud && <div className="profile-row"><span>Tipo</span><span>{ticket.tipoSolicitud}</span></div>}</div></section>
             <section className="detail-section"><span className="detail-label">Descripción reportada</span><p className="detail-description">{ticket.description || "Sin descripción adicional."}</p></section>
-            {ticket.resolutionNotes && <section className="detail-section solution-detail"><span className="detail-label"><Icon name="checkCircle" size={15} /> Solución registrada</span><p>{ticket.resolutionNotes}</p></section>}
+            {ticket.resolutionNotes && <section className="detail-section solution-detail"><span className="detail-label"><Icon name="checkCircle" size={15} /> Solución registrada</span><p>{ticket.resolutionNotes}</p>{ticket.attachments?.length > 0 && <div className="solution-evidence"><span>Evidencia de solución · {ticket.attachments.length} imagen{ticket.attachments.length === 1 ? "" : "es"}</span><div className="solution-thumbs">{ticket.attachments.map((a) => <a key={a.id} href={a.url} target="_blank" rel="noreferrer" title={a.original_name}><img src={a.url} alt={a.original_name} loading="lazy" onError={(e) => { e.target.style.display = "none"; }} /></a>)}</div></div>}</section>}
             {ticket.statusCode === "ESCALADO" && <section className="detail-section solution-detail"><span className="detail-label"><Icon name="upload" size={15} /> Escalado a {ticket.areaEscalada || "—"}{ticket.tiempoEscaladoMin != null ? ` · lleva ${formatDuracion(ticket.tiempoEscaladoMin)}` : ""}</span>{ticket.motivoEscalamiento && <p><b>Motivo (soporte):</b> {ticket.motivoEscalamiento}</p>}{ticket.instruccionesDespacho ? <p><b>Instrucciones para despacho:</b> {ticket.instruccionesDespacho}</p> : <p>Soporte aún no deja instrucciones para despacho.</p>}</section>}
             <section className="detail-section"><div className="detail-section-heading"><span className="detail-label">Evidencia adjunta</span><span>{ticket.attachments.length}/5</span></div>{ticket.attachments.length ? <div className="attachment-list">{ticket.attachments.map((attachment) => <a href={attachment.url} key={attachment.id} rel="noreferrer" target="_blank"><img src={attachment.url} alt={attachment.original_name} style={{ width: "52px", height: "52px", objectFit: "cover", borderRadius: "6px", flex: "0 0 auto" }} onError={(e) => { e.target.style.display = "none"; }} /><span><strong>{attachment.original_name}</strong><small>{Math.max(1, Math.round(attachment.size / 1024))} KB · {formatDateTime(attachment.created_at)}{["PENDIENTE", "PROCESANDO"].includes(attachment.ocr_estado) ? " · Procesando texto…" : attachment.ocr_estado === "FALLIDO" ? " · OCR no disponible" : ""}</small></span><Icon name="arrowRight" size={15} /></a>)}</div> : <p className="detail-empty">No hay evidencia adjunta.</p>}{canAttach && <form className="detail-attach-form" onSubmit={submitAttach} onPaste={handleAttachPaste}><label className={`upload-box small ${draggingAttach ? "dragging" : ""} ${attachError ? "has-error" : ""}`} onDragOver={(e) => { e.preventDefault(); setDraggingAttach(true); }} onDragLeave={() => setDraggingAttach(false)} onDrop={(e) => { e.preventDefault(); setDraggingAttach(false); const files = Array.from(e.dataTransfer?.files || []).filter((f) => f.type.startsWith("image/") || /\.(jpe?g|png)$/i.test(f.name)); if (files.length) pickAttachFiles(files, true); }}><input type="file" accept=".jpg,.jpeg,.png" multiple onChange={handleAttach} /><Icon name="upload" size={16} /><span>{attachList.length ? `${attachList.length} ${attachList.length === 1 ? "imagen" : "imágenes"}` : "Adjuntar, arrastrar o pegar (Ctrl+V)"}</span></label><button className="secondary-button" disabled={uploading || !attachFile} type="submit">{uploading ? "Subiendo..." : "Adjuntar"}</button></form>}{attachList.length > 0 && <div className="attach-preview-grid">{attachList.map((f, i) => <div className="attach-preview" key={`${f.name}-${f.size}-${i}`}><img src={attachPreviews[i]} alt={f.name} /><span title={f.name}>{f.name}</span><button type="button" aria-label={`Quitar ${f.name}`} onClick={() => removeAttachFile(i)}>✕</button></div>)}</div>}{attachError && <p className="form-submit-error" role="alert"><Icon name="alert" size={14} /> {attachError}</p>}</section>
             <section className="detail-section history-section"><div className="detail-section-heading"><span className="detail-label">Historial del ticket</span><span>{ticket.events.length}</span></div>{ticket.events.length ? <ol className="ticket-history">{ticket.events.map((event) => <li key={event.id}><span className="history-dot" /><div><strong>{event.event_label}</strong><p>{event.comment || `${event.actor?.name || "Sistema"} actualizó el ticket.`}</p><small>{event.actor?.name || "Sistema"} · {formatDateTime(event.created_at)}</small></div></li>)}</ol> : <p className="detail-empty">Aún no hay eventos registrados.</p>}</section>
@@ -1927,10 +2029,8 @@ function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
   }
 
   function handlePaste(event) {
-    const files = Array.from(event.clipboardData?.files || []).filter((f) => f.type.startsWith("image/"));
+    const files = extractClipboardImages(event);
     if (!files.length) return;
-    const tag = (event.target?.tagName || "").toLowerCase();
-    if (tag === "input" || tag === "textarea") return;
     event.preventDefault();
     event.stopPropagation();
     pickFiles(files, true);
