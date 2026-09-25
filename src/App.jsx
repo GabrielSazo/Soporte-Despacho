@@ -90,6 +90,12 @@ function initials(name = "") {
   return name.split(" ").filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "US";
 }
 
+function shortName(name = "") {
+  const parts = name.split(" ").filter(Boolean);
+  if (parts.length <= 2) return name;
+  return `${parts[0]} ${parts[2]}`;
+}
+
 function avatarClass(name = "") {
   if (name.includes("Andrea")) return "avatar-andrea";
   if (name.includes("Mario")) return "avatar-mario";
@@ -978,7 +984,7 @@ const BASE_FAVICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/sv
             </div>
             <div className="user-menu-wrapper">
               <button type="button" className="topbar-user" aria-label="Abrir menú de usuario" aria-expanded={showUserMenu} onClick={() => { setShowUserMenu((v) => !v); setShowNotifications(false); }}>
-                <div className={`avatar ${session.avatarClass}`}>{session.initials}</div><div><strong title={session.name}>{session.name}</strong><span>{session.team}</span></div><Icon name="chevronDown" size={15} style={{ transform: showUserMenu ? "rotate(180deg)" : "none", transition: "transform 150ms ease" }} />
+                <div className={`avatar ${session.avatarClass}`}>{session.initials}</div><div><strong title={session.name}>{shortName(session.name)}</strong><span>{session.team}</span></div><Icon name="chevronDown" size={15} style={{ transform: showUserMenu ? "rotate(180deg)" : "none", transition: "transform 150ms ease" }} />
               </button>
               {showUserMenu && (
                 <>
