@@ -70,10 +70,10 @@ const priorityClass = {
 };
 
 const roleLabels = {
-  DESPACHADOR: "Despachadora",
+  DESPACHADOR: "Despachador",
   SOPORTE: "Agente de soporte",
   SUPERVISOR: "Supervisor",
-  ADMIN: "Administradora",
+  ADMIN: "Administrador",
 };
 
 function readStoredSession() {
