@@ -5,5 +5,7 @@ __pycache__/
 *.py[cod]
 backend/db.sqlite3
 backend/media/
+backend/staticfiles/
 .env
 backend/.env
+Documento_Planificacion_Fase1_v1.2_Implementado.docx

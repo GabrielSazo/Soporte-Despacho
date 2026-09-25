@@ -40,7 +40,7 @@ services:
       dockerfile: backend/Dockerfile
     restart: unless-stopped
     command: >
-      sh -c "python manage.py migrate --noinput && python manage.py seed_demo && daphne -b 0.0.0.0 -p 8000 config.asgi:application"
+      sh -c "python manage.py migrate --noinput && python manage.py collectstatic --noinput || true && python manage.py seed_demo && daphne -b 0.0.0.0 -p 8000 config.asgi:application"
     environment:
       DJANGO_DEBUG: "true"
       DJANGO_SECRET_KEY: sestel-dev-secret-key-not-for-production

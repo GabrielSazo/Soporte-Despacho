@@ -95,6 +95,13 @@ class User(AbstractUser):
             from django.utils import timezone
             self.locked_at = timezone.now()
         self.save(update_fields=["failed_login_attempts", "locked_at"])
+        if self.failed_login_attempts == 5:
+            try:
+                from .audit import audit
+                from .models import AuditLog
+                audit(None, AuditLog.Action.ACCOUNT_LOCKED, entidad="usuario", entidad_id=str(self.pk), detalle=f"Cuenta bloqueada: {self.email}")
+            except Exception:
+                pass
 
     def reset_login_attempts(self):
         if self.failed_login_attempts or self.locked_at:
@@ -106,3 +113,36 @@ class User(AbstractUser):
         self.failed_login_attempts = 0
         self.locked_at = None
         self.save(update_fields=["failed_login_attempts", "locked_at"])
+
+
+class AuditLog(models.Model):
+    class Action(models.TextChoices):
+        USER_CREATED = "USUARIO_CREADO", "Usuario creado"
+        USER_EDITED = "USUARIO_EDITADO", "Usuario editado"
+        USER_DEACTIVATED = "USUARIO_DESACTIVADO", "Usuario desactivado"
+        USER_ACTIVATED = "USUARIO_ACTIVADO", "Usuario activado"
+        ROLE_CHANGED = "ROL_CAMBIADO", "Rol cambiado"
+        BULK_UPLOAD = "CARGA_MASIVA", "Carga masiva de usuarios"
+        PASSWORD_RESET_REQUESTED = "RESET_SOLICITADO", "Restablecimiento solicitado"
+        PASSWORD_RESET_DONE = "RESET_COMPLETADO", "Contraseña restablecida"
+        ACCOUNT_LOCKED = "CUENTA_BLOQUEADA", "Cuenta bloqueada"
+        CATALOG_CREATED = "CATALOGO_CREADO", "Catálogo creado"
+        CATALOG_EDITED = "CATALOGO_EDITADO", "Catálogo editado"
+        REPORT_EXPORTED = "REPORTE_DESCARGADO", "Reporte descargado"
+
+    actor = models.ForeignKey("accounts.User", on_delete=models.SET_NULL, null=True, blank=True, related_name="audit_logs")
+    action = models.CharField(max_length=30, choices=Action.choices, db_index=True)
+    entidad = models.CharField(max_length=60, blank=True, default="")
+    entidad_id = models.CharField(max_length=60, blank=True, default="")
+    detalle = models.TextField(blank=True, default="")
+    ip = models.CharField(max_length=45, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["action", "created_at"])]
+        verbose_name = "registro de auditoría"
+        verbose_name_plural = "registros de auditoría"
+
+    def __str__(self):
+        return f"{self.created_at:%d/%m %H:%M} - {self.get_action_display()} - {self.entidad}"

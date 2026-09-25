@@ -59,4 +59,9 @@ def require_validation_access(user, ticket):
     if user.is_administrator:
         return
     if ticket.creator_id != user.id:
-        raise PermissionDenied("Solo el despachador que creó el ticket puede validar la solución.")
+        if user.role == User.Role.SUPERVISOR:
+            origin_group = ticket.origin_team.group.code if ticket.origin_team_id else None
+            ticket_group = ticket.assigned_team.group.code if ticket.assigned_team_id else None
+            if origin_group in user.group_codes or ticket_group in user.group_codes:
+                return
+        raise PermissionDenied("Solo el despachador que creó el ticket, un supervisor de su grupo o administración puede validar la solución.")

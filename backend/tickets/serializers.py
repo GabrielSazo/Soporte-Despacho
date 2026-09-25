@@ -33,10 +33,11 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
     url = serializers.SerializerMethodField()
     file = serializers.FileField(write_only=True)
     ocr_estado_label = serializers.CharField(source="get_ocr_estado_display", read_only=True)
+    kind_label = serializers.CharField(source="get_kind_display", read_only=True)
 
     class Meta:
         model = TicketAttachment
-        fields = ["id", "file", "url", "original_name", "content_type", "size", "ocr_estado", "ocr_estado_label", "uploaded_by", "created_at"]
+        fields = ["id", "file", "url", "kind", "kind_label", "original_name", "content_type", "size", "ocr_estado", "ocr_estado_label", "uploaded_by", "created_at"]
         read_only_fields = ["original_name", "content_type", "size", "ocr_estado", "uploaded_by", "created_at"]
 
     def validate_file(self, file):
@@ -59,6 +60,7 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
         attachment = TicketAttachment.objects.create(
             ticket=ticket,
             file=file,
+            kind=validated_data.get("kind") or TicketAttachment.Kind.EVIDENCIA,
             original_name=file.name,
             content_type=getattr(file, "content_type", "application/octet-stream"),
             size=file.size,
@@ -187,10 +189,10 @@ class TicketCreateSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         user = self.context["request"].user
-        if not user.is_administrator and user.role != User.Role.DISPATCHER:
-            raise serializers.ValidationError("Solo un despachador puede registrar tickets.")
-        if not user.is_administrator and not user.teams.exists():
-            raise serializers.ValidationError("Tu cuenta no tiene un equipo asignado.")
+        if not user.is_administrator and user.role not in {User.Role.DISPATCHER, User.Role.SUPERVISOR}:
+            raise serializers.ValidationError("Solo un despachador o supervisor puede registrar tickets.")
+        if not user.teams.exists():
+            raise serializers.ValidationError("Tu cuenta no tiene un equipo asignado. Pide a un administrador que te asigne uno.")
         tipo = attrs.get("tipo_solicitud")
         kind = tipo.kind if tipo else None
         contrato = (attrs.get("contrato") or "").strip()
@@ -205,15 +207,11 @@ class TicketCreateSerializer(serializers.ModelSerializer):
         if not contrato and not numero_ot:
             raise serializers.ValidationError({"contrato": "Debes indicar el Contrato o la OT."})
         cliente = (attrs.get("cliente_nombre") or "").strip()
-        if not cliente:
-            raise serializers.ValidationError({"cliente_nombre": "Debes indicar el nombre del cliente."})
-        if not re.fullmatch(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9\s.\-,&()']+", cliente):
+        if cliente and not re.fullmatch(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9\s.\-,&()']+", cliente):
             raise serializers.ValidationError({"cliente_nombre": "Nombre inválido: solo letras, números, espacios y . , - & ( )."})
-        attrs["contrato"] = contrato
-        attrs["numero_ot"] = numero_ot
         attrs["cliente_nombre"] = cliente
-        if not (attrs.get("nodo") or "").strip():
-            raise serializers.ValidationError({"nodo": "Debes indicar el nodo."})
+        nodo = (attrs.get("nodo") or "").strip()
+        attrs["nodo"] = nodo
         abiertos = Ticket.objects.exclude(status=Ticket.Status.CLOSED)
         if contrato:
             existing = abiertos.filter(contrato=contrato).order_by("-created_at").first()

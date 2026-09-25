@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 
-from .models import Team, User, WorkGroup
+from .models import AuditLog, Team, User, WorkGroup
 
 
 @admin.register(WorkGroup)
@@ -32,3 +32,20 @@ class SestelUserAdmin(UserAdmin):
 
     list_display = ("username", "email", "first_name", "last_name", "role", "get_teams", "is_active")
     list_filter = ("role", "is_active")
+
+
+@admin.register(AuditLog)
+class AuditLogAdmin(admin.ModelAdmin):
+    list_display = ("created_at", "action", "actor", "entidad", "entidad_id", "detalle")
+    list_filter = ("action",)
+    search_fields = ("detalle", "entidad", "actor__email")
+    date_hierarchy = "created_at"
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return request.user.is_superuser

@@ -155,6 +155,24 @@ class TicketFlowTests(APITestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data["original_name"], "evidence.png")
 
+    def test_solution_evidence_has_own_limit(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        ticket = self.create_ticket_through_api()
+        self.client.force_authenticate(self.support)
+        for i in range(5):
+            evidence = SimpleUploadedFile(f"sol{i}.png", b"PNG test content", content_type="image/png")
+            response = self.client.post(
+                f"/api/tickets/{ticket.id}/attachments/", {"file": evidence, "kind": "SOLUCION"}, format="multipart"
+            )
+            self.assertEqual(response.status_code, 201)
+            self.assertEqual(response.data["kind"], "SOLUCION")
+        evidence = SimpleUploadedFile("sol5.png", b"PNG test content", content_type="image/png")
+        response = self.client.post(
+            f"/api/tickets/{ticket.id}/attachments/", {"file": evidence, "kind": "SOLUCION"}, format="multipart"
+        )
+        self.assertEqual(response.status_code, 400)
+
     def test_duplicate_contrato_or_ot_is_rejected(self):
         self.create_ticket_through_api(contrato="20001")
         self.client.force_authenticate(self.dispatcher)

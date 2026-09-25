@@ -158,6 +158,10 @@ class Ticket(models.Model):
 
 
 class TicketAttachment(models.Model):
+    class Kind(models.TextChoices):
+        EVIDENCIA = "EVIDENCIA", "Evidencia inicial"
+        SOLUCION = "SOLUCION", "Evidencia de solución"
+
     class OcrStatus(models.TextChoices):
         PENDING = "PENDIENTE", "Pendiente de OCR"
         PROCESSING = "PROCESANDO", "Procesando texto"
@@ -165,6 +169,7 @@ class TicketAttachment(models.Model):
         FAILED = "FALLIDO", "No se pudo extraer"
 
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="attachments")
+    kind = models.CharField(max_length=10, choices=Kind.choices, default=Kind.EVIDENCIA)
     file = models.FileField(upload_to="ticket_attachments/%Y/%m/%d/")
     original_name = models.CharField(max_length=255)
     content_type = models.CharField(max_length=100)

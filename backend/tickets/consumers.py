@@ -10,6 +10,19 @@ from rest_framework_simplejwt.exceptions import TokenError
 
 User = get_user_model()
 
+ONLINE_COUNTS = {}
+
+
+def online_user_ids():
+    return sorted(uid for uid, n in ONLINE_COUNTS.items() if n > 0)
+
+
+async def broadcast_presence(channel_layer, group_name="tickets_global"):
+    await channel_layer.group_send(
+        group_name,
+        {"type": "presence", "data": {"type": "presence", "user_ids": online_user_ids()}},
+    )
+
 @database_sync_to_async
 def get_user_from_token(token_str):
     try:
@@ -41,15 +54,31 @@ class TicketConsumer(AsyncWebsocketConsumer):
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()
         print(f"WSCONNECT /ws/tickets/ - {user} ({getattr(user, 'id', 'anon')})")
+        ONLINE_COUNTS[user.id] = ONLINE_COUNTS.get(user.id, 0) + 1
         await self.send(text_data=json.dumps({"type": "connected", "user": str(user)}))
+        await broadcast_presence(self.channel_layer, self.group_name)
 
     async def disconnect(self, close_code):
         if hasattr(self, "group_name"):
             await self.channel_layer.group_discard(self.group_name, self.channel_name)
+        user = getattr(self, "user", None)
+        if user and not getattr(user, "is_anonymous", True):
+            left = ONLINE_COUNTS.get(user.id, 1) - 1
+            if left <= 0:
+                ONLINE_COUNTS.pop(user.id, None)
+            else:
+                ONLINE_COUNTS[user.id] = left
+            try:
+                await broadcast_presence(self.channel_layer, getattr(self, "group_name", "tickets_global"))
+            except Exception:
+                pass
 
     async def receive(self, text_data=None, bytes_data=None):
         if text_data == "ping":
             await self.send(text_data="pong")
 
     async def ticket_update(self, event):
+        await self.send(text_data=json.dumps(event["data"]))
+
+    async def presence(self, event):
         await self.send(text_data=json.dumps(event["data"]))
