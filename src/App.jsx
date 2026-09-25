@@ -165,6 +165,34 @@ function extractClipboardImages(event) {
   return Array.from(clipboard.files || []).filter((f) => f.type && f.type.startsWith("image/"));
 }
 
+function pasteTableAsText(event, setValue) {
+  const cd = event.clipboardData;
+  if (!cd) return false;
+  let html = "";
+  try {
+    html = cd.getData("text/html");
+  } catch {
+    return false;
+  }
+  if (!html || !/<table/i.test(html)) return false;
+  try {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const lines = [...doc.querySelectorAll("tr")]
+      .map((tr) => [...tr.querySelectorAll("th,td")].map((c) => (c.innerText || "").trim()).filter(Boolean).join(": "))
+      .filter(Boolean);
+    if (!lines.length) return false;
+    const ta = event.target;
+    const start = ta.selectionStart ?? ta.value.length;
+    const end = ta.selectionEnd ?? start;
+    setValue(ta.value.slice(0, start) + lines.join("\n") + ta.value.slice(end));
+    event.preventDefault();
+    event.stopPropagation();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function mapUser(user) {
   const teams = user.teams || (user.team ? [user.team] : []);
   const firstTeam = teams[0];
@@ -1245,8 +1273,8 @@ function EscalateModal({ areas, onClose, onEscalate, ticket }) {
             <label className="field"><span>Área <b>*</b></span><select required value={areaId} onChange={(e) => setAreaId(e.target.value)}><option value="">Seleccionar</option>{(areas || []).filter((a) => a.is_active).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
             <label className="field"><span>Contrato</span><input name="contrato" inputMode="numeric" value={contrato} onChange={(e) => setContrato(e.target.value)} placeholder="Solo números" /></label>
             <label className="field"><span>OT</span><input name="numeroOt" inputMode="numeric" value={numeroOt} onChange={(e) => setNumeroOt(e.target.value)} placeholder="Solo números" /></label>
-            <label className="field field-wide"><span>Motivo <b>*</b></span><textarea required value={motivo} onChange={(e) => setMotivo(e.target.value)} rows="3" placeholder="Ej. Falla de planta externa, se requiere cuadrilla." /></label>
-            <label className="field field-wide"><span>Instrucciones para despacho</span><textarea value={instrucciones} onChange={(e) => setInstrucciones(e.target.value)} rows="2" placeholder="Ej. retirar al técnico y confirmar ventana." /></label>
+            <label className="field field-wide"><span>Motivo <b>*</b></span><textarea required value={motivo} onChange={(e) => setMotivo(e.target.value)} onPaste={(e) => { pasteTableAsText(e, setMotivo); }} rows="3" placeholder="Ej. Falla de planta externa, se requiere cuadrilla." /></label>
+            <label className="field field-wide"><span>Instrucciones para despacho</span><textarea value={instrucciones} onChange={(e) => setInstrucciones(e.target.value)} onPaste={(e) => { pasteTableAsText(e, setInstrucciones); }} rows="2" placeholder="Ej. retirar al técnico y confirmar ventana." /></label>
           </div>
           {error && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}
           <footer className="modal-actions"><button className="secondary-button" disabled={submitting} type="button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={submitting} type="submit"><Icon name="upload" size={18} /> {submitting ? "Escalando..." : "Escalar ticket"}</button></footer>
@@ -1752,7 +1780,7 @@ function ResolveTicketModal({ onClose, onResolve, ticket }) {
         <header className="modal-header"><div><p className="eyebrow">Resolución técnica</p><h2 id="resolve-ticket-title">Enviar a validación</h2><p>{ticket.id} volverá al despachador para confirmar la solución.</p></div><button className="icon-button" type="button" aria-label="Cerrar formulario" onClick={onClose}><Icon name="close" /></button></header>
         <form onSubmit={submit}>
           <div className="resolution-ticket"><span>{ticket.id}</span><strong>{ticket.title}</strong></div>
-          <label className="field"><span>Solución aplicada <b>*</b></span><textarea autoFocus required minLength="8" name="resolutionNotes" value={resolutionNotes} onChange={(event) => setResolutionNotes(event.target.value)} rows="5" placeholder="Describe el diagnóstico, la acción aplicada y el resultado verificado." /></label>
+          <label className="field"><span>Solución aplicada <b>*</b></span><textarea autoFocus required minLength="8" name="resolutionNotes" value={resolutionNotes} onChange={(event) => setResolutionNotes(event.target.value)} onPaste={(e) => { if (pasteTableAsText(e, setResolutionNotes)) return; const files = extractClipboardImages(e); if (files.length) { e.preventDefault(); e.stopPropagation(); pickSolutionFiles(files, true); } }} rows="5" placeholder="Describe el diagnóstico, la acción aplicada y el resultado verificado." /></label>
           <div className="field resolution-attach-field"><span>Evidencia fotográfica <small>(opcional · JPG/PNG · máx. 5 por ticket)</small></span>
             <label className={`upload-box ${draggingSolution ? "dragging" : ""} ${solutionError ? "has-error" : ""}`} onDragOver={(e) => { e.preventDefault(); setDraggingSolution(true); }} onDragLeave={() => setDraggingSolution(false)} onDrop={(e) => { e.preventDefault(); setDraggingSolution(false); const files = Array.from(e.dataTransfer?.files || []).filter((f) => f.type.startsWith("image/") || /\.(jpe?g|png)$/i.test(f.name)); if (files.length) pickSolutionFiles(files, true); }}>
               <input type="file" accept=".jpg,.jpeg,.png" multiple onChange={(e) => { pickSolutionFiles(Array.from(e.target.files || []), true); e.target.value = ""; }} />
@@ -1905,10 +1933,10 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onDeesca
               {canEscalate && <button className="secondary-button" type="button" onClick={() => onEscalate(ticket)}><Icon name="upload" size={16} /> Escalar</button>}
               {canDeescalate && <button className="primary-button" disabled={acting} type="button" onClick={() => runAction(onDeescalate)}>Recibida respuesta · continuar</button>}
               {canInstruct && !showInstruct && <button className="secondary-button" type="button" onClick={() => { setShowInstruct(true); setInstructText(ticket.instruccionesDespacho || ""); }}>Instruir a despacho</button>}
-              {canInstruct && showInstruct && <div style={{ display: "grid", gap: "6px", marginTop: "8px", width: "100%" }}><textarea value={instructText} onChange={(e) => setInstructText(e.target.value)} placeholder="Instrucciones para despacho (ej. retirar al técnico y confirmar ventana)" rows="3" style={{ width: "100%", border: "1px solid var(--line-strong)", borderRadius: "6px", padding: "8px", fontSize: "11px" }} /><div style={{ display: "flex", gap: "6px" }}><button className="secondary-button" disabled={acting || instructText.trim().length < 4} type="button" onClick={async () => { setActing(true); setActionError(""); try { await onInstruct(ticket, instructText.trim()); setShowInstruct(false); } catch (e) { setActionError(e.message || "No se pudo enviar."); } finally { setActing(false); } }}>Enviar instrucciones</button><button className="secondary-button" type="button" onClick={() => setShowInstruct(false)}>Cancelar</button></div></div>}
+              {canInstruct && showInstruct && <div style={{ display: "grid", gap: "6px", marginTop: "8px", width: "100%" }}><textarea value={instructText} onChange={(e) => setInstructText(e.target.value)} onPaste={(e) => { pasteTableAsText(e, setInstructText); }} placeholder="Instrucciones para despacho (ej. retirar al técnico y confirmar ventana)" rows="3" style={{ width: "100%", border: "1px solid var(--line-strong)", borderRadius: "6px", padding: "8px", fontSize: "11px" }} /><div style={{ display: "flex", gap: "6px" }}><button className="secondary-button" disabled={acting || instructText.trim().length < 4} type="button" onClick={async () => { setActing(true); setActionError(""); try { await onInstruct(ticket, instructText.trim()); setShowInstruct(false); } catch (e) { setActionError(e.message || "No se pudo enviar."); } finally { setActing(false); } }}>Enviar instrucciones</button><button className="secondary-button" type="button" onClick={() => setShowInstruct(false)}>Cancelar</button></div></div>}
               {canValidate && <>
                 <button className="primary-button" disabled={acting} type="button" onClick={() => runAction((t) => onValidate(t, true), true)}><Icon name="check" size={17} /> Aprobar solución</button>
-                {!showReject ? <button className="secondary-button" disabled={acting} type="button" onClick={() => setShowReject(true)}>Rechazar y devolver</button> : <div style={{ display: "grid", gap: "6px", marginTop: "8px", width: "100%" }}><textarea value={rejectComment} onChange={(e) => setRejectComment(e.target.value)} placeholder="Motivo del rechazo (obligatorio) — explica qué falta o por qué se devuelve" rows="3" style={{ width: "100%", border: "1px solid var(--line-strong)", borderRadius: "6px", padding: "8px", fontSize: "11px" }} /><div style={{ display: "flex", gap: "6px" }}><button className="secondary-button" disabled={acting || !rejectComment.trim()} type="button" onClick={async () => { setActing(true); setActionError(""); try { await onValidate(ticket, false, rejectComment); setShowReject(false); setRejectComment(""); } catch (e) { setActionError(e.message || "No se pudo rechazar."); } finally { setActing(false); } }}>Confirmar rechazo</button><button className="secondary-button" type="button" onClick={() => { setShowReject(false); setRejectComment(""); }}>Cancelar</button></div></div>}
+                {!showReject ? <button className="secondary-button" disabled={acting} type="button" onClick={() => setShowReject(true)}>Rechazar y devolver</button> : <div style={{ display: "grid", gap: "6px", marginTop: "8px", width: "100%" }}><textarea value={rejectComment} onChange={(e) => setRejectComment(e.target.value)} onPaste={(e) => { pasteTableAsText(e, setRejectComment); }} placeholder="Motivo del rechazo (obligatorio) — explica qué falta o por qué se devuelve" rows="3" style={{ width: "100%", border: "1px solid var(--line-strong)", borderRadius: "6px", padding: "8px", fontSize: "11px" }} /><div style={{ display: "flex", gap: "6px" }}><button className="secondary-button" disabled={acting || !rejectComment.trim()} type="button" onClick={async () => { setActing(true); setActionError(""); try { await onValidate(ticket, false, rejectComment); setShowReject(false); setRejectComment(""); } catch (e) { setActionError(e.message || "No se pudo rechazar."); } finally { setActing(false); } }}>Confirmar rechazo</button><button className="secondary-button" type="button" onClick={() => { setShowReject(false); setRejectComment(""); }}>Cancelar</button></div></div>}
               </>}
             </div>}
             {canReassign && <div className="detail-meta" style={{ marginTop: "14px" }}><span className="detail-label">Reasignar a persona del grupo</span><div style={{ display: "grid", gap: "6px", marginTop: "6px" }}><SearchSelect value={reassignTeam} onChange={setReassignTeam} options={candidates.map((u) => ({ value: String(u.id), label: u.name }))} placeholder="Escribe para filtrar…" ariaLabel="Reasignar a persona del grupo" /><button className="secondary-button" disabled={acting || !reassignTeam} type="button" style={{ minHeight: "34px", width: "100%" }} onClick={async () => { const attempt = ++reassignAttempt.current; setActing(true); setActionError(""); try { await onReassign(ticket, Number(reassignTeam)); if (reassignAttempt.current !== attempt) return; setReassignTeam(""); setActionError(""); } catch (e) { if (reassignAttempt.current !== attempt) return; setActionError(e.message || "No se pudo reasignar."); } finally { if (reassignAttempt.current === attempt) setActing(false); } }}>Mover</button></div>{candidates.length === 0 && <small style={{ color: "var(--quiet)", fontSize: "10px" }}>Sin agentes en este grupo.</small>}</div>}
@@ -2102,7 +2130,7 @@ function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
             <label className="field"><span>{idLabel} <b>*</b></span><input required name={idField} inputMode="numeric" value={form[idField]} onChange={updateField} onBlur={() => { checkDuplicate(); }} disabled={!canFillDetails} placeholder="Solo números" />{idError && <small className="field-error">{idError}</small>}</label>
             {form.kind !== "TECNICO" && <label className="field"><span>Nombre Cliente <b>*</b></span><input required name="cliente" value={form.cliente} onChange={updateField} onBlur={(e) => validateCliente(e.target.value)} disabled={!canFillDetails} placeholder="Nombre del cliente" />{clientError && <small className="field-error">{clientError}</small>}</label>}
             {form.kind !== "TECNICO" && <label className="field"><span>Nodo <b>*</b></span><input required name="nodo" value={form.nodo} onChange={updateField} disabled={!canFillDetails} placeholder="Nodo" /></label>}
-            <label className="field field-wide"><span>Comentarios <b>*</b></span><textarea required name="description" value={form.description} onChange={updateField} disabled={!canFillDetails} rows="4" placeholder="Detalle del caso, síntomas, ubicación o pasos ya realizados." /></label>
+            <label className="field field-wide"><span>Comentarios <b>*</b></span><textarea required name="description" value={form.description} onChange={updateField} onPaste={(e) => { if (pasteTableAsText(e, (v) => setForm((f) => ({ ...f, description: v })))) return; const files = extractClipboardImages(e); if (files.length) { e.preventDefault(); e.stopPropagation(); pickFiles(files, true); } }} disabled={!canFillDetails} rows="4" placeholder="Detalle del caso, síntomas, ubicación o pasos ya realizados." /></label>
           </div>
           {checking && <p className="form-info" role="status">Verificando {idLabel}...</p>}
           {duplicate && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> Ya existe {duplicate.reference} abierto con este {idLabel} ({duplicate.status_label}). <button type="button" className="text-button" onClick={() => onOpenTicket && onOpenTicket(duplicate.id)}>Ver ticket y documentarlo ahí</button></p>}
