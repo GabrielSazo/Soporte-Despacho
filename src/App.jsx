@@ -354,7 +354,12 @@ function App() {
 
   useEffect(() => {
     const closeOnEscape = (event) => {
-      if (event.key === "Escape") {
+      if (event.key !== "Escape") return;
+      if (lightbox) {
+        setLightbox(null);
+        return;
+      }
+      {
         setSidebarOpen(false);
         setNewTicketOpen(false);
         setTicketToResolve(null);
@@ -375,7 +380,7 @@ function App() {
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, []);
+  }, [lightbox]);
 
   useEffect(() => {
     document.body.style.overflow = sidebarOpen || newTicketOpen || ticketToResolve || ticketToEscalate || areaModal || ticketDetail || lightbox || userModal || bulkModal || teamModal || groupModal || passwordModal || showProfile ? "hidden" : "";
