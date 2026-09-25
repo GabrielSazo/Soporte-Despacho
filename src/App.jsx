@@ -1300,7 +1300,15 @@ function EscalateModal({ areas, onClose, onEscalate, ticket }) {
 
 function TeamView({ currentUser, onlineIds, onNotify, tickets, users }) {
   const [presenceFilter, setPresenceFilter] = useState("Todos");
-  const peopleByName = new Map();
+  const [dateRange, setDateRange] = useState("hoy");
+  const rangeFrom = (() => {
+    const now = new Date();
+    if (dateRange === "hoy") return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    if (dateRange === "semana") { const d = new Date(now); d.setDate(d.getDate() - 7); return d; }
+    if (dateRange === "mes") { const d = new Date(now); d.setMonth(d.getMonth() - 1); return d; }
+    return null;
+  })();
+  const inRange = (t) => !rangeFrom || new Date(t.createdAt) >= rangeFrom;
   const isSupView = currentUser.role === "SUPERVISOR";
   const myCodes = new Set([...(currentUser.groups || []).map((g) => g.code), ...((currentUser.teams || []).map((t) => t.group?.code || t.group))].filter(Boolean));
   const inScope = (u) => {
@@ -1326,18 +1334,19 @@ function TeamView({ currentUser, onlineIds, onNotify, tickets, users }) {
   });
   const matchActor = (e, person) => ((e.actor?.id && person.id && Number(e.actor.id) === Number(person.id)) || e.actor?.name === person.name);
   function statsFor(person) {
-    const creados = tickets.filter((t) => person.id ? t.creatorId === person.id : t.requester === person.name).length;
+    const inR = tickets.filter(inRange);
+    const creados = inR.filter((t) => person.id ? t.creatorId === person.id : t.requester === person.name).length;
     const pendientes = tickets.filter((t) => (person.id ? t.assigneeId === person.id : t.assignee === person.name) && t.statusCode !== "CERRADO").length;
     const validacion = tickets.filter((t) => (person.id ? t.creatorId === person.id : t.requester === person.name) && t.statusCode === "VALIDACION").length;
-    const cerrados = tickets.filter((t) => t.statusCode === "CERRADO" && (t.creatorId === person.id || t.assigneeId === person.id || (!person.id && (t.requester === person.name || t.assignee === person.name)))).length;
-    const resueltos = tickets.filter((t) => t.resolvedAt && (t.events || []).some((e) => e.event_type === "RESUELTO" && matchActor(e, person)));
+    const cerrados = inR.filter((t) => t.statusCode === "CERRADO" && (t.creatorId === person.id || t.assigneeId === person.id || (!person.id && (t.requester === person.name || t.assignee === person.name)))).length;
+    const resueltos = inR.filter((t) => t.resolvedAt && (t.events || []).some((e) => e.event_type === "RESUELTO" && matchActor(e, person)));
     const aht = resueltos.length ? resueltos.reduce((s, t) => s + (new Date(t.resolvedAt) - new Date(t.createdAt)) / 60000, 0) / resueltos.length : null;
     return { creados, pendientes, validacion, cerrados, aht };
   }
   const people = [...peopleByName.values()];
   return (
     <>
-      <PageHeader eyebrow="Disponibilidad del grupo" title="Personas que respaldan tu operación" description="La carga se calcula a partir de los tickets visibles para tu perfil y grupo." action={<label className="sort-select">Estado: <select value={presenceFilter} onChange={(e) => setPresenceFilter(e.target.value)} aria-label="Filtrar por estado"><option value="Todos">Todos</option><option value="En línea">En línea</option><option value="Ausente">Ausentes</option></select></label>} />
+      <PageHeader eyebrow="Disponibilidad del grupo" title="Personas que respaldan tu operación" description="Creados, cerrados y AHT respetan el rango; carga, pendientes y validación son actuales." action={<div style={{ display: "flex", gap: "8px" }}><label className="sort-select">Ver: <select value={dateRange} onChange={(e) => setDateRange(e.target.value)} aria-label="Rango de fechas"><option value="hoy">Hoy</option><option value="semana">Esta semana</option><option value="mes">Este mes</option><option value="todo">Siempre</option></select></label><label className="sort-select">Estado: <select value={presenceFilter} onChange={(e) => setPresenceFilter(e.target.value)} aria-label="Filtrar por estado"><option value="Todos">Todos</option><option value="En línea">En línea</option><option value="Ausente">Ausentes</option></select></label></div>} />
       <section className="team-grid">
         {people.length ? (
         <article className="panel users-panel" style={{ gridColumn: "1 / -1" }}>
