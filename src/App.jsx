@@ -1559,7 +1559,7 @@ function RequestTypeFormModal({ onClose, onSave, requestType, teams }) {
   const [submitting, setSubmitting] = useState(false);
   function updateField(e) { const { name, value, type, checked } = e.target; setForm((c) => ({ ...c, [name]: type === "checkbox" ? checked : value })); }
   async function submit(e) { e.preventDefault(); if (!form.name.trim()) { setError("Completa el nombre del tipo."); return; } setSubmitting(true); setError(""); try { await onSave({ ...form, teamId: form.teamId }, requestType); } catch (err) { setError(err.message || "No fue posible guardar el tipo."); setSubmitting(false); } }
-  return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="ticket-modal user-modal" role="dialog" aria-modal="true" aria-labelledby="rt-form-title" onMouseDown={(e) => e.stopPropagation()}><header className="modal-header"><div><p className="eyebrow">Catálogo de solicitudes</p><h2 id="rt-form-title">{isNew ? "Nuevo tipo" : "Editar tipo"}</h2><p>Define a qué solicitud y servicio aplica.</p></div><button className="icon-button" type="button" aria-label="Cerrar" onClick={onClose}><Icon name="close" /></button></header><form onSubmit={submit}><div className="form-grid user-form-grid"><label className="field"><span>Tipo de solicitud <b>*</b></span><select name="kind" value={form.kind} onChange={updateField}><option value="CLIENTE">Solicitud de Soporte Cliente</option><option value="TECNICO">Soporte Al Tecnico</option></select></label><label className="field"><span>Servicio <b>*</b></span><select name="service" value={form.service} onChange={updateField}><option value="HFC">HFC</option><option value="FTTH">FTTH</option><option value="WTTX">WTTX</option><option value="DTH">DTH</option></select></label><label className="field field-wide"><span>Nombre <b>*</b></span><input autoFocus required name="name" value={form.name} onChange={updateField} placeholder="ONT sin VLAN" /></label><label className="field field-wide"><span>Equipo que atiende</span><select name="teamId" value={form.teamId} onChange={updateField}><option value="">Automático (por grupo origen)</option>{(teams || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label></div><label className="active-user-toggle"><input checked={form.isActive} name="isActive" type="checkbox" onChange={updateField} /><span><i /></span><div><strong>Tipo activo</strong><small>Visible en el formulario.</small></div></label>{error && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}<footer className="modal-actions"><button className="secondary-button" disabled={submitting} type="button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={submitting} type="submit"><Icon name="check" size={18} /> {submitting ? "Guardando..." : isNew ? "Crear tipo" : "Guardar cambios"}</button></footer></form></section></div>;
+  return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="ticket-modal user-modal" role="dialog" aria-modal="true" aria-labelledby="rt-form-title" onMouseDown={(e) => e.stopPropagation()}><header className="modal-header"><div><p className="eyebrow">Catálogo de solicitudes</p><h2 id="rt-form-title">{isNew ? "Nuevo tipo" : "Editar tipo"}</h2><p>Define a qué solicitud y servicio aplica.</p></div><button className="icon-button" type="button" aria-label="Cerrar" onClick={onClose}><Icon name="close" /></button></header><form onSubmit={submit}><div className="form-grid user-form-grid"><label className="field"><span>Tipo de solicitud <b>*</b></span><select name="kind" value={form.kind} onChange={updateField}><option value="CLIENTE">Solicitud de Soporte Cliente</option><option value="TECNICO">Soporte Al Tecnico</option></select></label><label className="field"><span>Servicio <b>*</b></span><select name="service" value={form.service} onChange={updateField}><option value="HFC">HFC</option><option value="FTTH">FTTH</option><option value="WTTX">WTTX</option><option value="DTH">DTH</option></select></label><label className="field field-wide"><span>Nombre <b>*</b></span><input autoFocus required name="name" value={form.name} onChange={updateField} placeholder="ONT sin VLAN" /></label><label className="field field-wide"><span>Equipo que atiende</span><SearchSelect value={form.teamId} onChange={(v) => updateField({ target: { name: "teamId", value: v } })} options={(teams || []).map((t) => ({ value: String(t.id), label: `${t.name} · ${t.group_detail?.name || t.group?.name || ""}` }))} placeholder="Automático (por grupo origen)" ariaLabel="Equipo que atiende" /></label></div><label className="active-user-toggle"><input checked={form.isActive} name="isActive" type="checkbox" onChange={updateField} /><span><i /></span><div><strong>Tipo activo</strong><small>Visible en el formulario.</small></div></label>{error && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}<footer className="modal-actions"><button className="secondary-button" disabled={submitting} type="button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={submitting} type="submit"><Icon name="check" size={18} /> {submitting ? "Guardando..." : isNew ? "Crear tipo" : "Guardar cambios"}</button></footer></form></section></div>;
 }
 
 function AreaFormModal({ area, onClose, onSave }) {
@@ -1911,7 +1911,7 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onDeesca
                 {!showReject ? <button className="secondary-button" disabled={acting} type="button" onClick={() => setShowReject(true)}>Rechazar y devolver</button> : <div style={{ display: "grid", gap: "6px", marginTop: "8px", width: "100%" }}><textarea value={rejectComment} onChange={(e) => setRejectComment(e.target.value)} placeholder="Motivo del rechazo (obligatorio) — explica qué falta o por qué se devuelve" rows="3" style={{ width: "100%", border: "1px solid var(--line-strong)", borderRadius: "6px", padding: "8px", fontSize: "11px" }} /><div style={{ display: "flex", gap: "6px" }}><button className="secondary-button" disabled={acting || !rejectComment.trim()} type="button" onClick={async () => { setActing(true); setActionError(""); try { await onValidate(ticket, false, rejectComment); setShowReject(false); setRejectComment(""); } catch (e) { setActionError(e.message || "No se pudo rechazar."); } finally { setActing(false); } }}>Confirmar rechazo</button><button className="secondary-button" type="button" onClick={() => { setShowReject(false); setRejectComment(""); }}>Cancelar</button></div></div>}
               </>}
             </div>}
-            {canReassign && <div className="detail-meta" style={{ marginTop: "14px" }}><span className="detail-label">Reasignar a persona del grupo</span><div style={{ display: "grid", gap: "6px", marginTop: "6px" }}><select value={reassignTeam} onChange={(e) => setReassignTeam(e.target.value)} style={{ width: "100%", minWidth: 0, height: "34px", border: "1px solid var(--line-strong)", borderRadius: "6px", padding: "0 8px", fontSize: "11px" }}><option value="">Seleccionar persona</option>{candidates.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select><button className="secondary-button" disabled={acting || !reassignTeam} type="button" style={{ minHeight: "34px", width: "100%" }} onClick={async () => { const attempt = ++reassignAttempt.current; setActing(true); setActionError(""); try { await onReassign(ticket, Number(reassignTeam)); if (reassignAttempt.current !== attempt) return; setReassignTeam(""); setActionError(""); } catch (e) { if (reassignAttempt.current !== attempt) return; setActionError(e.message || "No se pudo reasignar."); } finally { if (reassignAttempt.current === attempt) setActing(false); } }}>Mover</button></div>{candidates.length === 0 && <small style={{ color: "var(--quiet)", fontSize: "10px" }}>Sin agentes en este grupo.</small>}</div>}
+            {canReassign && <div className="detail-meta" style={{ marginTop: "14px" }}><span className="detail-label">Reasignar a persona del grupo</span><div style={{ display: "grid", gap: "6px", marginTop: "6px" }}><SearchSelect value={reassignTeam} onChange={setReassignTeam} options={candidates.map((u) => ({ value: String(u.id), label: u.name }))} placeholder="Escribe para filtrar…" ariaLabel="Reasignar a persona del grupo" /><button className="secondary-button" disabled={acting || !reassignTeam} type="button" style={{ minHeight: "34px", width: "100%" }} onClick={async () => { const attempt = ++reassignAttempt.current; setActing(true); setActionError(""); try { await onReassign(ticket, Number(reassignTeam)); if (reassignAttempt.current !== attempt) return; setReassignTeam(""); setActionError(""); } catch (e) { if (reassignAttempt.current !== attempt) return; setActionError(e.message || "No se pudo reasignar."); } finally { if (reassignAttempt.current === attempt) setActing(false); } }}>Mover</button></div>{candidates.length === 0 && <small style={{ color: "var(--quiet)", fontSize: "10px" }}>Sin agentes en este grupo.</small>}</div>}
             {actionError && <p className="detail-action-error" role="alert"><Icon name="alert" size={15} /> {actionError}</p>}
           </aside>
         </div>}
@@ -2048,6 +2048,10 @@ function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
 
   async function submit(event) {
     event.preventDefault();
+    if (!form.kind || !form.service || !form.tipoId) {
+      setSubmitError("Elige tipo, servicio y solicitud específica.");
+      return;
+    }
     const idValue = (form.kind === "TECNICO" ? form.numeroOt : form.contrato).trim();
     const idOk = validateNumero(form.kind === "TECNICO" ? form.numeroOt : form.contrato, idLabel);
     const needsClient = form.kind !== "TECNICO";
@@ -2092,9 +2096,9 @@ function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
         <form onSubmit={submit}>
           <div className="auto-assignment"><Icon name="shield" size={19} /><div><span>Enrutamiento automático</span><strong>{session.groupsLabel || session.group} · Soporte Despacho</strong></div></div>
           <div className="form-grid">
-            <label className="field"><span>Tipo de solicitud <b>*</b></span><select required name="kind" value={form.kind} onChange={updateField}><option value="">Seleccionar</option><option value="CLIENTE">Solicitud de Soporte Cliente</option><option value="TECNICO">Soporte Al Tecnico</option></select></label>
+            <label className="field"><span>Tipo de solicitud <b>*</b></span><select autoFocus required name="kind" value={form.kind} onChange={updateField}><option value="">Seleccionar</option><option value="CLIENTE">Solicitud de Soporte Cliente</option><option value="TECNICO">Soporte Al Tecnico</option></select></label>
             <label className="field"><span>Tipo de servicio <b>*</b></span><select required name="service" value={form.service} onChange={updateField} disabled={!form.kind}><option value="">Seleccionar</option>{services.map((s) => <option key={s} value={s}>{s}</option>)}</select></label>
-            <label className="field field-wide"><span>Solicitud específica <b>*</b></span><select required name="tipoId" value={form.tipoId} onChange={updateField} disabled={!form.service}><option value="">Seleccionar</option>{options.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select></label>
+            <label className="field field-wide"><span>Solicitud específica <b>*</b></span><SearchSelect value={form.tipoId} onChange={(v) => updateField({ target: { name: "tipoId", value: v } })} options={options.map((o) => ({ value: String(o.id), label: o.name }))} placeholder={form.service ? "Escribe para filtrar…" : "Elige servicio primero"} ariaLabel="Solicitud específica" /></label>
             <label className="field"><span>{idLabel} <b>*</b></span><input required name={idField} inputMode="numeric" value={form[idField]} onChange={updateField} onBlur={() => { checkDuplicate(); }} disabled={!canFillDetails} placeholder="Solo números" />{idError && <small className="field-error">{idError}</small>}</label>
             {form.kind !== "TECNICO" && <label className="field"><span>Nombre Cliente <b>*</b></span><input required name="cliente" value={form.cliente} onChange={updateField} onBlur={(e) => validateCliente(e.target.value)} disabled={!canFillDetails} placeholder="Nombre del cliente" />{clientError && <small className="field-error">{clientError}</small>}</label>}
             {form.kind !== "TECNICO" && <label className="field"><span>Nodo <b>*</b></span><input required name="nodo" value={form.nodo} onChange={updateField} disabled={!canFillDetails} placeholder="Nodo" /></label>}
@@ -2108,6 +2112,53 @@ function NewTicketModal({ onClose, onCreate, onOpenTicket, session }) {
           <footer className="modal-actions"><button className="secondary-button" disabled={submitting} type="button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={submitting} type="submit"><Icon name="ticket" size={18} /> {submitting ? "Enviando..." : "Enviar a soporte"}</button></footer>
         </form>
       </section>
+    </div>
+  );
+}
+
+function SearchSelect({ value, onChange, options, placeholder, disabled, ariaLabel, name }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [highlight, setHighlight] = useState(0);
+  const selected = (options || []).find((o) => String(o.value) === String(value));
+  const filtered = (options || []).filter((o) => (o.label || "").toLowerCase().includes(query.toLowerCase()));
+  function choose(v) {
+    onChange(v);
+    setOpen(false);
+    setQuery("");
+    setHighlight(0);
+  }
+  function onKeyDown(e) {
+    if (e.key === "ArrowDown") { e.preventDefault(); setOpen(true); setHighlight((h) => Math.min(h + 1, Math.max(0, filtered.length - 1))); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setHighlight((h) => Math.max(h - 1, 0)); }
+    else if (e.key === "Enter" && open && filtered[highlight]) { e.preventDefault(); choose(filtered[highlight].value); }
+    else if (e.key === "Escape") { setOpen(false); setQuery(""); }
+  }
+  return (
+    <div className="search-select">
+      <input
+        value={open ? query : (selected ? selected.label : "")}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true); setHighlight(0); }}
+        onFocus={() => { setQuery(""); setHighlight(0); setOpen(true); }}
+        onKeyDown={onKeyDown}
+        placeholder={placeholder}
+        disabled={disabled}
+        aria-label={ariaLabel || placeholder}
+        autoComplete="off"
+      />
+      {open && !disabled && (
+        <>
+          <button type="button" className="dropdown-overlay" aria-label="Cerrar opciones" onClick={() => { setOpen(false); setQuery(""); }} />
+          <ul className="search-select-list" role="listbox">
+            {filtered.length === 0 && <li className="search-select-empty">Sin coincidencias</li>}
+            {filtered.map((o, i) => (
+              <li key={o.value} role="option" aria-selected={String(o.value) === String(value)}>
+                <button type="button" className={i === highlight ? "highlight" : ""} onMouseEnter={() => setHighlight(i)} onClick={() => choose(o.value)}>{o.label}</button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </div>
   );
 }
