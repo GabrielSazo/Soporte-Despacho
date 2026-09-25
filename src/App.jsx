@@ -1299,37 +1299,51 @@ function EscalateModal({ areas, onClose, onEscalate, ticket }) {
 }
 
 function TeamView({ currentUser, onlineIds, onNotify, tickets, users }) {
-  const [showRules, setShowRules] = useState(false);
+  const [expanded, setExpanded] = useState(null);
   const peopleByName = new Map();
   const memberUsers = (users || []).filter((u) => u.is_active && !u.is_locked);
   if (memberUsers.length) {
     memberUsers.forEach((u) => {
-      peopleByName.set(u.name, { initials: u.initials, name: u.name, role: u.roleLabel, load: 0, status: (onlineIds || []).map(Number).includes(Number(u.id)) ? "En línea" : "Ausente", className: u.avatarClass });
+      peopleByName.set(u.name, { id: u.id, initials: u.initials, name: u.name, role: u.roleLabel, load: 0, status: (onlineIds || []).map(Number).includes(Number(u.id)) ? "En línea" : "Ausente", className: u.avatarClass });
     });
   } else if (currentUser.role === "SOPORTE") {
-    peopleByName.set(currentUser.name, { initials: currentUser.initials, name: currentUser.name, role: currentUser.roleLabel, load: 0, status: "En línea", className: currentUser.avatarClass });
+    peopleByName.set(currentUser.name, { id: currentUser.id, initials: currentUser.initials, name: currentUser.name, role: currentUser.roleLabel, load: 0, status: "En línea", className: currentUser.avatarClass });
   }
   tickets.forEach((ticket) => {
     if (ticket.assignee === "Sin asignar") return;
-    const person = peopleByName.get(ticket.assignee) || { initials: initials(ticket.assignee), name: ticket.assignee, role: "Soporte", load: 0, status: "Ausente", className: avatarClass(ticket.assignee) };
+    const person = peopleByName.get(ticket.assignee) || { id: null, initials: initials(ticket.assignee), name: ticket.assignee, role: "Soporte", load: 0, status: "Ausente", className: avatarClass(ticket.assignee) };
     if (ticket.statusCode !== "CERRADO") person.load += 1;
     peopleByName.set(ticket.assignee, person);
   });
+  const matchActor = (e, person) => ((e.actor?.id && person.id && Number(e.actor.id) === Number(person.id)) || e.actor?.name === person.name);
+  function statsFor(person) {
+    const creados = tickets.filter((t) => person.id ? t.creatorId === person.id : t.requester === person.name).length;
+    const pendientes = tickets.filter((t) => (person.id ? t.assigneeId === person.id : t.assignee === person.name) && t.statusCode !== "CERRADO").length;
+    const validacion = tickets.filter((t) => (person.id ? t.creatorId === person.id : t.requester === person.name) && t.statusCode === "VALIDACION").length;
+    const cerrados = tickets.filter((t) => t.statusCode === "CERRADO" && (t.creatorId === person.id || t.assigneeId === person.id || (!person.id && (t.requester === person.name || t.assignee === person.name)))).length;
+    const resueltos = tickets.filter((t) => t.resolvedAt && (t.events || []).some((e) => e.event_type === "RESUELTO" && matchActor(e, person)));
+    const aht = resueltos.length ? resueltos.reduce((s, t) => s + (new Date(t.resolvedAt) - new Date(t.createdAt)) / 60000, 0) / resueltos.length : null;
+    return { creados, pendientes, validacion, cerrados, aht };
+  }
   const people = [...peopleByName.values()];
   return (
     <>
-      <PageHeader eyebrow="Disponibilidad del grupo" title="Personas que respaldan tu operación" description="La carga se calcula a partir de los tickets visibles para tu perfil y grupo." action={<button className="secondary-button" type="button" onClick={() => setShowRules(true)}><Icon name="users" size={18} /> Ver reglas de asignación</button>} />
-      {showRules && <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowRules(false)}><section className="ticket-modal user-modal" role="dialog" aria-modal="true" aria-labelledby="rules-title" onMouseDown={(e) => e.stopPropagation()}><header className="modal-header"><div><p className="eyebrow">Cómo se asigna</p><h2 id="rules-title">Reglas de asignación</h2></div><button className="icon-button" type="button" aria-label="Cerrar" onClick={() => setShowRules(false)}><Icon name="close" /></button></header><div style={{ padding: "19px 25px 25px", display: "grid", gap: "10px", fontSize: "12px", lineHeight: 1.5 }}><p><b>Tigo</b> → <b>Soporte B</b> · <b>BBI N-2, celtech, cellus, nexel</b> → <b>Soporte A</b></p><p>Los tickets nuevos quedan <b>abiertos</b> en la bandeja del grupo: cualquiera que lo cubra puede tomarlo.</p><p>Al <b>rechazar</b> una solución o <b>liberar</b> un ticket, vuelve a la bandeja del grupo (sin asignar).</p><p><b>Reasignar</b> mueve el ticket a una persona del mismo grupo.</p></div></section></div>}
+      <PageHeader eyebrow="Disponibilidad del grupo" title="Personas que respaldan tu operación" description="La carga se calcula a partir de los tickets visibles para tu perfil y grupo." />
       <section className="team-grid">
-        {people.length ? people.map((person) => (
+        {people.length ? people.map((person) => {
+          const st = statsFor(person);
+          const open = expanded === person.name;
+          return (
           <article className="team-card" key={person.name}>
             <div className={`avatar team-avatar ${person.className}`}>{person.initials}</div>
             <div className="team-card-title"><h2>{person.name}</h2><span className="online-status" style={person.status === "En línea" ? undefined : { color: "var(--quiet)" }}><i /> {person.status}</span></div>
             <p>{person.role}</p>
             <div className="capacity"><div><span>Carga activa</span><strong>{person.load} <small>tickets</small></strong></div><div className="capacity-bars"><i /><i /><i /><i /><i className={person.load < 5 ? "off" : ""} /></div></div>
-            <button type="button" onClick={() => onNotify(`Se abrió el perfil de ${person.name}.`)}>Ver carga <Icon name="arrowRight" size={16} /></button>
+            {open && <div className="team-stats"><div><span>Creados</span><strong>{st.creados}</strong></div><div><span>Pendientes</span><strong>{st.pendientes}</strong></div><div><span>En validación</span><strong>{st.validacion}</strong></div><div><span>Cerrados</span><strong>{st.cerrados}</strong></div><div><span>AHT</span><strong>{st.aht == null ? "—" : formatDuracion(st.aht)}</strong></div></div>}
+            <button type="button" onClick={() => setExpanded(open ? null : person.name)}>{open ? "Ocultar carga" : "Ver carga"} <Icon name="arrowRight" size={16} /></button>
           </article>
-        )) : <EmptyState />}
+          );
+        }) : <EmptyState />}
       </section>
     </>
   );
