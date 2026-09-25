@@ -161,12 +161,8 @@ function extractClipboardImages(event) {
     .filter((item) => item.type && item.type.startsWith("image/"))
     .map((item) => item.getAsFile())
     .filter(Boolean);
-  const fromFiles = Array.from(clipboard.files || []).filter((f) => f.type && f.type.startsWith("image/"));
-  const all = [...fromItems];
-  for (const f of fromFiles) {
-    if (!all.some((x) => x.name === f.name && x.size === f.size && x.lastModified === f.lastModified)) all.push(f);
-  }
-  return all;
+  if (fromItems.length) return fromItems;
+  return Array.from(clipboard.files || []).filter((f) => f.type && f.type.startsWith("image/"));
 }
 
 function mapUser(user) {
