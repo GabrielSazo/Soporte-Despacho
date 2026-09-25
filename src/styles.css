@@ -268,7 +268,7 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-radius: 4px
 .app-shell[data-brand="tigo"]:not([data-theme="dark"]) .topbar-user:hover { background: #ffffff; border-color: #cbd5ff; }
 .topbar-user .avatar { width: 31px; height: 31px; }
 .topbar-user strong, .topbar-user span { display: block; white-space: nowrap; }
-.topbar-user strong { font-size: 12px; }
+.topbar-user strong { font-size: 12px; }.topbar-user > div { min-width: 0; }.topbar-user strong { display: block; max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .topbar-user span { margin-top: 2px; color: var(--muted); font-size: 10px; }
 .topbar-user > svg { margin-left: 2px; color: var(--muted); }
 .mobile-brand { display: none; font-size: 17px; font-weight: 800; letter-spacing: -0.6px; }
