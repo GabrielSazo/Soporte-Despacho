@@ -33,10 +33,11 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
     url = serializers.SerializerMethodField()
     file = serializers.FileField(write_only=True)
     ocr_estado_label = serializers.CharField(source="get_ocr_estado_display", read_only=True)
+    kind_label = serializers.CharField(source="get_kind_display", read_only=True)
 
     class Meta:
         model = TicketAttachment
-        fields = ["id", "file", "url", "original_name", "content_type", "size", "ocr_estado", "ocr_estado_label", "uploaded_by", "created_at"]
+        fields = ["id", "file", "url", "kind", "kind_label", "original_name", "content_type", "size", "ocr_estado", "ocr_estado_label", "uploaded_by", "created_at"]
         read_only_fields = ["original_name", "content_type", "size", "ocr_estado", "uploaded_by", "created_at"]
 
     def validate_file(self, file):
@@ -59,6 +60,7 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
         attachment = TicketAttachment.objects.create(
             ticket=ticket,
             file=file,
+            kind=validated_data.get("kind") or TicketAttachment.Kind.EVIDENCIA,
             original_name=file.name,
             content_type=getattr(file, "content_type", "application/octet-stream"),
             size=file.size,

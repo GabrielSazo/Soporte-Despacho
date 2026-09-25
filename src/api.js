@@ -239,9 +239,10 @@ export function createTicket(ticket) {
   return request("/tickets/", { method: "POST", body: ticket });
 }
 
-export function uploadAttachment(ticketId, file) {
+export function uploadAttachment(ticketId, file, kind = "EVIDENCIA") {
   const form = new FormData();
   form.append("file", file);
+  form.append("kind", kind);
   return request(`/tickets/${ticketId}/attachments/`, { method: "POST", body: form });
 }
 

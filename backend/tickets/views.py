@@ -312,16 +312,26 @@ class TicketViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="attachments")
     def attachments(self, request, pk=None):
+        from .models import TicketAttachment
         ticket = self.get_object()
+        kind = (request.data.get("kind") or "EVIDENCIA").strip().upper()
+        if kind not in {TicketAttachment.Kind.EVIDENCIA, TicketAttachment.Kind.SOLUCION}:
+            raise ValidationError({"kind": "Tipo de evidencia inválido."})
+        if kind == TicketAttachment.Kind.SOLUCION and not (
+            request.user.is_administrator or request.user.role in {User.Role.SUPPORT, User.Role.SUPERVISOR}
+        ):
+            raise PermissionDenied("Solo soporte puede adjuntar evidencia de solución.")
         can_attach = request.user.is_administrator or ticket.creator_id == request.user.id
         can_attach = can_attach or (request.user.role == User.Role.SUPPORT and ticket.assigned_team.group.code in request.user.group_codes)
         can_attach = can_attach or (request.user.role == User.Role.SUPERVISOR and ticket.assigned_team.group.code in request.user.group_codes)
         can_attach = can_attach or (request.user.role == User.Role.DISPATCHER and ticket.origin_team.group.code in request.user.group_codes)
-        if ticket.attachments.count() >= 5:
-            raise ValidationError("Máximo 5 imágenes por ticket.")
+        if ticket.attachments.filter(kind=kind).count() >= 5:
+            raise ValidationError("Máximo 5 imágenes por tipo de evidencia.")
         if not can_attach:
             raise PermissionDenied("No puedes adjuntar evidencia a este ticket.")
-        serializer = TicketAttachmentSerializer(data=request.data, context={"request": request, "ticket": ticket})
+        data = request.data.copy() if hasattr(request.data, "copy") else dict(request.data)
+        data["kind"] = kind
+        serializer = TicketAttachmentSerializer(data=data, context={"request": request, "ticket": ticket})
         serializer.is_valid(raise_exception=True)
         attachment = serializer.save()
         return Response(TicketAttachmentSerializer(attachment, context={"request": request}).data, status=status.HTTP_201_CREATED)
