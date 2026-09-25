@@ -1299,7 +1299,6 @@ function EscalateModal({ areas, onClose, onEscalate, ticket }) {
 }
 
 function TeamView({ currentUser, onlineIds, onNotify, tickets, users }) {
-  const [expanded, setExpanded] = useState(null);
   const peopleByName = new Map();
   const memberUsers = (users || []).filter((u) => u.is_active && !u.is_locked);
   if (memberUsers.length) {
@@ -1330,20 +1329,27 @@ function TeamView({ currentUser, onlineIds, onNotify, tickets, users }) {
     <>
       <PageHeader eyebrow="Disponibilidad del grupo" title="Personas que respaldan tu operación" description="La carga se calcula a partir de los tickets visibles para tu perfil y grupo." />
       <section className="team-grid">
-        {people.length ? people.map((person) => {
-          const st = statsFor(person);
-          const open = expanded === person.name;
-          return (
-          <article className="team-card" key={person.name}>
-            <div className={`avatar team-avatar ${person.className}`}>{person.initials}</div>
-            <div className="team-card-title"><h2>{person.name}</h2><span className="online-status" style={person.status === "En línea" ? undefined : { color: "var(--quiet)" }}><i /> {person.status}</span></div>
-            <p>{person.role}</p>
-            <div className="capacity"><div><span>Carga activa</span><strong>{person.load} <small>tickets</small></strong></div><div className="capacity-bars"><i /><i /><i /><i /><i className={person.load < 5 ? "off" : ""} /></div></div>
-            {open && <div className="team-stats"><div><span>Creados</span><strong>{st.creados}</strong></div><div><span>Pendientes</span><strong>{st.pendientes}</strong></div><div><span>En validación</span><strong>{st.validacion}</strong></div><div><span>Cerrados</span><strong>{st.cerrados}</strong></div><div><span>AHT</span><strong>{st.aht == null ? "—" : formatDuracion(st.aht)}</strong></div></div>}
-            <button type="button" onClick={() => setExpanded(open ? null : person.name)}>{open ? "Ocultar carga" : "Ver carga"} <Icon name="arrowRight" size={16} /></button>
-          </article>
-          );
-        }) : <EmptyState />}
+        {people.length ? (
+        <article className="panel users-panel" style={{ gridColumn: "1 / -1" }}>
+          <div className="users-table-wrap"><table className="users-table"><thead><tr><th>Persona</th><th>Estado</th><th>Carga</th><th>Creados</th><th>Pendientes</th><th>Validación</th><th>Cerrados</th><th>AHT</th></tr></thead><tbody>
+            {people.map((person) => {
+              const st = statsFor(person);
+              return (
+              <tr key={person.name}>
+                <td data-label="Persona"><div className="managed-user"><div className={`avatar ${person.className}`}>{person.initials}</div><div><strong>{person.name}</strong><small>{person.role}</small></div></div></td>
+                <td data-label="Estado"><span className="online-status" style={person.status === "En línea" ? undefined : { color: "var(--quiet)" }}><i /> {person.status}</span></td>
+                <td data-label="Carga"><strong>{person.load}</strong></td>
+                <td data-label="Creados">{st.creados}</td>
+                <td data-label="Pendientes">{st.pendientes}</td>
+                <td data-label="Validación">{st.validacion}</td>
+                <td data-label="Cerrados">{st.cerrados}</td>
+                <td data-label="AHT">{st.aht == null ? "—" : formatDuracion(st.aht)}</td>
+              </tr>
+              );
+            })}
+          </tbody></table></div>
+        </article>
+        ) : <EmptyState />}
       </section>
     </>
   );
