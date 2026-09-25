@@ -76,10 +76,9 @@ ORIGIN_TO_SUPPORT = {
 
 @transaction.atomic
 def create_ticket(*, creator, **data):
-    if not creator.teams.exists():
-        raise ValueError("El usuario no tiene un equipo asignado.")
-
     first_team = creator.teams.first()
+    if first_team is None:
+        raise ValueError("El usuario no tiene un equipo asignado.")
     assigned_team = first_team
     try:
         from accounts.models import Team as SupportTeam

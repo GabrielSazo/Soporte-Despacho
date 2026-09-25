@@ -191,8 +191,8 @@ class TicketCreateSerializer(serializers.ModelSerializer):
         user = self.context["request"].user
         if not user.is_administrator and user.role != User.Role.DISPATCHER:
             raise serializers.ValidationError("Solo un despachador puede registrar tickets.")
-        if not user.is_administrator and not user.teams.exists():
-            raise serializers.ValidationError("Tu cuenta no tiene un equipo asignado.")
+        if not user.teams.exists():
+            raise serializers.ValidationError("Tu cuenta no tiene un equipo asignado. Pide a un administrador que te asigne uno.")
         tipo = attrs.get("tipo_solicitud")
         kind = tipo.kind if tipo else None
         contrato = (attrs.get("contrato") or "").strip()
