@@ -995,7 +995,7 @@ const BASE_FAVICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/sv
 
 function Dashboard({ canCreate, criticalTickets, dashboard, onCreate, onOpen, onShowTickets, tickets, validationTickets }) {
   const activeTickets = dashboard?.metrics?.active_tickets ?? tickets.filter((ticket) => ticket.statusCode !== "CERRADO").length;
-  const resolvedToday = dashboard?.metrics?.closed_today ?? tickets.filter((ticket) => ticket.statusCode === "CERRADO").length;
+  const resolvedToday = dashboard?.metrics?.closed_today ?? tickets.filter((ticket) => ticket.resolvedAt && new Date(ticket.resolvedAt).toDateString() === new Date().toDateString()).length;
   const sla = dashboard?.sla || { en_tiempo: 0, advertencia: 0, vencido: 0 };
   const slaTotal = sla.en_tiempo + sla.advertencia + sla.vencido;
   const slaScore = slaTotal ? Math.round((sla.en_tiempo / slaTotal) * 100) : 100;
@@ -1005,7 +1005,7 @@ function Dashboard({ canCreate, criticalTickets, dashboard, onCreate, onOpen, on
     { label: "Tickets activos", value: activeTickets, trend: `${sla.vencido} vencidos`, detail: "necesitan atención", icon: "ticket", tone: "green" },
     { label: "Requieren atención", value: dashboard?.metrics?.critical_tickets ?? criticalTickets, trend: `${sla.vencido} vencidos`, detail: "SLA menor a 1 hora", icon: "alert", tone: "coral" },
     { label: "En validación", value: validationTickets.length, trend: `${validationTickets.length} casos`, detail: "pendientes de respuesta", icon: "checkCircle", tone: "violet" },
-    { label: "Resueltos hoy", value: resolvedToday, trend: "", detail: "cerrados hoy", icon: "activity", tone: "blue" },
+    { label: "Resueltos hoy", value: resolvedToday, trend: "", detail: "enviados a validación hoy", icon: "activity", tone: "blue" },
   ];
   const ritmo = slaScore >= 90 ? ["En buen ritmo", "La mayor parte de los casos avanza dentro del tiempo acordado."] : slaScore >= 70 ? ["Ritmo medio", "Hay casos próximos a vencer que conviene atender."] : ["Requiere atención", "Varios casos están vencidos o por vencer."];
   const recentActivity = tickets

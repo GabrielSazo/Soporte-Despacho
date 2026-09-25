@@ -477,7 +477,7 @@ class DashboardView(APIView):
         tickets = visible_tickets_for(request.user)
         now = timezone.now()
         active = tickets.exclude(status=Ticket.Status.CLOSED)
-        closed_today = tickets.filter(status=Ticket.Status.CLOSED, closed_at__date=now.date()).count()
+        closed_today = tickets.filter(resolved_at__date=now.date()).count()
         sla_totals = {
             "en_tiempo": 0,
             "advertencia": 0,
