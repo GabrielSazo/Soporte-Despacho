@@ -1299,6 +1299,7 @@ function EscalateModal({ areas, onClose, onEscalate, ticket }) {
 }
 
 function TeamView({ currentUser, onlineIds, onNotify, tickets, users }) {
+  const [presenceFilter, setPresenceFilter] = useState("Todos");
   const peopleByName = new Map();
   const isSupView = currentUser.role === "SUPERVISOR";
   const myCodes = new Set([...(currentUser.groups || []).map((g) => g.code), ...((currentUser.teams || []).map((t) => t.group?.code || t.group))].filter(Boolean));
@@ -1336,12 +1337,12 @@ function TeamView({ currentUser, onlineIds, onNotify, tickets, users }) {
   const people = [...peopleByName.values()];
   return (
     <>
-      <PageHeader eyebrow="Disponibilidad del grupo" title="Personas que respaldan tu operación" description="La carga se calcula a partir de los tickets visibles para tu perfil y grupo." />
+      <PageHeader eyebrow="Disponibilidad del grupo" title="Personas que respaldan tu operación" description="La carga se calcula a partir de los tickets visibles para tu perfil y grupo." action={<label className="sort-select">Estado: <select value={presenceFilter} onChange={(e) => setPresenceFilter(e.target.value)} aria-label="Filtrar por estado"><option value="Todos">Todos</option><option value="En línea">En línea</option><option value="Ausente">Ausentes</option></select></label>} />
       <section className="team-grid">
         {people.length ? (
         <article className="panel users-panel" style={{ gridColumn: "1 / -1" }}>
           <div className="users-table-wrap"><table className="users-table"><thead><tr><th>Persona</th><th>Estado</th><th>Carga</th><th>Creados</th><th>Pendientes</th><th>Validación</th><th>Cerrados</th><th>AHT</th></tr></thead><tbody>
-            {people.map((person) => {
+            {people.filter((person) => presenceFilter === "Todos" || person.status === presenceFilter).map((person) => {
               const st = statsFor(person);
               return (
               <tr key={person.name}>
