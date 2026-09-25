@@ -968,7 +968,7 @@ const BASE_FAVICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/sv
           {isLoading ? <LoadingState /> : <>
             {activeView === "Resumen" && <Dashboard canCreate={canCreateTickets} criticalTickets={criticalTickets} dashboard={dashboard} onCreate={() => setNewTicketOpen(true)} onOpen={openTicketDetail} onShowTickets={() => setActiveView("Tickets")} tickets={tickets} validationTickets={validationTickets} />}
             {activeView === "Tickets" && <TicketsView canCreate={canCreateTickets} currentUser={session} filter={filter} filteredTickets={filteredTickets} onCreate={() => setNewTicketOpen(true)} onFilterChange={setFilter} onNotify={notify} onOpen={openTicketDetail} onResolve={setTicketToResolve} onTake={takeTicket} query={query} setQuery={setQuery} />}
-            {activeView === "Validaciones" && <ValidationsView canValidate={["DESPACHADOR", "ADMIN"].includes(session.role)} tickets={validationTickets} onOpen={openTicketDetail} onValidate={validateTicket} />}
+            {activeView === "Validaciones" && <ValidationsView canValidate={["DESPACHADOR", "ADMIN", "SUPERVISOR"].includes(session.role)} tickets={validationTickets} onOpen={openTicketDetail} onValidate={validateTicket} />}
             {activeView === "Escalados" && <EscalationsView currentUser={session} tickets={escalatedTickets} onOpen={openTicketDetail} onDeescalate={deescalateTicket} />}
             {activeView === "Mi grupo" && <TeamView currentUser={session} onlineIds={onlineIds} onNotify={notify} tickets={tickets} users={users} />}
             {activeView === "Informes" && <ReportsView groups={groups} onNotify={notify} />}
@@ -1795,8 +1795,8 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onDeesca
   const canTake = currentUser.role === "SOPORTE" && ["ABIERTO", "ASIGNADO"].includes(ticket.statusCode);
   const canRelease = ["ASIGNADO", "EN_PROCESO"].includes(ticket.statusCode) && (ticket.assigneeId === currentUser.id || currentUser.role === "ADMIN" || (currentUser.role === "SUPERVISOR" && (currentUser.groups || []).map((g) => g.code).includes(ticket.groupCode)));
   const canResolve = currentUser.role === "SOPORTE" && ticket.statusCode === "EN_PROCESO";
-  const canValidate = ((currentUser.role === "DESPACHADOR" && ticket.creatorId === currentUser.id) || currentUser.role === "ADMIN") && ticket.statusCode === "VALIDACION";
   const myGroupCodes = [...new Set([...(currentUser.groups || []).map((g) => g.code), ...((currentUser.teams || []).map((t) => t.group?.code || t.group))])].filter(Boolean);
+  const canValidate = (((currentUser.role === "DESPACHADOR" && ticket.creatorId === currentUser.id) || currentUser.role === "ADMIN" || (currentUser.role === "SUPERVISOR" && [ticket.groupCode, ticket.originGroupCode].filter(Boolean).some((c) => myGroupCodes.includes(c)))) && ticket.statusCode === "VALIDACION");
   const inTicketGroups = [ticket.groupCode, ticket.originGroupCode].filter(Boolean).some((c) => myGroupCodes.includes(c));
   const canEscalate = (currentUser.role === "ADMIN" || ((currentUser.role === "SOPORTE" || currentUser.role === "SUPERVISOR") && inTicketGroups)) && ["ABIERTO", "ASIGNADO", "EN_PROCESO"].includes(ticket.statusCode);
   const canDeescalate = (currentUser.role === "ADMIN" || ((currentUser.role === "SOPORTE" || currentUser.role === "SUPERVISOR") && inTicketGroups)) && ticket.statusCode === "ESCALADO";
@@ -1804,7 +1804,7 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onDeesca
   const [showInstruct, setShowInstruct] = useState(false);
   const [instructText, setInstructText] = useState("");
   const canAttach = currentUser.is_administrator || currentUser.role === "ADMIN" || ticket.requester === currentUser.name || (currentUser.role === "SOPORTE" && currentUser.team === ticket.team);
-  const canReassign = ticket.statusCode !== "CERRADO" && ["DESPACHADOR", "SOPORTE", "SUPERVISOR", "ADMIN"].includes(currentUser.role) && (currentUser.role === "ADMIN" || (currentUser.groups || []).map((g) => g.code).includes(ticket.groupCode));
+  const canReassign = ticket.statusCode !== "CERRADO" && ticket.statusCode !== "VALIDACION" && ["DESPACHADOR", "SOPORTE", "SUPERVISOR", "ADMIN"].includes(currentUser.role) && (currentUser.role === "ADMIN" || (currentUser.groups || []).map((g) => g.code).includes(ticket.groupCode));
   const candidates = (users || []).filter((u) => u.is_active && !u.is_locked && u.role === "SOPORTE" && (u.groupName || "").split(",").map((s) => s.trim()).includes(ticket.team));
 
   async function runAction(action, accepted) {

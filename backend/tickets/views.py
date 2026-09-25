@@ -191,8 +191,8 @@ class TicketViewSet(viewsets.ModelViewSet):
     def reassign(self, request, pk=None):
         ticket = self.get_object()
         require_support_access(request.user, ticket)
-        if ticket.status == Ticket.Status.CLOSED:
-            raise ValidationError("No se puede reasignar un ticket cerrado.")
+        if ticket.status in {Ticket.Status.CLOSED, Ticket.Status.VALIDATION}:
+            raise ValidationError("No se puede reasignar un ticket cerrado o en validación.")
         user_id = request.data.get("user_id") or request.data.get("assignee")
         if not user_id:
             raise ValidationError({"user": "Debes indicar la persona destino."})
