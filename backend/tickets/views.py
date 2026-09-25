@@ -362,7 +362,7 @@ class ReportsSummaryView(APIView):
         sla_ok = cerrados.filter(closed_at__lte=F("sla_due_at")).count()
         pct_sla = round(sla_ok / cerrados.count() * 100, 1) if cerrados.count() else None
 
-        today = timezone.now().date()
+        today = timezone.localdate()
         start = today - timedelta(days=13)
         date_from = request.query_params.get("from") or start.isoformat()
         date_to = request.query_params.get("to") or today.isoformat()
@@ -477,7 +477,7 @@ class DashboardView(APIView):
         tickets = visible_tickets_for(request.user)
         now = timezone.now()
         active = tickets.exclude(status=Ticket.Status.CLOSED)
-        closed_today = tickets.filter(resolved_at__date=now.date()).count()
+        closed_today = tickets.filter(resolved_at__date=timezone.localdate()).count()
         sla_totals = {
             "en_tiempo": 0,
             "advertencia": 0,
