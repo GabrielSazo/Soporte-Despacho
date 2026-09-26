@@ -1311,6 +1311,7 @@ function TeamView({ currentUser, onlineIds, onNotify, tickets, users }) {
   const inRange = (t) => !rangeFrom || new Date(t.createdAt) >= rangeFrom;
   const peopleByName = new Map();
   const isSupView = currentUser.role === "SUPERVISOR";
+  const isSupportView = currentUser.role === "SOPORTE";
   const myCodes = new Set([...(currentUser.groups || []).map((g) => g.code), ...((currentUser.teams || []).map((t) => t.group?.code || t.group))].filter(Boolean));
   const inScope = (u) => {
     const teams = u.teams || [];
@@ -1318,7 +1319,7 @@ function TeamView({ currentUser, onlineIds, onNotify, tickets, users }) {
     const codes = [...teams.map((t) => t.group?.code || t.group_detail?.code), ...mgroups.map((g) => g.code || g)];
     return codes.some((c) => c && myCodes.has(c));
   };
-  const memberUsers = (users || []).filter((u) => u.is_active && !u.is_locked && (!isSupView || ((u.role === "DESPACHADOR" || u.role === "SOPORTE") && inScope(u))));
+  const memberUsers = (users || []).filter((u) => u.is_active && !u.is_locked && (!isSupView || ((u.role === "DESPACHADOR" || u.role === "SOPORTE") && inScope(u))) && (!isSupportView || u.role === "DESPACHADOR" || u.role === "SOPORTE"));
   if (memberUsers.length) {
     memberUsers.forEach((u) => {
       peopleByName.set(u.name, { id: u.id, initials: u.initials, name: u.name, role: u.roleLabel, load: 0, status: (onlineIds || []).map(Number).includes(Number(u.id)) ? "En línea" : "Ausente", className: u.avatarClass });
@@ -1329,6 +1330,10 @@ function TeamView({ currentUser, onlineIds, onNotify, tickets, users }) {
   tickets.forEach((ticket) => {
     if (ticket.assignee === "Sin asignar") return;
     if (isSupView && !peopleByName.get(ticket.assignee)) return;
+    if (isSupportView) {
+      const au = (users || []).find((x) => x.name === ticket.assignee);
+      if (au && au.role !== "DESPACHADOR" && au.role !== "SOPORTE") return;
+    }
     const person = peopleByName.get(ticket.assignee) || { id: null, initials: initials(ticket.assignee), name: ticket.assignee, role: "Soporte", load: 0, status: "Ausente", className: avatarClass(ticket.assignee) };
     if (ticket.statusCode !== "CERRADO") person.load += 1;
     peopleByName.set(ticket.assignee, person);
