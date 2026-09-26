@@ -96,6 +96,31 @@ function shortName(name = "") {
   return `${parts[0]} ${parts[2]}`;
 }
 
+function passwordChecks(pw = "") {
+  return [
+    { label: "Mínimo 10 caracteres", ok: pw.length >= 10 },
+    { label: "Una mayúscula", ok: /[A-ZÁÉÍÓÚÜÑ]/.test(pw) },
+    { label: "Una minúscula", ok: /[a-záéíóúüñ]/.test(pw) },
+    { label: "Un número", ok: /[0-9]/.test(pw) },
+  ];
+}
+
+function isStrongPassword(pw = "") {
+  return passwordChecks(pw).every((c) => c.ok);
+}
+
+function PasswordChecklist({ value }) {
+  const checks = passwordChecks(value);
+  if (!value) return null;
+  return (
+    <ul className="password-checks" aria-live="polite">
+      {checks.map((c) => (
+        <li key={c.label} className={c.ok ? "ok" : ""}><span>{c.ok ? "✓" : "○"}</span> {c.label}</li>
+      ))}
+    </ul>
+  );
+}
+
 function avatarClass(name = "") {
   if (name.includes("Andrea")) return "avatar-andrea";
   if (name.includes("Mario")) return "avatar-mario";
@@ -1440,6 +1465,20 @@ function ReportsView({ groups, onNotify }) {
 
   const kpis = summary?.kpis || {};
   const porArea = summary?.por_area_escalada || [];
+  const byService = summary?.by_service || [];
+  const byGroup = summary?.by_group || [];
+  const totalService = byService.reduce((s, r) => s + r.total, 0);
+  const donutColors = ["#001EB4", "#667EEA", "#00B2A9", "#F5A623", "#E5484D", "#8E8EA0"];
+  const donutBg = (() => {
+    if (!totalService) return "#e8eee9";
+    let acc = 0;
+    return "conic-gradient(" + byService.map((r, i) => {
+      const from = (acc / totalService) * 100;
+      acc += r.total;
+      const to = (acc / totalService) * 100;
+      return `${donutColors[i % donutColors.length]} ${from}% ${to}%`;
+    }).join(", ") + ")";
+  })();
   const daily = summary?.daily || [];
   const maxDaily = Math.max(1, ...daily.map((d) => d.total));
   const maxAhtDay = Math.max(0, ...daily.map((d) => d.aht_minutos || 0));
@@ -1474,23 +1513,39 @@ function ReportsView({ groups, onNotify }) {
         </div>
         <footer className="modal-actions" style={{ margin: "12px 0 0", padding: 0, border: 0 }}><button className="primary-button" type="button" disabled={loading} onClick={load}>{loading ? "Cargando..." : "Aplicar filtros"}</button></footer>
       </article>
-      <section className="report-highlights" style={{ gridTemplateColumns: "repeat(5, minmax(0, 1fr))" }}>
-        <article><span>Entrantes</span><strong>{fmt(kpis.entrantes)}</strong></article>
-        <article><span>Resueltos</span><strong>{fmt(kpis.resueltos)}</strong></article>
-        <article><span>AHT</span><strong>{fmtDur(kpis.aht_minutos)}</strong><p>Tomado → resuelto</p></article>
-        <article><span>% SLA cumplido</span><strong>{fmt(kpis.pct_sla, "%")}</strong><p><b>Meta: 90%</b></p></article>
-        <article><span>En proceso</span><strong>{fmt(kpis.en_proceso)}</strong></article>
+      <section className="metrics-grid" aria-label="Indicadores">
+        {[
+          { label: "Entrantes", value: fmt(kpis.entrantes), sub: "tickets en el rango", icon: "ticket", tone: "green" },
+          { label: "Resueltos", value: fmt(kpis.resueltos), sub: "enviados a validación", icon: "checkCircle", tone: "violet" },
+          { label: "AHT", value: fmtDur(kpis.aht_minutos), sub: "tomado → resuelto", icon: "clock", tone: "blue" },
+          { label: "% SLA cumplido", value: fmt(kpis.pct_sla, "%"), sub: "meta 90%", icon: "activity", tone: "blue" },
+          { label: "En proceso", value: fmt(kpis.en_proceso), sub: "casos abiertos", icon: "users", tone: "green" },
+          { label: "Vencidos", value: fmt(kpis.vencidos), sub: "fuera de SLA", icon: "alert", tone: "coral" },
+          { label: "Devueltos", value: fmt(kpis.devueltos), sub: "rechazos a soporte", icon: "ticket", tone: "coral" },
+          { label: "Escalados", value: fmt(kpis.escalados_abiertos), sub: "en áreas externas", icon: "upload", tone: "violet" },
+          { label: "T. escalado", value: fmtDur(kpis.tiempo_prom_escalado_min), sub: "promedio en área", icon: "clock", tone: "violet" },
+          { label: "Respuesta", value: fmtDur(kpis.t_respuesta_min), sub: "creado → tomado", icon: "bell", tone: "green" },
+          { label: "Atención", value: fmtDur(kpis.aht_minutos), sub: "tomado → resuelto", icon: "checkCircle", tone: "blue" },
+          { label: "Cierre", value: fmtDur(kpis.t_cierre_min), sub: "validación → cierre", icon: "shield", tone: "green" },
+        ].map((m) => (
+          <article className="metric-card" key={m.label}>
+            <div className={`metric-icon ${m.tone}`}><Icon name={m.icon} size={21} /></div>
+            <div className="metric-heading"><span>{m.label}</span></div>
+            <strong>{m.value}</strong>
+            <p>{m.sub}</p>
+          </article>
+        ))}
       </section>
-      <section className="report-highlights" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
-        <article><span>Vencidos</span><strong>{fmt(kpis.vencidos)}</strong></article>
-        <article><span>Devueltos a soporte</span><strong>{fmt(kpis.devueltos)}</strong><p>Rechazos de validación</p></article>
-        <article><span>Escalados abiertos</span><strong>{fmt(kpis.escalados_abiertos)}</strong><p>En áreas externas</p></article>
-        <article><span>Tiempo prom. escalado</span><strong>{fmtDur(kpis.tiempo_prom_escalado_min)}</strong><p>Contador por ticket</p></article>
-      </section>
-      <section className="report-highlights" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
-        <article><span>Respuesta soporte</span><strong>{fmtDur(kpis.t_respuesta_min)}</strong><p>Creado → tomado</p></article>
-        <article><span>Atención soporte</span><strong>{fmtDur(kpis.aht_minutos)}</strong><p>Tomado → resuelto</p></article>
-        <article><span>Cierre despacho</span><strong>{fmtDur(kpis.t_cierre_min)}</strong><p>Validación → cierre</p></article>
+      <section className="reports-grid">
+        <article className="panel channel-panel"><PanelHeading eyebrow="Mezcla" title="Por servicio" />
+          <div className="donut-layout">
+            <div className="donut" style={{ background: donutBg }}><span>{totalService}<small>tickets</small></span></div>
+            <div className="donut-legend">{byService.length === 0 && <span>Sin datos</span>}{byService.map((r, i) => <span key={r.service}><i style={{ background: donutColors[i % donutColors.length] }} /> {r.service} <b>{r.total} · {totalService ? Math.round((r.total / totalService) * 100) : 0}%</b></span>)}</div>
+          </div>
+        </article>
+        <article className="panel performance-panel"><PanelHeading eyebrow="Carga" title="Por grupo" />
+          <div className="performance-bars">{byGroup.length === 0 && <p className="detail-empty">Sin datos.</p>}{byGroup.map((r) => <ReportBar key={r.group} label={r.group} value={kpis.entrantes ? Math.round((r.total / kpis.entrantes) * 100) : 0} />)}</div>
+        </article>
       </section>
       {porArea.length > 0 && <article className="panel" style={{ padding: "14px 20px", marginBottom: "17px" }}><PanelHeading eyebrow="Escalamiento" title="Por área" /><div style={{ display: "flex", flexWrap: "wrap", gap: "8px 22px" }}>{porArea.map((r) => <span key={r.area} style={{ fontSize: "11px", color: "var(--muted)" }}><b style={{ color: "var(--ink)" }}>{r.total}</b> {r.area}</span>)}</div></article>}
       <section className="reports-grid" style={{ gridTemplateColumns: "1fr" }}>
@@ -1615,6 +1670,10 @@ function UserFormModal({ onClose, onSave, teams, groups, user }) {
       setError("Selecciona al menos un grupo para despachador o soporte.");
       return;
     }
+    if (form.password && !isStrongPassword(form.password)) {
+      setError("La contraseña no cumple la política (10+, mayúscula, minúscula y número).");
+      return;
+    }
     setSubmitting(true);
     setError("");
     try {
@@ -1636,7 +1695,8 @@ function UserFormModal({ onClose, onSave, teams, groups, user }) {
             <label className="field field-wide"><span>Correo institucional <b>*</b></span><input required type="email" name="email" value={form.email} onChange={updateField} placeholder="nombre@empresa.com" /></label>
             <label className="field"><span>Rol <b>*</b></span><select name="role" value={form.role} onChange={updateField}><option value="DESPACHADOR">Despachador</option><option value="SOPORTE">Agente de soporte</option><option value="SUPERVISOR">Supervisor</option><option value="ADMIN">Administrador</option></select></label>
             {form.role === "SUPERVISOR" ? <label className="field field-wide"><span>Grupos supervisados <b>*</b></span><div className="teams-checklist compact">{groups.map((g) => <label key={g.id} className="team-check"><input type="checkbox" checked={form.managedGroups.includes(String(g.id))} onChange={() => toggleGroup(g.id)} /><span>{g.name} <small>· {g.code}</small></span></label>)}{groups.length === 0 && <small>Sin grupos registrados</small>}</div></label> : <label className="field field-wide"><span>Grupos {(form.role !== "ADMIN") && <b>*</b>}</span><div className="teams-checklist compact">{groups.map((g) => { const groupTeams = teams.filter((t) => String(t.group) === String(g.id) || String(t.group_detail?.id) === String(g.id)); if (!groupTeams.length) return null; const allSelected = groupTeams.every((t) => form.teams.includes(String(t.id))); return <label key={g.id} className="team-check"><input type="checkbox" checked={allSelected} onChange={() => toggleGroupTeams(g.id)} /><span>{g.name} <small>· {g.code}</small></span></label>; })}{groups.length === 0 && <small>Sin grupos registrados</small>}</div></label>}
-            <label className="field field-wide"><span>{isNew ? "Contraseña temporal" : "Nueva contraseña"} {isNew && <b>*</b>}</span><input required={isNew} minLength="8" name="password" type="password" value={form.password} onChange={updateField} placeholder={isNew ? "Mínimo 8 caracteres" : "Déjalo vacío para conservarla"} /></label>
+            <label className="field field-wide"><span>{isNew ? "Contraseña temporal" : "Nueva contraseña"}</span><input minLength="10" name="password" type="password" value={form.password} onChange={updateField} placeholder={isNew ? "Vacía para enviar invitación por correo" : "Déjalo vacío para conservarla"} /><PasswordChecklist value={form.password} /></label>
+            {isNew && !form.password && <p className="form-info" role="status"><Icon name="shield" size={16} /> Sin contraseña se enviará invitación por correo para definirla.</p>}
           </div>
           <label className="active-user-toggle"><input checked={form.isActive} name="isActive" type="checkbox" onChange={updateField} /><span><i /></span><div><strong>Usuario activo</strong><small>Puede iniciar sesión y recibir asignaciones.</small></div></label>
           {error && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}
@@ -1727,8 +1787,8 @@ function PasswordResetModal({ onClose, onSave, user }) {
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  async function submit(e) { e.preventDefault(); if (password.length < 8) { setError("La contraseña debe tener al menos 8 caracteres."); return; } if (password !== confirm) { setError("Las contraseñas no coinciden."); return; } setSubmitting(true); setError(""); try { await onSave(user, password); } catch (err) { setError(err.message || "No fue posible restablecer la contraseña."); setSubmitting(false); } }
-  return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="ticket-modal user-modal" role="dialog" aria-modal="true" aria-labelledby="pwd-title" onMouseDown={(e) => e.stopPropagation()}><header className="modal-header"><div><p className="eyebrow">Seguridad</p><h2 id="pwd-title">Restablecer contraseña</h2><p>Define una nueva contraseña para {user.name} ({user.email}).</p></div><button className="icon-button" type="button" aria-label="Cerrar" onClick={onClose}><Icon name="close" /></button></header><form onSubmit={submit}><div className="form-grid user-form-grid"><label className="field field-wide"><span>Nueva contraseña <b>*</b></span><input autoFocus required minLength="8" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mínimo 8 caracteres" /></label><label className="field field-wide"><span>Confirmar contraseña <b>*</b></span><input required minLength="8" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Repite la contraseña" /></label></div>{error && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}<footer className="modal-actions"><button className="secondary-button" disabled={submitting} type="button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={submitting} type="submit"><Icon name="shield" size={18} /> {submitting ? "Guardando..." : "Restablecer"}</button></footer></form></section></div>;
+  async function submit(e) { e.preventDefault(); if (!isStrongPassword(password)) { setError("La contraseña no cumple la política (10+, mayúscula, minúscula y número)."); return; } if (password !== confirm) { setError("Las contraseñas no coinciden."); return; } setSubmitting(true); setError(""); try { await onSave(user, password); } catch (err) { setError(err.message || "No fue posible restablecer la contraseña."); setSubmitting(false); } }
+  return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="ticket-modal user-modal" role="dialog" aria-modal="true" aria-labelledby="pwd-title" onMouseDown={(e) => e.stopPropagation()}><header className="modal-header"><div><p className="eyebrow">Seguridad</p><h2 id="pwd-title">Restablecer contraseña</h2><p>Define una nueva contraseña para {user.name} ({user.email}).</p></div><button className="icon-button" type="button" aria-label="Cerrar" onClick={onClose}><Icon name="close" /></button></header><form onSubmit={submit}><div className="form-grid user-form-grid"><label className="field field-wide"><span>Nueva contraseña <b>*</b></span><input autoFocus required minLength="10" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mínimo 10 caracteres" /><PasswordChecklist value={password} /></label><label className="field field-wide"><span>Confirmar contraseña <b>*</b></span><input required minLength="10" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Repite la contraseña" /></label></div>{error && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}<footer className="modal-actions"><button className="secondary-button" disabled={submitting} type="button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={submitting} type="submit"><Icon name="shield" size={18} /> {submitting ? "Guardando..." : "Restablecer"}</button></footer></form></section></div>;
 }
 
 function PageHeader({ eyebrow, title, description, action }) {
@@ -2419,7 +2479,7 @@ function PasswordResetPage({ brand, theme, onToggleTheme }) {
     setError("");
     setSuccess("");
     if (!uid.trim() || !token.trim()) { setError("El enlace debe contener uid y token. Solicita un nuevo correo si es necesario."); return; }
-    if (newPassword.length < 8) { setError("La nueva contraseña debe tener al menos 8 caracteres."); return; }
+    if (!isStrongPassword(newPassword)) { setError("La contraseña no cumple la política (10+, mayúscula, minúscula y número)."); return; }
     if (newPassword !== confirm) { setError("Las contraseñas no coinciden."); return; }
     setSubmitting(true);
     try {
@@ -2459,8 +2519,8 @@ function PasswordResetPage({ brand, theme, onToggleTheme }) {
             <p className="login-copy">Define tu nueva clave. El enlace es válido por 1 hora y de un solo uso.</p>
             <input type="hidden" value={uid} />
             <input type="hidden" value={token} />
-            <label className="login-field"><span>Nueva contraseña</span><input required minLength="8" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Mínimo 8 caracteres" /></label>
-            <label className="login-field"><span>Confirmar contraseña</span><input required minLength="8" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Repite la clave" /></label>
+            <label className="login-field"><span>Nueva contraseña</span><input required minLength="10" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Mínimo 10 caracteres" /><PasswordChecklist value={newPassword} /></label>
+            <label className="login-field"><span>Confirmar contraseña</span><input required minLength="10" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Repite la clave" /></label>
             {error && <p className="login-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}
             <button className="primary-button login-submit" disabled={submitting} type="submit">{submitting ? "Guardando..." : "Restablecer clave"}</button>
             <a className="text-button" href="/" style={{ display: "inline-flex", marginTop: "12px", justifyContent: "center", width: "100%", textDecoration: "none" }}>Volver al inicio de sesión</a>

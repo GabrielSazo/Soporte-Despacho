@@ -234,8 +234,8 @@ class PasswordResetConfirmView(APIView):
             raise ValidationError({"token": "El enlace no es válido."})
         if not password_reset_token_generator.check_token(user, token):
             raise ValidationError({"token": "El token es inválido o ha expirado. Solicita uno nuevo."})
-        if len(new_password) < 8:
-            raise ValidationError({"new_password": ["La contraseña debe tener al menos 8 caracteres."]})
+        if len(new_password) < 10:
+            raise ValidationError({"new_password": ["La contraseña debe tener al menos 10 caracteres."]})
         try:
             validate_password(new_password, user=None)
         except DjangoValidationError as exc:
@@ -268,8 +268,14 @@ class UserViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         from .audit import audit
         from .models import AuditLog
+        had_password = bool(serializer.validated_data.get("password"))
         obj = serializer.save()
         audit(self.request.user, AuditLog.Action.USER_CREATED, entidad="usuario", entidad_id=str(obj.pk), detalle=f"{obj.email} ({obj.get_role_display()})", request=self.request)
+        if not had_password:
+            try:
+                send_invitation_email(obj)
+            except Exception:
+                pass
 
     def get_queryset(self):
         qs = super().get_queryset()

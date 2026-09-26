@@ -73,7 +73,7 @@ class CurrentUserSerializer(serializers.ModelSerializer):
 
 class UserSerializer(serializers.ModelSerializer):
     name = serializers.CharField(source="display_name", read_only=True)
-    password = serializers.CharField(write_only=True, required=False, min_length=8)
+    password = serializers.CharField(write_only=True, required=False, min_length=10)
     teams = serializers.PrimaryKeyRelatedField(queryset=Team.objects.all(), many=True, required=False)
     teams_detail = TeamSummarySerializer(source="teams", many=True, read_only=True)
     managed_groups = serializers.PrimaryKeyRelatedField(queryset=WorkGroup.objects.all(), many=True, required=False)
@@ -104,10 +104,15 @@ class UserSerializer(serializers.ModelSerializer):
         extra_kwargs = {"password": {"write_only": True}}
 
     def create(self, validated_data):
-        password = validated_data.pop("password")
+        password = validated_data.pop("password", None)
         teams = validated_data.pop("teams", [])
         mgroups = validated_data.pop("managed_groups", [])
-        user = User.objects.create_user(password=password, **validated_data)
+        if password:
+            user = User.objects.create_user(password=password, **validated_data)
+        else:
+            user = User(**validated_data)
+            user.set_unusable_password()
+            user.save()
         if teams:
             user.teams.set(teams)
         if mgroups:
@@ -115,8 +120,6 @@ class UserSerializer(serializers.ModelSerializer):
         return user
 
     def validate(self, attrs):
-        if not self.instance and not attrs.get("password"):
-            raise serializers.ValidationError({"password": "La contraseña es obligatoria al crear un usuario."})
         role = attrs.get("role", getattr(self.instance, "role", None))
         if self.instance:
             has_teams = attrs.get("teams") is not None and len(attrs.get("teams")) > 0 or self.instance.teams.exists()
