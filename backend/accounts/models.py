@@ -117,6 +117,7 @@ class User(AbstractUser):
 
 class AuditLog(models.Model):
     class Action(models.TextChoices):
+        LOGIN = "INICIO_SESION", "Inicio de sesión"
         USER_CREATED = "USUARIO_CREADO", "Usuario creado"
         USER_EDITED = "USUARIO_EDITADO", "Usuario editado"
         USER_DEACTIVATED = "USUARIO_DESACTIVADO", "Usuario desactivado"

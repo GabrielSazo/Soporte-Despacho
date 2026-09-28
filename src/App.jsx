@@ -98,6 +98,31 @@ function shortName(name = "") {
   return `${parts[0]} ${parts[2]}`;
 }
 
+function passwordChecks(pw = "") {
+  return [
+    { label: "Mínimo 10 caracteres", ok: pw.length >= 10 },
+    { label: "Una mayúscula", ok: /[A-ZÁÉÍÓÚÜÑ]/.test(pw) },
+    { label: "Una minúscula", ok: /[a-záéíóúüñ]/.test(pw) },
+    { label: "Un número", ok: /[0-9]/.test(pw) },
+  ];
+}
+
+function isStrongPassword(pw = "") {
+  return passwordChecks(pw).every((c) => c.ok);
+}
+
+function PasswordChecklist({ value }) {
+  const checks = passwordChecks(value);
+  if (!value) return null;
+  return (
+    <ul className="password-checks" aria-live="polite">
+      {checks.map((c) => (
+        <li key={c.label} className={c.ok ? "ok" : ""}><span>{c.ok ? "✓" : "○"}</span> {c.label}</li>
+      ))}
+    </ul>
+  );
+}
+
 function avatarClass(name = "") {
   if (name.includes("Andrea")) return "avatar-andrea";
   if (name.includes("Mario")) return "avatar-mario";
@@ -784,7 +809,7 @@ function App() {
     if (filter === "Trabajables") return ["ABIERTO", "ASIGNADO"].includes(ticket.statusCode) && ticket.assigneeId !== session?.id;
     return !statusMap[filter] || ticket.statusCode === statusMap[filter];
   });
-  const canCreateTickets = session && ["DESPACHADOR", "ADMIN", "SUPERVISOR"].includes(session.role);
+  const canCreateTickets = session && ["DESPACHADOR"].includes(session.role);
   const visibleNavigation = session?.role === "DESPACHADOR"
     ? navigation.filter((item) => ["Tickets", "Validaciones", "Escalados"].includes(item.label))
     : session && ["ADMIN", "SUPERVISOR"].includes(session.role) ? [...navigation, { label: "Administración", icon: "users" }] : navigation;
@@ -1021,7 +1046,7 @@ const BASE_FAVICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/sv
           {isLoading ? <LoadingState /> : <>
             {activeView === "Resumen" && <Dashboard canCreate={canCreateTickets} criticalTickets={criticalTickets} dashboard={dashboard} onCreate={() => setNewTicketOpen(true)} onOpen={openTicketDetail} onShowTickets={() => setActiveView("Tickets")} tickets={tickets} validationTickets={validationTickets} />}
             {activeView === "Tickets" && <TicketsView canCreate={canCreateTickets} currentUser={session} filter={filter} filteredTickets={filteredTickets} onCreate={() => setNewTicketOpen(true)} onFilterChange={setFilter} onNotify={notify} onOpen={openTicketDetail} onResolve={setTicketToResolve} onTake={takeTicket} query={query} setQuery={setQuery} />}
-            {activeView === "Validaciones" && <ValidationsView canValidate={["DESPACHADOR", "ADMIN", "SUPERVISOR"].includes(session.role)} tickets={validationTickets} onOpen={openTicketDetail} onValidate={validateTicket} />}
+            {activeView === "Validaciones" && <ValidationsView canValidate={["DESPACHADOR", "ADMIN", "SUPERVISOR"].includes(session.role)} tickets={validationTickets} onAttach={attachToTicket} onOpen={openTicketDetail} onValidate={validateTicket} />}
             {activeView === "Escalados" && <EscalationsView currentUser={session} tickets={escalatedTickets} onOpen={openTicketDetail} onDeescalate={deescalateTicket} />}
             {activeView === "Mi grupo" && <TeamView currentUser={session} onlineIds={onlineIds} onNotify={notify} tickets={tickets} users={users} />}
             {activeView === "Informes" && <ReportsView groups={groups} onNotify={notify} />}
@@ -1084,7 +1109,7 @@ function Dashboard({ canCreate, criticalTickets, dashboard, onCreate, onOpen, on
       <PageHeader
         eyebrow="Operación en tiempo real"
         title="Todo bajo control."
-        description="Supervisa el trabajo de tu equipo y prioriza lo que necesita atención ahora."
+        description=""
         action={canCreate ? <button className="primary-button" type="button" onClick={onCreate}><Icon name="plus" size={18} /> Nuevo ticket</button> : null}
       />
 
@@ -1178,7 +1203,7 @@ function TicketsView({ canCreate, currentUser, filter, filteredTickets, onCreate
       <PageHeader
         eyebrow="Gestión de solicitudes"
         title="Bandeja de tickets"
-        description="Consulta y prioriza los casos asignados a tu grupo de trabajo."
+        description=""
         action={canCreate ? <button className="primary-button" type="button" onClick={onCreate}><Icon name="plus" size={18} /> Nuevo ticket</button> : null}
       />
       <article className="panel tickets-page-panel">
@@ -1202,9 +1227,29 @@ function TicketsView({ canCreate, currentUser, filter, filteredTickets, onCreate
   );
 }
 
-function ValidationsView({ canValidate, tickets, onOpen, onValidate }) {
+function ValidationsView({ canValidate, tickets, onAttach, onOpen, onValidate }) {
   const [rejectId, setRejectId] = useState(null);
   const [rejectComment, setRejectComment] = useState("");
+  const [rejectFiles, setRejectFiles] = useState([]);
+  const [compressingReject, setCompressingReject] = useState(false);
+
+  async function confirmReject(ticket) {
+    await onValidate(ticket, false, rejectComment);
+    const files = rejectFiles.slice(0, 5);
+    for (const f of files) {
+      try {
+        await onAttach(ticket, f);
+      } catch {
+        break;
+      }
+    }
+    setRejectId(null);
+    setRejectComment("");
+    setRejectFiles([]);
+    setRejectId(null);
+    setRejectComment("");
+    setRejectFiles([]);
+  }
   return (
     <>
       <PageHeader
@@ -1218,9 +1263,9 @@ function ValidationsView({ canValidate, tickets, onOpen, onValidate }) {
             <div className="validation-card-top"><span className="ticket-id">{ticket.id}</span><span className="status-pill status-validation">Validación</span></div>
             <h2>{ticket.title}</h2>
             <div className="solution-note"><Icon name="checkCircle" size={19} /><div><span>Solución de Soporte</span><p>{ticket.resolutionNotes || "Soporte marcó este caso como resuelto. Confirma el resultado en campo."}</p></div></div>
-            {ticket.attachments?.length > 0 && <div className="validation-evidence" onClick={(e) => e.stopPropagation()}><span>Evidencia de solución · {ticket.attachments.length} imagen{ticket.attachments.length === 1 ? "" : "es"}</span><div className="validation-thumbs">{ticket.attachments.map((a) => <a key={a.id} href={a.url} target="_blank" rel="noreferrer" title={a.original_name}><img src={a.url} alt={a.original_name} loading="lazy" onError={(e) => { e.target.style.display = "none"; }} /></a>)}</div></div>}
+            {(ticket.attachments || []).filter((a) => a.kind === "SOLUCION").length > 0 && <div className="validation-evidence" onClick={(e) => e.stopPropagation()}><span>Evidencia de solución · {ticket.attachments.filter((a) => a.kind === "SOLUCION").length} imagen{ticket.attachments.filter((a) => a.kind === "SOLUCION").length === 1 ? "" : "es"}</span><div className="validation-thumbs">{ticket.attachments.filter((a) => a.kind === "SOLUCION").map((a) => <a key={a.id} href={a.url} target="_blank" rel="noreferrer" title={a.original_name}><img src={a.url} alt={a.original_name} loading="lazy" onError={(e) => { e.target.style.display = "none"; }} /></a>)}</div></div>}
             <div className="validation-meta"><span><div className="avatar small-avatar">{initials(ticket.assignee)}</div> {ticket.assignee}</span><span><Icon name="clock" size={16} /> {ticket.created}</span></div>
-            {rejectId === ticket.apiId && canValidate ? <div style={{ display: "grid", gap: "8px", marginTop: "10px" }} onClick={(e) => e.stopPropagation()}><textarea value={rejectComment} onChange={(e) => setRejectComment(e.target.value)} placeholder="Motivo del rechazo (obligatorio)" rows="3" style={{ width: "100%", border: "1px solid var(--line-strong)", borderRadius: "6px", padding: "8px", fontSize: "11px" }} /><div style={{ display: "flex", gap: "6px" }}><button className="secondary-button" disabled={!rejectComment.trim()} type="button" onClick={() => { onValidate(ticket, false, rejectComment); setRejectId(null); setRejectComment(""); }}>Confirmar rechazo</button><button className="secondary-button" type="button" onClick={() => { setRejectId(null); setRejectComment(""); }}>Cancelar</button></div></div> : canValidate ? <div className="validation-actions" onClick={(e) => e.stopPropagation()}><button className="secondary-button" type="button" onClick={() => setRejectId(ticket.apiId)}>Rechazar y devolver</button><button className="primary-button" type="button" onClick={() => onValidate(ticket, true)}><Icon name="check" size={17} /> Aprobar solución</button></div> : null}
+            {rejectId === ticket.apiId && canValidate ? <div style={{ display: "grid", gap: "8px", marginTop: "10px" }} onClick={(e) => e.stopPropagation()} onPaste={async (e) => { const files = extractClipboardImages(e); if (!files.length) return; e.preventDefault(); e.stopPropagation(); setCompressingReject(true); try { const picked = []; for (const f of files) picked.push(await compressImageFile(f)); setRejectFiles(picked.slice(0, 5)); } finally { setCompressingReject(false); } }}><textarea value={rejectComment} onChange={(e) => setRejectComment(e.target.value)} onPaste={(e) => { pasteTableAsText(e, setRejectComment); }} placeholder="Motivo del rechazo (obligatorio)" rows="3" style={{ width: "100%", border: "1px solid var(--line-strong)", borderRadius: "6px", padding: "8px", fontSize: "11px" }} /><label className="upload-box small"><input type="file" accept=".jpg,.jpeg,.png" multiple onChange={async (e) => { setCompressingReject(true); try { const picked = []; for (const f of Array.from(e.target.files || [])) picked.push(await compressImageFile(f)); setRejectFiles(picked.slice(0, 5)); } finally { setCompressingReject(false); e.target.value = ""; } }} /><Icon name="upload" size={16} /><span>{compressingReject ? "Procesando imágenes…" : rejectFiles.length ? `${rejectFiles.length} para adjuntar` : "Adjuntar evidencia (opcional)"}</span></label><div style={{ display: "flex", gap: "6px" }}><button className="secondary-button" disabled={!rejectComment.trim() || compressingReject} type="button" onClick={() => confirmReject(ticket)}>Confirmar rechazo</button><button className="secondary-button" type="button" onClick={() => { setRejectId(null); setRejectComment(""); setRejectFiles([]); }}>Cancelar</button></div></div> : canValidate ? <div className="validation-actions" onClick={(e) => e.stopPropagation()}><button className="secondary-button" type="button" onClick={() => setRejectId(ticket.apiId)}>Rechazar y devolver</button><button className="primary-button" type="button" onClick={() => onValidate(ticket, true)}><Icon name="check" size={17} /> Aprobar solución</button></div> : null}
             <div style={{ marginTop: "8px", fontSize: "10px", color: "var(--quiet)", textAlign: "center" }}>Clic para ver detalle →</div>
           </article>
         ))}
@@ -1323,6 +1368,7 @@ function TeamView({ currentUser, onlineIds, onNotify, tickets, users }) {
   const inRange = (t) => !rangeFrom || new Date(t.createdAt) >= rangeFrom;
   const peopleByName = new Map();
   const isSupView = currentUser.role === "SUPERVISOR";
+  const isSupportView = currentUser.role === "SOPORTE";
   const myCodes = new Set([...(currentUser.groups || []).map((g) => g.code), ...((currentUser.teams || []).map((t) => t.group?.code || t.group))].filter(Boolean));
   const inScope = (u) => {
     const teams = u.teams || [];
@@ -1330,7 +1376,7 @@ function TeamView({ currentUser, onlineIds, onNotify, tickets, users }) {
     const codes = [...teams.map((t) => t.group?.code || t.group_detail?.code), ...mgroups.map((g) => g.code || g)];
     return codes.some((c) => c && myCodes.has(c));
   };
-  const memberUsers = (users || []).filter((u) => u.is_active && !u.is_locked && (!isSupView || ((u.role === "DESPACHADOR" || u.role === "SOPORTE") && inScope(u))));
+  const memberUsers = (users || []).filter((u) => u.is_active && !u.is_locked && (!isSupView || ((u.role === "DESPACHADOR" || u.role === "SOPORTE") && inScope(u))) && (!isSupportView || u.role === "DESPACHADOR" || u.role === "SOPORTE"));
   if (memberUsers.length) {
     memberUsers.forEach((u) => {
       peopleByName.set(u.name, { id: u.id, initials: u.initials, name: u.name, role: u.roleLabel, load: 0, status: (onlineIds || []).map(Number).includes(Number(u.id)) ? "En línea" : "Ausente", className: u.avatarClass });
@@ -1341,6 +1387,10 @@ function TeamView({ currentUser, onlineIds, onNotify, tickets, users }) {
   tickets.forEach((ticket) => {
     if (ticket.assignee === "Sin asignar") return;
     if (isSupView && !peopleByName.get(ticket.assignee)) return;
+    if (isSupportView) {
+      const au = (users || []).find((x) => x.name === ticket.assignee);
+      if (au && au.role !== "DESPACHADOR" && au.role !== "SOPORTE") return;
+    }
     const person = peopleByName.get(ticket.assignee) || { id: null, initials: initials(ticket.assignee), name: ticket.assignee, role: "Soporte", load: 0, status: "Ausente", className: avatarClass(ticket.assignee) };
     if (ticket.statusCode !== "CERRADO") person.load += 1;
     peopleByName.set(ticket.assignee, person);
@@ -1447,6 +1497,20 @@ function ReportsView({ groups, onNotify }) {
 
   const kpis = summary?.kpis || {};
   const porArea = summary?.por_area_escalada || [];
+  const byService = summary?.by_service || [];
+  const byGroup = summary?.by_group || [];
+  const totalService = byService.reduce((s, r) => s + r.total, 0);
+  const donutColors = ["#001EB4", "#667EEA", "#00B2A9", "#F5A623", "#E5484D", "#8E8EA0"];
+  const donutBg = (() => {
+    if (!totalService) return "#e8eee9";
+    let acc = 0;
+    return "conic-gradient(" + byService.map((r, i) => {
+      const from = (acc / totalService) * 100;
+      acc += r.total;
+      const to = (acc / totalService) * 100;
+      return `${donutColors[i % donutColors.length]} ${from}% ${to}%`;
+    }).join(", ") + ")";
+  })();
   const daily = summary?.daily || [];
   const maxDaily = Math.max(1, ...daily.map((d) => d.total));
   const maxAhtDay = Math.max(0, ...daily.map((d) => d.aht_minutos || 0));
@@ -1470,7 +1534,7 @@ function ReportsView({ groups, onNotify }) {
 
   return (
     <>
-      <PageHeader eyebrow="Indicadores operativos" title="El turno en cifras" description="Filtra por grupo, servicio y fecha. AHT = tiempo promedio de atención (tomado → resuelto)." action={<button className="primary-button" type="button" disabled={downloading} onClick={download}><Icon name="upload" size={18} /> {downloading ? "Descargando..." : "Descargar CSV"}</button>} />
+      <PageHeader eyebrow="Indicadores operativos" title="El turno en cifras" description="" action={<button className="primary-button" type="button" disabled={downloading} onClick={download}><Icon name="upload" size={18} /> {downloading ? "Descargando..." : "Descargar CSV"}</button>} />
       <article className="panel" style={{ padding: "16px 20px", marginBottom: "17px" }}>
         <div className="form-grid" style={{ marginTop: 0 }}>
           <label className="field"><span>Rango</span><select value={range} onChange={(e) => applyRange(e.target.value)} aria-label="Rango de fechas"><option value="todo">Todo</option><option value="hoy">Hoy</option><option value="semana">Esta semana</option><option value="mes">Este mes</option><option value="custom">Personalizado</option></select></label>
@@ -1481,23 +1545,39 @@ function ReportsView({ groups, onNotify }) {
         </div>
         <footer className="modal-actions" style={{ margin: "12px 0 0", padding: 0, border: 0 }}><button className="primary-button" type="button" disabled={loading} onClick={load}>{loading ? "Cargando..." : "Aplicar filtros"}</button></footer>
       </article>
-      <section className="report-highlights" style={{ gridTemplateColumns: "repeat(5, minmax(0, 1fr))" }}>
-        <article><span>Entrantes</span><strong>{fmt(kpis.entrantes)}</strong></article>
-        <article><span>Resueltos</span><strong>{fmt(kpis.resueltos)}</strong></article>
-        <article><span>AHT</span><strong>{fmtDur(kpis.aht_minutos)}</strong><p>Tomado → resuelto</p></article>
-        <article><span>% SLA cumplido</span><strong>{fmt(kpis.pct_sla, "%")}</strong><p><b>Meta: 90%</b></p></article>
-        <article><span>En proceso</span><strong>{fmt(kpis.en_proceso)}</strong></article>
+      <section className="metrics-grid" aria-label="Indicadores">
+        {[
+          { label: "Entrantes", value: fmt(kpis.entrantes), sub: "tickets en el rango", icon: "ticket", tone: "green" },
+          { label: "Resueltos", value: fmt(kpis.resueltos), sub: "enviados a validación", icon: "checkCircle", tone: "violet" },
+          { label: "AHT", value: fmtDur(kpis.aht_minutos), sub: "tomado → resuelto", icon: "clock", tone: "blue" },
+          { label: "% SLA cumplido", value: fmt(kpis.pct_sla, "%"), sub: "meta 90%", icon: "activity", tone: "blue" },
+          { label: "En proceso", value: fmt(kpis.en_proceso), sub: "casos abiertos", icon: "users", tone: "green" },
+          { label: "Vencidos", value: fmt(kpis.vencidos), sub: "fuera de SLA", icon: "alert", tone: "coral" },
+          { label: "Devueltos", value: fmt(kpis.devueltos), sub: "rechazos a soporte", icon: "ticket", tone: "coral" },
+          { label: "Escalados", value: fmt(kpis.escalados_abiertos), sub: "en áreas externas", icon: "upload", tone: "violet" },
+          { label: "T. escalado", value: fmtDur(kpis.tiempo_prom_escalado_min), sub: "promedio en área", icon: "clock", tone: "violet" },
+          { label: "Respuesta", value: fmtDur(kpis.t_respuesta_min), sub: "creado → tomado", icon: "bell", tone: "green" },
+          { label: "Atención", value: fmtDur(kpis.aht_minutos), sub: "tomado → resuelto", icon: "checkCircle", tone: "blue" },
+          { label: "Cierre", value: fmtDur(kpis.t_cierre_min), sub: "validación → cierre", icon: "shield", tone: "green" },
+        ].map((m) => (
+          <article className="metric-card" key={m.label}>
+            <div className={`metric-icon ${m.tone}`}><Icon name={m.icon} size={21} /></div>
+            <div className="metric-heading"><span>{m.label}</span></div>
+            <strong>{m.value}</strong>
+            <p>{m.sub}</p>
+          </article>
+        ))}
       </section>
-      <section className="report-highlights" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
-        <article><span>Vencidos</span><strong>{fmt(kpis.vencidos)}</strong></article>
-        <article><span>Devueltos a soporte</span><strong>{fmt(kpis.devueltos)}</strong><p>Rechazos de validación</p></article>
-        <article><span>Escalados abiertos</span><strong>{fmt(kpis.escalados_abiertos)}</strong><p>En áreas externas</p></article>
-        <article><span>Tiempo prom. escalado</span><strong>{fmtDur(kpis.tiempo_prom_escalado_min)}</strong><p>Contador por ticket</p></article>
-      </section>
-      <section className="report-highlights" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
-        <article><span>Respuesta soporte</span><strong>{fmtDur(kpis.t_respuesta_min)}</strong><p>Creado → tomado</p></article>
-        <article><span>Atención soporte</span><strong>{fmtDur(kpis.aht_minutos)}</strong><p>Tomado → resuelto</p></article>
-        <article><span>Cierre despacho</span><strong>{fmtDur(kpis.t_cierre_min)}</strong><p>Validación → cierre</p></article>
+      <section className="reports-grid">
+        <article className="panel channel-panel"><PanelHeading eyebrow="Mezcla" title="Por servicio" />
+          <div className="donut-layout">
+            <div className="donut" style={{ background: donutBg }}><span>{totalService}<small>tickets</small></span></div>
+            <div className="donut-legend">{byService.length === 0 && <span>Sin datos</span>}{byService.map((r, i) => <span key={r.service}><i style={{ background: donutColors[i % donutColors.length] }} /> {r.service} <b>{r.total} · {totalService ? Math.round((r.total / totalService) * 100) : 0}%</b></span>)}</div>
+          </div>
+        </article>
+        <article className="panel performance-panel"><PanelHeading eyebrow="Carga" title="Por grupo" />
+          <div className="performance-bars">{byGroup.length === 0 && <p className="detail-empty">Sin datos.</p>}{byGroup.map((r) => <ReportBar key={r.group} label={r.group} value={kpis.entrantes ? Math.round((r.total / kpis.entrantes) * 100) : 0} />)}</div>
+        </article>
       </section>
       {porArea.length > 0 && <article className="panel" style={{ padding: "14px 20px", marginBottom: "17px" }}><PanelHeading eyebrow="Escalamiento" title="Por área" /><div style={{ display: "flex", flexWrap: "wrap", gap: "8px 22px" }}>{porArea.map((r) => <span key={r.area} style={{ fontSize: "11px", color: "var(--muted)" }}><b style={{ color: "var(--ink)" }}>{r.total}</b> {r.area}</span>)}</div></article>}
       <section className="reports-grid" style={{ gridTemplateColumns: "1fr" }}>
@@ -1548,7 +1628,7 @@ function UsersView({ areas, auditLogs, error, groups, loading, onBulk, onCreate,
 
   return (
     <>
-      <PageHeader eyebrow="Administración" title="Administración" description="Gestiona personas, grupos, catálogos y accesos. Los roles son asignables por administrador y las credenciales se restablecen desde aquí." action={tab === "usuarios" ? <div style={{ display: "flex", gap: "8px" }}>{currentRole === "ADMIN" && <button className="secondary-button" type="button" onClick={onBulk}><Icon name="upload" size={18} /> Carga masiva</button>}{currentRole === "ADMIN" && <button className="primary-button" type="button" onClick={onCreate}><Icon name="plus" size={18} /> Nuevo usuario</button>}</div> : tab === "tipos" ? <button className="primary-button" type="button" onClick={onCreateRequestType}><Icon name="plus" size={18} /> Nuevo tipo</button> : tab === "areas" ? <button className="primary-button" type="button" onClick={onCreateArea}><Icon name="plus" size={18} /> Nueva área</button> : tab === "auditoria" ? null : <button className="primary-button" type="button" onClick={onCreateGroup}><Icon name="plus" size={18} /> Nuevo grupo</button>} />
+      <PageHeader eyebrow="Administración" title="Administración" description="" action={tab === "usuarios" ? <div style={{ display: "flex", gap: "8px" }}>{currentRole === "ADMIN" && <button className="secondary-button" type="button" onClick={onBulk}><Icon name="upload" size={18} /> Carga masiva</button>}{currentRole === "ADMIN" && <button className="primary-button" type="button" onClick={onCreate}><Icon name="plus" size={18} /> Nuevo usuario</button>}</div> : tab === "tipos" ? <button className="primary-button" type="button" onClick={onCreateRequestType}><Icon name="plus" size={18} /> Nuevo tipo</button> : tab === "areas" ? <button className="primary-button" type="button" onClick={onCreateArea}><Icon name="plus" size={18} /> Nueva área</button> : tab === "auditoria" ? null : <button className="primary-button" type="button" onClick={onCreateGroup}><Icon name="plus" size={18} /> Nuevo grupo</button>} />
       {error && <ApiConnectionError message={error} onRetry={onRetry} />}
       {currentRole !== "SUPERVISOR" && <div className="admin-tabs" role="tablist">
         <button className={tab === "usuarios" ? "selected" : ""} type="button" role="tab" aria-selected={tab === "usuarios"} onClick={() => setTab("usuarios")}><Icon name="users" size={16} /> Usuarios <span>{users.length}</span></button>
@@ -1622,6 +1702,10 @@ function UserFormModal({ onClose, onSave, teams, groups, user }) {
       setError("Selecciona al menos un grupo para despachador o soporte.");
       return;
     }
+    if (form.password && !isStrongPassword(form.password)) {
+      setError("La contraseña no cumple la política (10+, mayúscula, minúscula y número).");
+      return;
+    }
     setSubmitting(true);
     setError("");
     try {
@@ -1643,7 +1727,8 @@ function UserFormModal({ onClose, onSave, teams, groups, user }) {
             <label className="field field-wide"><span>Correo institucional <b>*</b></span><input required type="email" name="email" value={form.email} onChange={updateField} placeholder="nombre@empresa.com" /></label>
             <label className="field"><span>Rol <b>*</b></span><select name="role" value={form.role} onChange={updateField}><option value="DESPACHADOR">Despachador</option><option value="SOPORTE">Agente de soporte</option><option value="SUPERVISOR">Supervisor</option><option value="ADMIN">Administrador</option></select></label>
             {form.role === "SUPERVISOR" ? <label className="field field-wide"><span>Grupos supervisados <b>*</b></span><div className="teams-checklist compact">{groups.map((g) => <label key={g.id} className="team-check"><input type="checkbox" checked={form.managedGroups.includes(String(g.id))} onChange={() => toggleGroup(g.id)} /><span>{g.name} <small>· {g.code}</small></span></label>)}{groups.length === 0 && <small>Sin grupos registrados</small>}</div></label> : <label className="field field-wide"><span>Grupos {(form.role !== "ADMIN") && <b>*</b>}</span><div className="teams-checklist compact">{groups.map((g) => { const groupTeams = teams.filter((t) => String(t.group) === String(g.id) || String(t.group_detail?.id) === String(g.id)); if (!groupTeams.length) return null; const allSelected = groupTeams.every((t) => form.teams.includes(String(t.id))); return <label key={g.id} className="team-check"><input type="checkbox" checked={allSelected} onChange={() => toggleGroupTeams(g.id)} /><span>{g.name} <small>· {g.code}</small></span></label>; })}{groups.length === 0 && <small>Sin grupos registrados</small>}</div></label>}
-            <label className="field field-wide"><span>{isNew ? "Contraseña temporal" : "Nueva contraseña"} {isNew && <b>*</b>}</span><input required={isNew} minLength="8" name="password" type="password" value={form.password} onChange={updateField} placeholder={isNew ? "Mínimo 8 caracteres" : "Déjalo vacío para conservarla"} /></label>
+            <label className="field field-wide"><span>{isNew ? "Contraseña temporal" : "Nueva contraseña"}</span><input minLength="10" name="password" type="password" value={form.password} onChange={updateField} placeholder={isNew ? "Vacía para enviar invitación por correo" : "Déjalo vacío para conservarla"} /><PasswordChecklist value={form.password} /></label>
+            {isNew && !form.password && <p className="form-info" role="status"><Icon name="shield" size={16} /> Sin contraseña se enviará invitación por correo para definirla.</p>}
           </div>
           <label className="active-user-toggle"><input checked={form.isActive} name="isActive" type="checkbox" onChange={updateField} /><span><i /></span><div><strong>Usuario activo</strong><small>Puede iniciar sesión y recibir asignaciones.</small></div></label>
           {error && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}
@@ -1734,8 +1819,8 @@ function PasswordResetModal({ onClose, onSave, user }) {
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  async function submit(e) { e.preventDefault(); if (password.length < 8) { setError("La contraseña debe tener al menos 8 caracteres."); return; } if (password !== confirm) { setError("Las contraseñas no coinciden."); return; } setSubmitting(true); setError(""); try { await onSave(user, password); } catch (err) { setError(err.message || "No fue posible restablecer la contraseña."); setSubmitting(false); } }
-  return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="ticket-modal user-modal" role="dialog" aria-modal="true" aria-labelledby="pwd-title" onMouseDown={(e) => e.stopPropagation()}><header className="modal-header"><div><p className="eyebrow">Seguridad</p><h2 id="pwd-title">Restablecer contraseña</h2><p>Define una nueva contraseña para {user.name} ({user.email}).</p></div><button className="icon-button" type="button" aria-label="Cerrar" onClick={onClose}><Icon name="close" /></button></header><form onSubmit={submit}><div className="form-grid user-form-grid"><label className="field field-wide"><span>Nueva contraseña <b>*</b></span><input autoFocus required minLength="8" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mínimo 8 caracteres" /></label><label className="field field-wide"><span>Confirmar contraseña <b>*</b></span><input required minLength="8" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Repite la contraseña" /></label></div>{error && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}<footer className="modal-actions"><button className="secondary-button" disabled={submitting} type="button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={submitting} type="submit"><Icon name="shield" size={18} /> {submitting ? "Guardando..." : "Restablecer"}</button></footer></form></section></div>;
+  async function submit(e) { e.preventDefault(); if (!isStrongPassword(password)) { setError("La contraseña no cumple la política (10+, mayúscula, minúscula y número)."); return; } if (password !== confirm) { setError("Las contraseñas no coinciden."); return; } setSubmitting(true); setError(""); try { await onSave(user, password); } catch (err) { setError(err.message || "No fue posible restablecer la contraseña."); setSubmitting(false); } }
+  return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="ticket-modal user-modal" role="dialog" aria-modal="true" aria-labelledby="pwd-title" onMouseDown={(e) => e.stopPropagation()}><header className="modal-header"><div><p className="eyebrow">Seguridad</p><h2 id="pwd-title">Restablecer contraseña</h2><p>Define una nueva contraseña para {user.name} ({user.email}).</p></div><button className="icon-button" type="button" aria-label="Cerrar" onClick={onClose}><Icon name="close" /></button></header><form onSubmit={submit}><div className="form-grid user-form-grid"><label className="field field-wide"><span>Nueva contraseña <b>*</b></span><input autoFocus required minLength="10" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mínimo 10 caracteres" /><PasswordChecklist value={password} /></label><label className="field field-wide"><span>Confirmar contraseña <b>*</b></span><input required minLength="10" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Repite la contraseña" /></label></div>{error && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}<footer className="modal-actions"><button className="secondary-button" disabled={submitting} type="button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={submitting} type="submit"><Icon name="shield" size={18} /> {submitting ? "Guardando..." : "Restablecer"}</button></footer></form></section></div>;
 }
 
 function PageHeader({ eyebrow, title, description, action }) {
@@ -1928,6 +2013,8 @@ function TicketDetailModal({ currentUser, isLoading, onAnalyze, onAttach, onClos
     }
   }
   const [reassignTeam, setReassignTeam] = useState("");
+  const [rejectFiles, setRejectFiles] = useState([]);
+  const [compressingReject, setCompressingReject] = useState(false);
   const reassignAttempt = useRef(0);
   const [draggingAttach, setDraggingAttach] = useState(false);
   const [rejectComment, setRejectComment] = useState("");
@@ -1954,6 +2041,7 @@ function TicketDetailModal({ currentUser, isLoading, onAnalyze, onAttach, onClos
       await action(ticket, accepted);
     } catch (error) {
       setActionError(error.message || "No fue posible actualizar el ticket.");
+    } finally {
       setActing(false);
     }
   }
@@ -2047,7 +2135,7 @@ function TicketDetailModal({ currentUser, isLoading, onAnalyze, onAttach, onClos
               {canInstruct && showInstruct && <div style={{ display: "grid", gap: "6px", marginTop: "8px", width: "100%" }}><textarea value={instructText} onChange={(e) => setInstructText(e.target.value)} onPaste={(e) => { pasteTableAsText(e, setInstructText); }} placeholder="Instrucciones para despacho (ej. retirar al técnico y confirmar ventana)" rows="3" style={{ width: "100%", border: "1px solid var(--line-strong)", borderRadius: "6px", padding: "8px", fontSize: "11px" }} /><div style={{ display: "flex", gap: "6px" }}><button className="secondary-button" disabled={acting || instructText.trim().length < 4} type="button" onClick={async () => { setActing(true); setActionError(""); try { await onInstruct(ticket, instructText.trim()); setShowInstruct(false); } catch (e) { setActionError(e.message || "No se pudo enviar."); } finally { setActing(false); } }}>Enviar instrucciones</button><button className="secondary-button" type="button" onClick={() => setShowInstruct(false)}>Cancelar</button></div></div>}
               {canValidate && <>
                 <button className="primary-button" disabled={acting} type="button" onClick={() => runAction((t) => onValidate(t, true), true)}><Icon name="check" size={17} /> Aprobar solución</button>
-                {!showReject ? <button className="secondary-button" disabled={acting} type="button" onClick={() => setShowReject(true)}>Rechazar y devolver</button> : <div style={{ display: "grid", gap: "6px", marginTop: "8px", width: "100%" }}><textarea value={rejectComment} onChange={(e) => setRejectComment(e.target.value)} onPaste={(e) => { pasteTableAsText(e, setRejectComment); }} placeholder="Motivo del rechazo (obligatorio) — explica qué falta o por qué se devuelve" rows="3" style={{ width: "100%", border: "1px solid var(--line-strong)", borderRadius: "6px", padding: "8px", fontSize: "11px" }} /><div style={{ display: "flex", gap: "6px" }}><button className="secondary-button" disabled={acting || !rejectComment.trim()} type="button" onClick={async () => { setActing(true); setActionError(""); try { await onValidate(ticket, false, rejectComment); setShowReject(false); setRejectComment(""); } catch (e) { setActionError(e.message || "No se pudo rechazar."); } finally { setActing(false); } }}>Confirmar rechazo</button><button className="secondary-button" type="button" onClick={() => { setShowReject(false); setRejectComment(""); }}>Cancelar</button></div></div>}
+                {!showReject ? <button className="secondary-button" disabled={acting} type="button" onClick={() => setShowReject(true)}>Rechazar y devolver</button> : <div style={{ display: "grid", gap: "6px", marginTop: "8px", width: "100%" }} onPaste={async (e) => { const files = extractClipboardImages(e); if (!files.length) return; e.preventDefault(); e.stopPropagation(); setCompressingReject(true); try { const picked = []; for (const f of files) picked.push(await compressImageFile(f)); setRejectFiles(picked.slice(0, 5)); } finally { setCompressingReject(false); } }}><textarea value={rejectComment} onChange={(e) => setRejectComment(e.target.value)} onPaste={(e) => { pasteTableAsText(e, setRejectComment); }} placeholder="Motivo del rechazo (obligatorio) — explica qué falta o por qué se devuelve" rows="3" style={{ width: "100%", border: "1px solid var(--line-strong)", borderRadius: "6px", padding: "8px", fontSize: "11px" }} /><label className="upload-box small"><input type="file" accept=".jpg,.jpeg,.png" multiple onChange={async (e) => { setCompressingReject(true); try { const picked = []; for (const f of Array.from(e.target.files || [])) picked.push(await compressImageFile(f)); setRejectFiles(picked.slice(0, 5)); } finally { setCompressingReject(false); e.target.value = ""; } }} /><Icon name="upload" size={16} /><span>{compressingReject ? "Procesando imágenes…" : rejectFiles.length ? `${rejectFiles.length} para adjuntar` : "Adjuntar evidencia (opcional)"}</span></label><div style={{ display: "flex", gap: "6px" }}><button className="secondary-button" disabled={acting || !rejectComment.trim() || compressingReject} type="button" onClick={async () => { setActing(true); setActionError(""); try { await onValidate(ticket, false, rejectComment); for (const f of rejectFiles.slice(0, 5)) { try { await onAttach(ticket, f); } catch { break; } } setShowReject(false); setRejectComment(""); setRejectFiles([]); } catch (e) { setActionError(e.message || "No se pudo rechazar."); } finally { setActing(false); } }}>Confirmar rechazo</button><button className="secondary-button" type="button" onClick={() => { setShowReject(false); setRejectComment(""); setRejectFiles([]); }}>Cancelar</button></div></div>}
               </>}
             </div>}
             {canReassign && <div className="detail-meta" style={{ marginTop: "14px" }}><span className="detail-label">Reasignar a persona del grupo</span><div style={{ display: "grid", gap: "6px", marginTop: "6px" }}><SearchSelect value={reassignTeam} onChange={setReassignTeam} options={candidates.map((u) => ({ value: String(u.id), label: u.name }))} placeholder="Escribe para filtrar…" ariaLabel="Reasignar a persona del grupo" /><button className="secondary-button" disabled={acting || !reassignTeam} type="button" style={{ minHeight: "34px", width: "100%" }} onClick={async () => { const attempt = ++reassignAttempt.current; setActing(true); setActionError(""); try { await onReassign(ticket, Number(reassignTeam)); if (reassignAttempt.current !== attempt) return; setReassignTeam(""); setActionError(""); } catch (e) { if (reassignAttempt.current !== attempt) return; setActionError(e.message || "No se pudo reasignar."); } finally { if (reassignAttempt.current === attempt) setActing(false); } }}>Mover</button></div>{candidates.length === 0 && <small style={{ color: "var(--quiet)", fontSize: "10px" }}>Sin agentes en este grupo.</small>}</div>}
@@ -2443,7 +2531,7 @@ function PasswordResetPage({ brand, theme, onToggleTheme }) {
     setError("");
     setSuccess("");
     if (!uid.trim() || !token.trim()) { setError("El enlace debe contener uid y token. Solicita un nuevo correo si es necesario."); return; }
-    if (newPassword.length < 8) { setError("La nueva contraseña debe tener al menos 8 caracteres."); return; }
+    if (!isStrongPassword(newPassword)) { setError("La contraseña no cumple la política (10+, mayúscula, minúscula y número)."); return; }
     if (newPassword !== confirm) { setError("Las contraseñas no coinciden."); return; }
     setSubmitting(true);
     try {
@@ -2483,8 +2571,8 @@ function PasswordResetPage({ brand, theme, onToggleTheme }) {
             <p className="login-copy">Define tu nueva clave. El enlace es válido por 1 hora y de un solo uso.</p>
             <input type="hidden" value={uid} />
             <input type="hidden" value={token} />
-            <label className="login-field"><span>Nueva contraseña</span><input required minLength="8" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Mínimo 8 caracteres" /></label>
-            <label className="login-field"><span>Confirmar contraseña</span><input required minLength="8" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Repite la clave" /></label>
+            <label className="login-field"><span>Nueva contraseña</span><input required minLength="10" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Mínimo 10 caracteres" /><PasswordChecklist value={newPassword} /></label>
+            <label className="login-field"><span>Confirmar contraseña</span><input required minLength="10" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Repite la clave" /></label>
             {error && <p className="login-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}
             <button className="primary-button login-submit" disabled={submitting} type="submit">{submitting ? "Guardando..." : "Restablecer clave"}</button>
             <a className="text-button" href="/" style={{ display: "inline-flex", marginTop: "12px", justifyContent: "center", width: "100%", textDecoration: "none" }}>Volver al inicio de sesión</a>
