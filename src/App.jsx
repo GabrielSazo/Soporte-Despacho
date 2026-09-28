@@ -797,7 +797,7 @@ function App() {
     if (filter === "Trabajables") return ["ABIERTO", "ASIGNADO"].includes(ticket.statusCode) && ticket.assigneeId !== session?.id;
     return !statusMap[filter] || ticket.statusCode === statusMap[filter];
   });
-  const canCreateTickets = session && ["DESPACHADOR", "ADMIN", "SUPERVISOR"].includes(session.role);
+  const canCreateTickets = session && ["DESPACHADOR"].includes(session.role);
   const visibleNavigation = session?.role === "DESPACHADOR"
     ? navigation.filter((item) => ["Tickets", "Validaciones", "Escalados"].includes(item.label))
     : session && ["ADMIN", "SUPERVISOR"].includes(session.role) ? [...navigation, { label: "Administración", icon: "users" }] : navigation;
