@@ -1991,6 +1991,7 @@ function TicketDetailModal({ currentUser, isLoading, onAttach, onClose, onDeesca
       await action(ticket, accepted);
     } catch (error) {
       setActionError(error.message || "No fue posible actualizar el ticket.");
+    } finally {
       setActing(false);
     }
   }
