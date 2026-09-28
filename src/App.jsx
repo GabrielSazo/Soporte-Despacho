@@ -1097,7 +1097,7 @@ function Dashboard({ canCreate, criticalTickets, dashboard, onCreate, onOpen, on
       <PageHeader
         eyebrow="Operación en tiempo real"
         title="Todo bajo control."
-        description="Supervisa el trabajo de tu equipo y prioriza lo que necesita atención ahora."
+        description=""
         action={canCreate ? <button className="primary-button" type="button" onClick={onCreate}><Icon name="plus" size={18} /> Nuevo ticket</button> : null}
       />
 
@@ -1191,7 +1191,7 @@ function TicketsView({ canCreate, currentUser, filter, filteredTickets, onCreate
       <PageHeader
         eyebrow="Gestión de solicitudes"
         title="Bandeja de tickets"
-        description="Consulta y prioriza los casos asignados a tu grupo de trabajo."
+        description=""
         action={canCreate ? <button className="primary-button" type="button" onClick={onCreate}><Icon name="plus" size={18} /> Nuevo ticket</button> : null}
       />
       <article className="panel tickets-page-panel">
@@ -1522,7 +1522,7 @@ function ReportsView({ groups, onNotify }) {
 
   return (
     <>
-      <PageHeader eyebrow="Indicadores operativos" title="El turno en cifras" description="Filtra por grupo, servicio y fecha. AHT = tiempo promedio de atención (tomado → resuelto)." action={<button className="primary-button" type="button" disabled={downloading} onClick={download}><Icon name="upload" size={18} /> {downloading ? "Descargando..." : "Descargar CSV"}</button>} />
+      <PageHeader eyebrow="Indicadores operativos" title="El turno en cifras" description="" action={<button className="primary-button" type="button" disabled={downloading} onClick={download}><Icon name="upload" size={18} /> {downloading ? "Descargando..." : "Descargar CSV"}</button>} />
       <article className="panel" style={{ padding: "16px 20px", marginBottom: "17px" }}>
         <div className="form-grid" style={{ marginTop: 0 }}>
           <label className="field"><span>Rango</span><select value={range} onChange={(e) => applyRange(e.target.value)} aria-label="Rango de fechas"><option value="todo">Todo</option><option value="hoy">Hoy</option><option value="semana">Esta semana</option><option value="mes">Este mes</option><option value="custom">Personalizado</option></select></label>
@@ -1616,7 +1616,7 @@ function UsersView({ areas, auditLogs, error, groups, loading, onBulk, onCreate,
 
   return (
     <>
-      <PageHeader eyebrow="Administración" title="Administración" description="Gestiona personas, grupos, catálogos y accesos. Los roles son asignables por administrador y las credenciales se restablecen desde aquí." action={tab === "usuarios" ? <div style={{ display: "flex", gap: "8px" }}>{currentRole === "ADMIN" && <button className="secondary-button" type="button" onClick={onBulk}><Icon name="upload" size={18} /> Carga masiva</button>}{currentRole === "ADMIN" && <button className="primary-button" type="button" onClick={onCreate}><Icon name="plus" size={18} /> Nuevo usuario</button>}</div> : tab === "tipos" ? <button className="primary-button" type="button" onClick={onCreateRequestType}><Icon name="plus" size={18} /> Nuevo tipo</button> : tab === "areas" ? <button className="primary-button" type="button" onClick={onCreateArea}><Icon name="plus" size={18} /> Nueva área</button> : tab === "auditoria" ? null : <button className="primary-button" type="button" onClick={onCreateGroup}><Icon name="plus" size={18} /> Nuevo grupo</button>} />
+      <PageHeader eyebrow="Administración" title="Administración" description="" action={tab === "usuarios" ? <div style={{ display: "flex", gap: "8px" }}>{currentRole === "ADMIN" && <button className="secondary-button" type="button" onClick={onBulk}><Icon name="upload" size={18} /> Carga masiva</button>}{currentRole === "ADMIN" && <button className="primary-button" type="button" onClick={onCreate}><Icon name="plus" size={18} /> Nuevo usuario</button>}</div> : tab === "tipos" ? <button className="primary-button" type="button" onClick={onCreateRequestType}><Icon name="plus" size={18} /> Nuevo tipo</button> : tab === "areas" ? <button className="primary-button" type="button" onClick={onCreateArea}><Icon name="plus" size={18} /> Nueva área</button> : tab === "auditoria" ? null : <button className="primary-button" type="button" onClick={onCreateGroup}><Icon name="plus" size={18} /> Nuevo grupo</button>} />
       {error && <ApiConnectionError message={error} onRetry={onRetry} />}
       {currentRole !== "SUPERVISOR" && <div className="admin-tabs" role="tablist">
         <button className={tab === "usuarios" ? "selected" : ""} type="button" role="tab" aria-selected={tab === "usuarios"} onClick={() => setTab("usuarios")}><Icon name="users" size={16} /> Usuarios <span>{users.length}</span></button>
