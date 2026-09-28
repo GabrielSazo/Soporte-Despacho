@@ -84,6 +84,9 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
                 code="no_active_account",
             )
         data["user"] = CurrentUserSerializer(self.user).data
+        from .audit import audit
+        from .models import AuditLog
+        audit(self.user, AuditLog.Action.LOGIN, entidad="sesion", detalle=self.user.email, request=self.context.get("request"))
         return data
 
 
@@ -270,7 +273,8 @@ class UserViewSet(viewsets.ModelViewSet):
         from .models import AuditLog
         had_password = bool(serializer.validated_data.get("password"))
         obj = serializer.save()
-        audit(self.request.user, AuditLog.Action.USER_CREATED, entidad="usuario", entidad_id=str(obj.pk), detalle=f"{obj.email} ({obj.get_role_display()})", request=self.request)
+        equipos = ",".join(sorted(obj.teams.values_list("code", flat=True)))
+        audit(self.request.user, AuditLog.Action.USER_CREATED, entidad="usuario", entidad_id=str(obj.pk), detalle=f"{obj.email} | rol={obj.role} | equipos={equipos or '-'} | activo={obj.is_active}", request=self.request)
         if not had_password:
             try:
                 send_invitation_email(obj)
@@ -318,18 +322,33 @@ class UserViewSet(viewsets.ModelViewSet):
             if new_mgroups is not None and new_mgroups:
                 raise ValidationError({"managed_groups": "Solo un administrador puede asignar grupos supervisados."})
         old_role, old_active = target.role, target.is_active
+        old_teams = sorted(target.teams.values_list("code", flat=True))
+        old_name, old_email = target.get_full_name().strip(), target.email
         serializer.save()
         from .audit import audit
         from .models import AuditLog
         new_role, new_active = target.role, target.is_active
+        new_teams = sorted(target.teams.values_list("code", flat=True))
+        cambios = []
         if old_role != new_role:
-            audit(self.request.user, AuditLog.Action.ROLE_CHANGED, entidad="usuario", entidad_id=str(target.pk), detalle=f"{target.email}: {old_role} → {new_role}", request=self.request)
+            cambios.append(f"rol {old_role}→{new_role}")
+        if old_active != new_active:
+            cambios.append("desactivado" if old_active else "activado")
+        if old_teams != new_teams:
+            cambios.append(f"equipos [{','.join(old_teams) or '-'}]→[{','.join(new_teams) or '-'}]")
+        if old_name != target.get_full_name().strip():
+            cambios.append(f"nombre {old_name or '-'}→{target.get_full_name().strip()}")
+        if old_email != target.email:
+            cambios.append(f"correo {old_email}→{target.email}")
+        detalle = f"{target.email}" + (f" | {'; '.join(cambios)}" if cambios else " | sin cambios")
+        if old_role != new_role:
+            audit(self.request.user, AuditLog.Action.ROLE_CHANGED, entidad="usuario", entidad_id=str(target.pk), detalle=detalle, request=self.request)
         elif old_active and not new_active:
-            audit(self.request.user, AuditLog.Action.USER_DEACTIVATED, entidad="usuario", entidad_id=str(target.pk), detalle=target.email, request=self.request)
+            audit(self.request.user, AuditLog.Action.USER_DEACTIVATED, entidad="usuario", entidad_id=str(target.pk), detalle=detalle, request=self.request)
         elif not old_active and new_active:
-            audit(self.request.user, AuditLog.Action.USER_ACTIVATED, entidad="usuario", entidad_id=str(target.pk), detalle=target.email, request=self.request)
+            audit(self.request.user, AuditLog.Action.USER_ACTIVATED, entidad="usuario", entidad_id=str(target.pk), detalle=detalle, request=self.request)
         else:
-            audit(self.request.user, AuditLog.Action.USER_EDITED, entidad="usuario", entidad_id=str(target.pk), detalle=target.email, request=self.request)
+            audit(self.request.user, AuditLog.Action.USER_EDITED, entidad="usuario", entidad_id=str(target.pk), detalle=detalle, request=self.request)
 
 
 class BulkUserUploadView(APIView):
