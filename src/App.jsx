@@ -1219,6 +1219,7 @@ function ValidationsView({ canValidate, tickets, onAttach, onOpen, onValidate })
   const [rejectId, setRejectId] = useState(null);
   const [rejectComment, setRejectComment] = useState("");
   const [rejectFiles, setRejectFiles] = useState([]);
+  const [compressingReject, setCompressingReject] = useState(false);
 
   async function confirmReject(ticket) {
     await onValidate(ticket, false, rejectComment);
@@ -1230,6 +1231,9 @@ function ValidationsView({ canValidate, tickets, onAttach, onOpen, onValidate })
         break;
       }
     }
+    setRejectId(null);
+    setRejectComment("");
+    setRejectFiles([]);
     setRejectId(null);
     setRejectComment("");
     setRejectFiles([]);
