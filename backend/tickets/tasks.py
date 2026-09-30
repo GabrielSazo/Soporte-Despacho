@@ -96,9 +96,11 @@ def process_attachment_ocr(attachment_id):
                 # sort by y (top to bottom)
                 barcodes = sorted(barcodes, key=lambda b: b.rect.top)
                 vals = [b.data.decode(errors="ignore").strip() for b in barcodes if b.data]
-                labels = ["SN", "MAC", "EMTA MAC"]
                 for i, v in enumerate(vals[:3]):
-                    barcode_lines.append(f"{labels[i] if i < len(labels) else f'BARCODE{i+1}'} {v}")
+                    if re.fullmatch(r"[0-9A-Fa-f]{2}([:-][0-9A-Fa-f]{2}){5}", v):
+                        barcode_lines.append(f"MAC {v}")
+                    else:
+                        barcode_lines.append(f"CODIGO{i + 1} {v}")
         except Exception:
             pass
         # Combine
@@ -114,16 +116,32 @@ def process_attachment_ocr(attachment_id):
             # fallback to first 2 non-empty lines
             parts.extend([l for l in text_top.splitlines() if l.strip()][:2])
         parts.extend(barcode_lines)
+
+        def es_basura(texto):
+            t = (texto or "").strip()
+            if len(t) < 8:
+                return True
+            if re.search(r"[=~_\-]{5,}", t):
+                return True
+            letras = len(re.findall(r"[A-Za-z0-9]", t))
+            return letras < len(t) * 0.4
+
         if parts:
             snippet = "\n".join(parts)[:800]
-            record_event(ticket, TicketEvent.EventType.ATTACHMENT, actor=None, comment=f"OCR:\n{snippet}")
         elif text_top.strip():
             snippet = " ".join(text_top.split())[:500]
-            record_event(ticket, TicketEvent.EventType.ATTACHMENT, actor=None, comment=f"OCR: {snippet}")
-        attachment.ocr_estado = TicketAttachment.OcrStatus.DONE
+        else:
+            snippet = ""
+        if snippet and not es_basura(snippet):
+            record_event(ticket, TicketEvent.EventType.ATTACHMENT, actor=None, comment=f"OCR:\n{snippet}")
+            attachment.ocr_estado = TicketAttachment.OcrStatus.DONE
+            attachment.save(update_fields=["ocr_estado"])
+            broadcast_ticket_update(ticket.id, "ocr_done")
+            return "ok"
+        attachment.ocr_estado = TicketAttachment.OcrStatus.FAILED
         attachment.save(update_fields=["ocr_estado"])
-        broadcast_ticket_update(ticket.id, "ocr_done")
-        return "ok"
+        broadcast_ticket_update(ticket.id, "ocr_failed")
+        return "unreadable"
     except Exception:
         try:
             attachment.ocr_estado = TicketAttachment.OcrStatus.FAILED
