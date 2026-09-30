@@ -230,8 +230,8 @@ def process_attachment_ocr(attachment_id):
             elif error_lines and not l and len(error_lines) > 1:
                 break
         if error_lines:
-            texto_err = re.sub(r"(?i)^error:\s*", "", " ".join(error_lines))[:300]
-            parts.insert(0, "ERROR " + texto_err)
+            texto_err = re.sub(r"(?i)^error:\s*", "", " ".join(l for l in error_lines if l.lower() != "error:"))[:300]
+            parts.insert(0, "ERROR " + (texto_err or "no legible"))
 
         def es_basura(texto):
             t = (texto or "").strip()
