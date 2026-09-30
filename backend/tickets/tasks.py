@@ -55,6 +55,12 @@ def process_attachment_ocr(attachment_id):
             except Exception:
                 return 0
 
+        def run_ocr_eq(image, config, scale=2):
+            w, h = image.size
+            img = ImageOps.equalize(image).resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+            img.info["dpi"] = (300, 300)
+            return pytesseract.image_to_string(img, lang="spa+eng", config=config).strip()
+
         candidates = []
         try:
             candidates.append(run_ocr(base, "--oem 3 --psm 6 -c preserve_interword_spaces=1", scale=2))
@@ -66,6 +72,10 @@ def process_attachment_ocr(attachment_id):
             pass
         try:
             candidates.append(run_ocr(gray, "--oem 3 --psm 11", scale=3))
+        except Exception:
+            pass
+        try:
+            candidates.append(run_ocr_eq(gray, "--oem 3 --psm 6"))
         except Exception:
             pass
 
@@ -188,7 +198,8 @@ def process_attachment_ocr(attachment_id):
                 tokens = [c for c in re.findall(r"[0-9A-Z]{8,20}", text_top.upper()) if ":" not in c and ";" not in c]
                 tokens += [b.split(" ", 1)[1] for b in barcode_lines if " " in b and ":" not in b and ";" not in b]
                 mixtos = [c for c in tokens if re.search(r"[A-Z].*[0-9]|[0-9].*[A-Z]", c)]
-                candidatos = [c for c in (mixtos or tokens) if c not in vistos]
+                con_digito = [c for c in tokens if re.search(r"[0-9]", c)]
+                candidatos = [c for c in (mixtos or con_digito) if c not in vistos]
                 if candidatos:
                     mejor = max(candidatos, key=len)
                     vistos.add(mejor)
