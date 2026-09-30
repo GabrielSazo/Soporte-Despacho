@@ -211,7 +211,8 @@ def process_attachment_ocr(attachment_id):
             l = line.strip()
             if re.search(r"(?i)\berror\b", l):
                 limpio = re.sub(r"(?i).*?\berror\b\s*:?\s*", "", l).strip()
-                error_lines.append(limpio or l)
+                if limpio:
+                    error_lines.append(limpio)
             elif error_lines and l and len(error_lines) < 4:
                 error_lines.append(l)
             elif error_lines and not l and len(error_lines) > 1:
