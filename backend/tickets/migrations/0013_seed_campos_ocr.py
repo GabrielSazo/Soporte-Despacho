@@ -12,6 +12,7 @@ DEFAULTS = {
     "Magnolia": "SN",
     "Reactivacion STB": "SN",
     "Cambio de Tecnologia": "SN",
+    "Activacion ATV / MG": "HSN,CODIGO",
 }
 
 

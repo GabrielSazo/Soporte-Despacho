@@ -98,7 +98,16 @@ def process_attachment_ocr(attachment_id):
         def buscar_etiqueta(texto, etiqueta):
             base = norm(etiqueta)
             m = re.search(rf"{re.escape(base)}\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9\-_]{{3,}})", norm(texto), re.I)
-            return m.group(1).strip() if m else ""
+            if m:
+                return m.group(1).strip()
+            lineas = [l.strip() for l in texto.splitlines()]
+            for i, l in enumerate(lineas):
+                if re.fullmatch(rf"{re.escape(base)}\s*:?", norm(l).strip(), re.I):
+                    for nxt in lineas[i + 1:i + 3]:
+                        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9\-_ ]{3,}", nxt):
+                            return nxt.strip()
+                    break
+            return ""
 
         ALIAS = {
             "PASSWORD": ["PASSWORD", "Preshared Key", "WiFi Password", "WLAN Key", "WPA Key", "CLAVE"],
@@ -197,6 +206,18 @@ def process_attachment_ocr(attachment_id):
                 # fallback to first 2 non-empty lines
                 parts.extend([l for l in text_top.splitlines() if l.strip()][:2])
             parts.extend(barcode_lines)
+        error_lines = []
+        for line in text_top.splitlines():
+            l = line.strip()
+            if re.search(r"(?i)\berror\b", l):
+                limpio = re.sub(r"(?i).*?\berror\b\s*:?\s*", "", l).strip()
+                error_lines.append(limpio or l)
+            elif error_lines and l and len(error_lines) < 4:
+                error_lines.append(l)
+            elif error_lines and not l and len(error_lines) > 1:
+                break
+        if error_lines:
+            parts.insert(0, "ERROR " + " ".join(error_lines)[:300])
 
         def es_basura(texto):
             t = (texto or "").strip()
