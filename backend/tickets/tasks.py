@@ -71,6 +71,23 @@ def process_attachment_ocr(attachment_id):
         # Si la confianza es muy baja, no publicar basura
         if text_top and mean_conf(base) < 40:
             text_top = ""
+        # Perfil de extracción según el tipo de equipo del ticket (estándar por equipo)
+        perfil = []
+        try:
+            tipo = ticket.tipo_solicitud
+            if tipo and tipo.campos_ocr:
+                perfil = [c.strip().upper() for c in tipo.campos_ocr.split(",") if c.strip()]
+        except Exception:
+            perfil = []
+
+        def buscar_mac(texto):
+            m = re.search(r"(?:MAC[\s:\-]{0,3})?((?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2})", texto)
+            return m.group(1).upper() if m else ""
+
+        def buscar_etiqueta(texto, etiqueta):
+            m = re.search(rf"{re.escape(etiqueta)}\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9\-_]{{3,}})", texto, re.I)
+            return m.group(1).strip() if m else ""
+
         # Extract SSID/PASSWORD lines via regex, ignore noise
         lines = []
         for line in text_top.splitlines():
@@ -87,7 +104,7 @@ def process_attachment_ocr(attachment_id):
         # Fallback: if lines empty, use raw top 2 lines
         if not lines:
             lines = [l.strip() for l in text_top.splitlines() if l.strip()][:2]
-        # Barcodes -> SN/MAC/EMTA in order top->bottom
+        # Barcodes -> MAC validada o CODIGO en orden top->bottom
         barcode_lines = []
         try:
             from pyzbar.pyzbar import decode
@@ -103,19 +120,37 @@ def process_attachment_ocr(attachment_id):
                         barcode_lines.append(f"CODIGO{i + 1} {v}")
         except Exception:
             pass
-        # Combine
+        # Combine: si hay perfil, extrae por etiquetas del equipo; si no, genérico
         parts = []
-        # SSID/PASSWORD block
-        ssid_pass = []
-        for l in lines:
-            if "SSID" in l.upper() or "PASSWORD" in l.upper() or re.match(r"^[0-9A-Z]{10,}$", l):
-                ssid_pass.append(l)
-        if ssid_pass:
-            parts.extend(ssid_pass[:3])
+        if perfil:
+            vistos = set()
+            for etiqueta in perfil:
+                valor = ""
+                if etiqueta == "MAC":
+                    valor = buscar_mac(text_top) or next((b.split(" ", 1)[1] for b in barcode_lines if b.startswith("MAC ")), "")
+                elif etiqueta in ("SSID", "PASSWORD", "WLAN", "WIFI"):
+                    for l in lines:
+                        if etiqueta in l.upper() or (etiqueta in ("WLAN", "WIFI") and ("SSID" in l.upper() or "PASSWORD" in l.upper())):
+                            valor = l
+                            break
+                else:
+                    valor = buscar_etiqueta(text_top, etiqueta)
+                if valor and valor not in vistos:
+                    vistos.add(valor)
+                    parts.append(f"{etiqueta} {valor}" if not valor.upper().startswith(etiqueta) else valor)
+            parts.extend([b for b in barcode_lines if b.split(" ", 1)[1] not in vistos])
         else:
-            # fallback to first 2 non-empty lines
-            parts.extend([l for l in text_top.splitlines() if l.strip()][:2])
-        parts.extend(barcode_lines)
+            # SSID/PASSWORD block
+            ssid_pass = []
+            for l in lines:
+                if "SSID" in l.upper() or "PASSWORD" in l.upper() or re.match(r"^[0-9A-Z]{10,}$", l):
+                    ssid_pass.append(l)
+            if ssid_pass:
+                parts.extend(ssid_pass[:3])
+            else:
+                # fallback to first 2 non-empty lines
+                parts.extend([l for l in text_top.splitlines() if l.strip()][:2])
+            parts.extend(barcode_lines)
 
         def es_basura(texto):
             t = (texto or "").strip()

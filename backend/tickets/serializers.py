@@ -25,7 +25,7 @@ class RequestTypeSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = RequestType
-        fields = ["id", "kind", "kind_label", "service", "service_label", "name", "is_active", "equipo_asignado", "equipo_detail"]
+        fields = ["id", "kind", "kind_label", "service", "service_label", "name", "is_active", "equipo_asignado", "equipo_detail", "campos_ocr"]
 
 
 class TicketAttachmentSerializer(serializers.ModelSerializer):

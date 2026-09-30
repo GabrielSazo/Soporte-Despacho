@@ -25,6 +25,7 @@ class RequestType(models.Model):
     name = models.CharField(max_length=120)
     is_active = models.BooleanField(default=True)
     equipo_asignado = models.ForeignKey(Team, on_delete=models.SET_NULL, null=True, blank=True, related_name="tipos_asignados")
+    campos_ocr = models.CharField(max_length=200, blank=True, default="", help_text="Etiquetas separadas por coma que el OCR debe buscar (ej. SN,MAC). Vacío = genérico.")
 
     class Meta:
         ordering = ["kind", "service", "name"]
