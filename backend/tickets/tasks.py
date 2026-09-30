@@ -114,7 +114,14 @@ def process_attachment_ocr(attachment_id):
                 barcodes = sorted(barcodes, key=lambda b: b.rect.top)
                 vals = [b.data.decode(errors="ignore").strip() for b in barcodes if b.data]
                 for i, v in enumerate(vals[:3]):
-                    if re.fullmatch(r"[0-9A-Fa-f]{2}([:-][0-9A-Fa-f]{2}){5}", v):
+                    if v.upper().startswith("WIFI:"):
+                        ssid = re.search(r"S:([^;]+)", v)
+                        wkey = re.search(r"P:([^;]+)", v)
+                        if ssid:
+                            barcode_lines.append(f"SSID {ssid.group(1).strip()}")
+                        if wkey:
+                            barcode_lines.append(f"PASSWORD {wkey.group(1).strip()}")
+                    elif re.fullmatch(r"[0-9A-Fa-f]{2}([:-][0-9A-Fa-f]{2}){5}", v):
                         barcode_lines.append(f"MAC {v}")
                     else:
                         barcode_lines.append(f"CODIGO{i + 1} {v}")
@@ -138,6 +145,15 @@ def process_attachment_ocr(attachment_id):
                 if valor and valor not in vistos:
                     vistos.add(valor)
                     parts.append(f"{etiqueta} {valor}" if not valor.upper().startswith(etiqueta) else valor)
+            if "SN" in perfil and not any(p.upper().startswith("SN ") for p in parts):
+                tokens = [c for c in re.findall(r"[0-9A-Z]{8,20}", text_top.upper()) if ":" not in c and ";" not in c]
+                tokens += [b.split(" ", 1)[1] for b in barcode_lines if " " in b and ":" not in b and ";" not in b]
+                mixtos = [c for c in tokens if re.search(r"[A-Z].*[0-9]|[0-9].*[A-Z]", c)]
+                candidatos = [c for c in (mixtos or tokens) if c not in vistos]
+                if candidatos:
+                    mejor = max(candidatos, key=len)
+                    vistos.add(mejor)
+                    parts.append(f"SN {mejor}")
             parts.extend([b for b in barcode_lines if b.split(" ", 1)[1] not in vistos])
         else:
             # SSID/PASSWORD block
