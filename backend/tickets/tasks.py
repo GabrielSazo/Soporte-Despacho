@@ -19,6 +19,13 @@ def process_attachment_ocr(attachment_id):
         from PIL import Image, ImageEnhance, ImageOps, ImageStat
         import pytesseract
         img0 = Image.open(attachment.file.path)
+        try:
+            osd = pytesseract.image_to_osd(img0)
+            rot = re.search(r"Rotate:\s*(\d+)", osd or "")
+            if rot and int(rot.group(1)) % 360:
+                img0 = img0.rotate(360 - int(rot.group(1)), expand=True)
+        except Exception:
+            pass
         gray = img0.convert("L")
         # Si el fondo es oscuro (capturas), invertir para texto claro sobre blanco
         try:
@@ -80,13 +87,27 @@ def process_attachment_ocr(attachment_id):
         except Exception:
             perfil = []
 
+        def norm(s):
+            import unicodedata
+            return "".join(c for c in unicodedata.normalize("NFKD", s or "") if not unicodedata.combining(c))
+
         def buscar_mac(texto):
             m = re.search(r"(?:MAC[\s:\-]{0,3})?((?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2})", texto)
             return m.group(1).upper() if m else ""
 
         def buscar_etiqueta(texto, etiqueta):
-            m = re.search(rf"{re.escape(etiqueta)}\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9\-_]{{3,}})", texto, re.I)
+            base = norm(etiqueta)
+            m = re.search(rf"{re.escape(base)}\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9\-_]{{3,}})", norm(texto), re.I)
             return m.group(1).strip() if m else ""
+
+        ALIAS = {
+            "PASSWORD": ["PASSWORD", "Preshared Key", "WiFi Password", "WLAN Key", "WPA Key", "CLAVE"],
+            "SSID": ["SSID", "Network Name"],
+            "WPS": ["WPS PIN", "WPS"],
+            "HSN": ["HSN"],
+            "CODIGO": ["Codigo de Activacion", "Codigo"],
+        }
+        MAC_TIPOS = ["CM MAC", "MTA MAC", "WAN MAC", "GW MAC", "MAC"]
 
         # Extract SSID/PASSWORD lines via regex, ignore noise
         lines = []
@@ -134,17 +155,26 @@ def process_attachment_ocr(attachment_id):
             for etiqueta in perfil:
                 valor = ""
                 if etiqueta == "MAC":
-                    valor = buscar_mac(text_top) or next((b.split(" ", 1)[1] for b in barcode_lines if b.startswith("MAC ")), "")
+                    for variante in MAC_TIPOS:
+                        valor = buscar_etiqueta(text_top, variante)
+                        if valor:
+                            etiqueta = variante
+                            break
+                    if not valor:
+                        valor = buscar_mac(text_top) or next((b.split(" ", 1)[1] for b in barcode_lines if b.startswith("MAC ")), "")
                 elif etiqueta in ("SSID", "PASSWORD", "WLAN", "WIFI"):
                     for l in lines:
                         if etiqueta in l.upper() or (etiqueta in ("WLAN", "WIFI") and ("SSID" in l.upper() or "PASSWORD" in l.upper())):
                             valor = l
                             break
                 else:
-                    valor = buscar_etiqueta(text_top, etiqueta)
+                    for alias in [etiqueta] + ALIAS.get(etiqueta, []):
+                        valor = buscar_etiqueta(text_top, alias)
+                        if valor:
+                            break
                 if valor and valor not in vistos:
                     vistos.add(valor)
-                    parts.append(f"{etiqueta} {valor}" if not valor.upper().startswith(etiqueta) else valor)
+                    parts.append(f"{etiqueta} {valor}" if not valor.upper().startswith(norm(etiqueta).upper()) else valor)
             if "SN" in perfil and not any(p.upper().startswith("SN ") for p in parts):
                 tokens = [c for c in re.findall(r"[0-9A-Z]{8,20}", text_top.upper()) if ":" not in c and ";" not in c]
                 tokens += [b.split(" ", 1)[1] for b in barcode_lines if " " in b and ":" not in b and ";" not in b]
