@@ -227,8 +227,13 @@ def process_attachment_ocr(attachment_id):
                 parts.extend([l for l in texto_total.splitlines() if l.strip()][:2])
             parts.extend(barcode_lines)
         error_lines = []
+        ui_stop = {"regresar", "atras", "atrás", "cancelar", "aceptar", "guardar", "continuar", "salir", "menu", "inicio", "ok"}
         for line in texto_total.splitlines():
             l = line.strip()
+            if not l or l.lower() in ui_stop:
+                if error_lines and len(error_lines) > 1:
+                    break
+                continue
             if re.search(r"(?i)\berror\b", l):
                 limpio = re.sub(r"(?i).*?\berror\b\s*:?\s*", "", l).strip()
                 error_lines.append(limpio if limpio else "Error:")
