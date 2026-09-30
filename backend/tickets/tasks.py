@@ -85,6 +85,8 @@ def process_attachment_ocr(attachment_id):
 
         scored = [(len(t), t) for t in (meaningful(c) for c in candidates) if t]
         text_top = max(scored)[1] if scored else ""
+        # Texto combinado de todas las pasadas para no perder datos (errores, fondo)
+        texto_total = "\n".join(dict.fromkeys([l for _, t in scored for l in t.splitlines()] + ([text_top] if text_top else [])))
         # Si la confianza es muy baja, no publicar basura
         if text_top and mean_conf(base) < 40:
             text_top = ""
@@ -130,7 +132,7 @@ def process_attachment_ocr(attachment_id):
 
         # Extract SSID/PASSWORD lines via regex, ignore noise
         lines = []
-        for line in text_top.splitlines():
+        for line in texto_total.splitlines():
             l = line.strip()
             if re.search(r"SSID\s*:", l, re.I):
                 l = re.sub(r".*?(SSID\s*:.*)", r"\1", l, flags=re.I).strip()
@@ -143,7 +145,7 @@ def process_attachment_ocr(attachment_id):
                 lines.append(l)
         # Fallback: if lines empty, use raw top 2 lines
         if not lines:
-            lines = [l.strip() for l in text_top.splitlines() if l.strip()][:2]
+            lines = [l.strip() for l in texto_total.splitlines() if l.strip()][:2]
         # Barcodes -> MAC validada o CODIGO en orden top->bottom
         barcode_lines = []
         try:
@@ -175,12 +177,12 @@ def process_attachment_ocr(attachment_id):
                 valor = ""
                 if etiqueta == "MAC":
                     for variante in MAC_TIPOS:
-                        valor = buscar_etiqueta(text_top, variante)
+                        valor = buscar_etiqueta(texto_total, variante)
                         if valor:
                             etiqueta = variante
                             break
                     if not valor:
-                        valor = buscar_mac(text_top) or next((b.split(" ", 1)[1] for b in barcode_lines if b.startswith("MAC ")), "")
+                        valor = buscar_mac(texto_total) or next((b.split(" ", 1)[1] for b in barcode_lines if b.startswith("MAC ")), "")
                 elif etiqueta in ("SSID", "PASSWORD", "WLAN", "WIFI"):
                     for l in lines:
                         if etiqueta in l.upper() or (etiqueta in ("WLAN", "WIFI") and ("SSID" in l.upper() or "PASSWORD" in l.upper())):
@@ -188,14 +190,14 @@ def process_attachment_ocr(attachment_id):
                             break
                 else:
                     for alias in [etiqueta] + ALIAS.get(etiqueta, []):
-                        valor = buscar_etiqueta(text_top, alias)
+                        valor = buscar_etiqueta(texto_total, alias)
                         if valor:
                             break
                 if valor and valor not in vistos:
                     vistos.add(valor)
                     parts.append(f"{etiqueta} {valor}" if not valor.upper().startswith(norm(etiqueta).upper()) else valor)
             if "SN" in perfil and not any(p.upper().startswith("SN ") for p in parts):
-                tokens = [c for c in re.findall(r"[0-9A-Z]{8,20}", text_top.upper()) if ":" not in c and ";" not in c]
+                tokens = [c for c in re.findall(r"[0-9A-Z]{8,20}", texto_total.upper()) if ":" not in c and ";" not in c]
                 tokens += [b.split(" ", 1)[1] for b in barcode_lines if " " in b and ":" not in b and ";" not in b]
                 mixtos = [c for c in tokens if re.search(r"[A-Z].*[0-9]|[0-9].*[A-Z]", c)]
                 con_digito = [c for c in tokens if re.search(r"[0-9]", c)]
@@ -215,21 +217,21 @@ def process_attachment_ocr(attachment_id):
                 parts.extend(ssid_pass[:3])
             else:
                 # fallback to first 2 non-empty lines
-                parts.extend([l for l in text_top.splitlines() if l.strip()][:2])
+                parts.extend([l for l in texto_total.splitlines() if l.strip()][:2])
             parts.extend(barcode_lines)
         error_lines = []
-        for line in text_top.splitlines():
+        for line in texto_total.splitlines():
             l = line.strip()
             if re.search(r"(?i)\berror\b", l):
                 limpio = re.sub(r"(?i).*?\berror\b\s*:?\s*", "", l).strip()
-                if limpio:
-                    error_lines.append(limpio)
+                error_lines.append(limpio if limpio else "Error:")
             elif error_lines and l and len(error_lines) < 4:
                 error_lines.append(l)
             elif error_lines and not l and len(error_lines) > 1:
                 break
         if error_lines:
-            parts.insert(0, "ERROR " + " ".join(error_lines)[:300])
+            texto_err = re.sub(r"(?i)^error:\s*", "", " ".join(error_lines))[:300]
+            parts.insert(0, "ERROR " + texto_err)
 
         def es_basura(texto):
             t = (texto or "").strip()
