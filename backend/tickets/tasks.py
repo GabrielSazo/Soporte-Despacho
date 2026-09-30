@@ -202,8 +202,15 @@ def process_attachment_ocr(attachment_id):
                 mixtos = [c for c in tokens if re.search(r"[A-Z].*[0-9]|[0-9].*[A-Z]", c)]
                 con_digito = [c for c in tokens if re.search(r"[0-9]", c)]
                 candidatos = [c for c in (mixtos or con_digito) if c not in vistos]
-                if candidatos:
-                    mejor = max(candidatos, key=len)
+                pegados = []
+                for m in re.findall(r"\d{4,}(?: \d{3,})?", texto_total):
+                    j = m.replace(" ", "")
+                    if 8 <= len(j) <= 22 and " " in m and j not in vistos:
+                        pegados.append(j)
+                mejor_contiguo = max(candidatos, key=len) if candidatos else ""
+                mejor_pegado = max(pegados, key=len) if pegados else ""
+                mejor = mejor_pegado if mejor_pegado and len(mejor_pegado) > len(mejor_contiguo) + 2 else mejor_contiguo
+                if mejor:
                     vistos.add(mejor)
                     parts.append(f"SN {mejor}")
             parts.extend([b for b in barcode_lines if b.split(" ", 1)[1] not in vistos])
