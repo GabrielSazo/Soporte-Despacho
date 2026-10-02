@@ -121,11 +121,49 @@ def process_attachment_ocr(attachment_id):
                     break
             return ""
 
+        form_text = ""
+        try:
+            w0, h0 = gray.size
+            top = ImageOps.equalize(gray.crop((0, 0, w0, int(h0 * 0.45))))
+            top = top.resize((w0 * 2, int(h0 * 0.45 * 2)), Image.LANCZOS)
+            form_text = pytesseract.image_to_string(top, lang="spa+eng", config="--oem 3 --psm 6").strip()
+        except Exception:
+            form_text = ""
+
+        def leer_digitos_debajo(etiquetas):
+            try:
+                img2 = prep(base, 2)
+                data = pytesseract.image_to_data(img2, lang="spa+eng", config="--oem 3 --psm 6", output_type=pytesseract.Output.DICT)
+                n = len(data.get("text", []))
+                w, h = img2.size
+                for i in range(n):
+                    palabra = norm(data["text"][i] or "")
+                    if not palabra:
+                        continue
+                    if any(palabra.upper() == norm(e).upper() or norm(e).upper() in palabra.upper() for e in etiquetas):
+                        try:
+                            x0 = max(0, int(data["left"][i]) - 20)
+                            y0 = int(data["top"][i]) + int(data["height"][i])
+                            x1 = min(w, x0 + int(data["width"][i]) + w // 2)
+                            y1 = min(h, y0 + h // 6)
+                            if y1 <= y0 or x1 <= x0:
+                                continue
+                            recorte = img2.crop((x0, y0, x1, y1))
+                            txt = pytesseract.image_to_string(recorte, config="--oem 3 --psm 7 -c tessedit_char_whitelist=0123456789").strip()
+                            digitos = re.sub(r"\D", "", txt)
+                            if len(digitos) >= 6:
+                                return digitos
+                        except Exception:
+                            continue
+            except Exception:
+                pass
+            return ""
+
         ALIAS = {
             "PASSWORD": ["PASSWORD", "Preshared Key", "WiFi Password", "WLAN Key", "WPA Key", "CLAVE"],
             "SSID": ["SSID", "Network Name"],
             "WPS": ["WPS PIN", "WPS"],
-            "HSN": ["HSN"],
+            "HSN": ["HSN", "ISN"],
             "CODIGO": ["Codigo de Activacion", "Codigo"],
         }
         MAC_TIPOS = ["CM MAC", "MTA MAC", "WAN MAC", "GW MAC", "MAC"]
@@ -193,6 +231,22 @@ def process_attachment_ocr(attachment_id):
                         valor = buscar_etiqueta(texto_total, alias)
                         if valor:
                             break
+                    if not valor and etiqueta in ("HSN", "CODIGO", "WPS"):
+                        valor = leer_digitos_debajo([etiqueta] + ALIAS.get(etiqueta, []))
+                    if not valor and etiqueta in ("HSN", "CODIGO") and form_text:
+                        for alias in [etiqueta] + ALIAS.get(etiqueta, []):
+                            valor = buscar_etiqueta(form_text, alias)
+                            if valor:
+                                break
+                        if valor and etiqueta in ("HSN", "CODIGO", "WPS"):
+                            valor = re.sub(r"\D", "", valor)
+                            if len(valor) < 6:
+                                valor = ""
+                        if not valor:
+                            runs = [re.sub(r"\D", "", m) for m in re.findall(r"[\d/S]{10,}", form_text)]
+                            runs = [r for r in runs if len(r) >= 10]
+                            if runs:
+                                valor = max(runs, key=len)
                 if valor and valor not in vistos:
                     vistos.add(valor)
                     parts.append(f"{etiqueta} {valor}" if not valor.upper().startswith(norm(etiqueta).upper()) else valor)
