@@ -61,6 +61,27 @@ def process_attachment_ocr(attachment_id):
             img.info["dpi"] = (300, 300)
             return pytesseract.image_to_string(img, lang="spa+eng", config=config).strip()
 
+        def run_rapid(image):
+            try:
+                from rapidocr_onnxruntime import RapidOCR
+                import numpy as np
+                global _RAPID_ENGINE
+                try:
+                    engine = _RAPID_ENGINE
+                except NameError:
+                    engine = None
+                if engine is None:
+                    engine = RapidOCR()
+                    globals()["_RAPID_ENGINE"] = engine
+                out, _ = engine(np.array(image.convert("RGB")))
+                if not out:
+                    return "", 0
+                textos = [t for _, t, s in out if t and (s or 0) >= 0.5]
+                conf = sum(s for _, _, s in out if s) / len(out)
+                return "\n".join(textos).strip(), round(conf, 3)
+            except Exception:
+                return "", 0
+
         candidates = []
         try:
             candidates.append(run_ocr(base, "--oem 3 --psm 6 -c preserve_interword_spaces=1", scale=2))
@@ -78,6 +99,13 @@ def process_attachment_ocr(attachment_id):
             candidates.append(run_ocr_eq(gray, "--oem 3 --psm 6"))
         except Exception:
             pass
+        rapid_text, rapid_conf = "", 0
+        try:
+            rapid_text, rapid_conf = run_rapid(img0)
+            if rapid_text:
+                candidates.append(rapid_text)
+        except Exception:
+            pass
 
         def meaningful(text):
             lines = [l.strip() for l in (text or "").splitlines() if len(re.findall(r"[A-Za-z0-9]", l)) >= 3]
@@ -85,10 +113,13 @@ def process_attachment_ocr(attachment_id):
 
         scored = [(len(t), t) for t in (meaningful(c) for c in candidates) if t]
         text_top = max(scored)[1] if scored else ""
+        # RapidOCR primero: más rápido y preciso en etiquetas; Tesseract complementa
+        if rapid_text and rapid_conf >= 0.6:
+            text_top = rapid_text
         # Texto combinado de todas las pasadas para no perder datos (errores, fondo)
-        texto_total = "\n".join(dict.fromkeys([l for _, t in scored for l in t.splitlines()] + ([text_top] if text_top else [])))
-        # Si la confianza es muy baja, no publicar basura
-        if text_top and mean_conf(base) < 40:
+        texto_total = "\n".join(dict.fromkeys(([rapid_text] if rapid_text else []) + [l for _, t in scored for l in t.splitlines()] + ([text_top] if text_top else [])))
+        # Si la confianza Tesseract es muy baja y Rapid no aportó, no publicar basura
+        if text_top and not (rapid_text and rapid_conf >= 0.6) and mean_conf(base) < 40:
             text_top = ""
         # Perfil de extracción según el tipo de equipo del ticket (estándar por equipo)
         perfil = []
