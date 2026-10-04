@@ -10,8 +10,8 @@ from rest_framework.test import APITestCase
 
 from accounts.models import Team, User, WorkGroup
 
-from .models import Ticket
-from .services import create_ticket, resolve_ticket, take_ticket
+from .models import AIAgentConfig, Ticket
+from .services import apply_priority_by_ai, create_ticket, resolve_ticket, take_ticket
 
 
 class TicketFlowTests(APITestCase):
@@ -223,3 +223,73 @@ class TicketFlowTests(APITestCase):
         self.assertEqual(des.status_code, 200)
         ticket.refresh_from_db()
         self.assertEqual(ticket.status, Ticket.Status.IN_PROGRESS)
+
+class AIAgentTests(APITestCase):
+    def setUp(self):
+        group, _ = WorkGroup.objects.get_or_create(name="Tigo", defaults={"code": "tigo"})
+        self.team, _ = Team.objects.get_or_create(group=group, name="FTTH Norte", defaults={"code": "ftth-norte"})
+        self.admin = User.objects.create_user(
+            username="admin-ia@sestel.local",
+            email="admin-ia@sestel.local",
+            password="Sestel2026!",
+            role=User.Role.ADMIN,
+        )
+        self.admin.teams.set([self.team])
+        self.dispatcher = User.objects.create_user(
+            username="despacho-ia@sestel.local",
+            email="despacho-ia@sestel.local",
+            password="Sestel2026!",
+            role=User.Role.DISPATCHER,
+        )
+        self.dispatcher.teams.set([self.team])
+
+    def test_admin_puede_ver_y_configurar_agente(self):
+        self.client.force_authenticate(self.admin)
+        response = self.client.get("/api/ia-config/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(sorted(response.data["services"]), ["FTTH", "HFC"])
+        patch = self.client.patch("/api/ia-config/1/", {"threshold": 0.85}, format="json")
+        self.assertEqual(patch.status_code, 200)
+        self.assertEqual(patch.data["threshold"], 0.85)
+
+    def test_no_admin_no_puede_configurar_agente(self):
+        self.client.force_authenticate(self.dispatcher)
+        response = self.client.get("/api/ia-config/")
+        self.assertEqual(response.status_code, 403)
+
+    def test_umbral_fuera_de_rango_es_rechazado(self):
+        self.client.force_authenticate(self.admin)
+        response = self.client.patch("/api/ia-config/1/", {"threshold": 0.2}, format="json")
+        self.assertEqual(response.status_code, 400)
+
+    def test_agente_apagado_bloquea_revision_y_no_deja_eventos(self):
+        from .tasks import review_ticket_ai
+
+        cfg = AIAgentConfig.get_config()
+        cfg.enabled = False
+        cfg.save(update_fields=["enabled"])
+        ticket = create_ticket(
+            creator=self.dispatcher,
+            title="ONT sin señal",
+            description="La ONT permanece sin señal.",
+            category=Ticket.Category.FTTH,
+            priority=Ticket.Priority.MEDIUM,
+        )
+        self.assertEqual(review_ticket_ai(ticket.id), "disabled")
+        self.assertFalse(ticket.events.filter(comment__startswith="IA-").exists())
+
+    def test_aplicar_prioridad_recarga_sla_y_deja_historial(self):
+        ticket = create_ticket(
+            creator=self.dispatcher,
+            title="ONT sin señal",
+            description="La ONT permanece sin señal.",
+            category=Ticket.Category.FTTH,
+            priority=Ticket.Priority.MEDIUM,
+        )
+        apply_priority_by_ai(ticket, Ticket.Priority.HIGH, 0.9, "corte total")
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.priority, Ticket.Priority.HIGH)
+        minutos = (ticket.sla_due_at - timezone.now()).total_seconds() / 60
+        self.assertGreaterEqual(minutos, 7)
+        self.assertLessEqual(minutos, 8.5)
+        self.assertTrue(ticket.events.filter(comment__startswith="IA-Aplicada:").exists())

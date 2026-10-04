@@ -140,7 +140,7 @@ def process_attachment_ocr(attachment_id):
         attachment.ocr_estado = TicketAttachment.OcrStatus.DONE
         attachment.save(update_fields=["ocr_estado"])
         broadcast_ticket_update(ticket.id, "ocr_done")
-        if needs_ai and settings.IA_VISION_ENABLED and not getattr(settings, "CELERY_TASK_ALWAYS_EAGER", False):
+        if needs_ai and _ai_enabled() and not getattr(settings, "CELERY_TASK_ALWAYS_EAGER", False):
             try:
                 analyze_attachment_ai.delay(attachment.id)
             except Exception:
@@ -163,7 +163,7 @@ def analyze_attachment_ai(attachment_id, prompt=""):
         attachment = TicketAttachment.objects.select_related("ticket").get(pk=attachment_id)
     except TicketAttachment.DoesNotExist:
         return "missing"
-    if not settings.IA_VISION_ENABLED:
+    if not _ai_enabled():
         return "disabled"
     ticket = attachment.ticket
     prompt = (prompt or "").strip() or (
@@ -207,10 +207,83 @@ def analyze_attachment_ai(attachment_id, prompt=""):
 
 
 REVIEW_MARKER = "IA-Revisor:"
+APPLIED_MARKER = "IA-Aplicada:"
+SEVERITY = {"BAJA": 1, "MEDIA": 2, "ALTA": 3, "CRITICA": 4}
+
+
+def _ai_config():
+    try:
+        from .models import AIAgentConfig
+        return AIAgentConfig.get_config()
+    except Exception:
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            enabled=getattr(settings, "IA_VISION_ENABLED", True),
+            auto_apply=getattr(settings, "IA_AUTO_APPLY", True),
+            threshold=float(getattr(settings, "IA_THRESHOLD", 0.8) or 0.8),
+            services=list(getattr(settings, "IA_SERVICES", ["FTTH", "HFC"]) or ["FTTH", "HFC"]),
+            allow_lower=getattr(settings, "IA_ALLOW_LOWER", True),
+            cooldown_hours=int(getattr(settings, "IA_COOLDOWN_HOURS", 24) or 24),
+        )
+
+
+def _ai_enabled():
+    if not getattr(settings, "IA_VISION_ENABLED", True):
+        return False
+    try:
+        return bool(_ai_config().enabled)
+    except Exception:
+        return True
+
+
+def _in_scope(category, services):
+    scope = {str(s).upper() for s in (services or [])}
+    return bool(scope) and str(category or "").upper() in scope
+
+
+def _recent_ai_event(ticket, hours):
+    try:
+        from django.db.models import Q
+        from django.utils import timezone as tz
+        from datetime import timedelta as td
+        cutoff = tz.now() - td(hours=max(0, int(hours or 0)))
+        return ticket.events.filter(
+            Q(comment__startswith=REVIEW_MARKER) | Q(comment__startswith=APPLIED_MARKER),
+            created_at__gte=cutoff,
+        ).exists()
+    except Exception:
+        return False
+
+
+def _parse_review(texto):
+    import json as jsonlib
+    match = re.search(r"\{.*\}", texto or "", re.DOTALL)
+    if not match:
+        return None
+    try:
+        data = jsonlib.loads(match.group(0))
+    except Exception:
+        return None
+    prioridad = str(data.get("prioridad") or "").strip().upper()
+    if prioridad not in SEVERITY:
+        return None
+    try:
+        confianza = float(data.get("confianza"))
+    except (TypeError, ValueError):
+        return None
+    confianza = min(1.0, max(0.0, confianza))
+    return {
+        "prioridad": prioridad,
+        "confianza": confianza,
+        "motivo": str(data.get("motivo") or "").strip()[:500],
+        "resumen": str(data.get("resumen") or "").strip()[:500],
+    }
 
 
 def maybe_schedule_review(ticket_id):
     if getattr(settings, "CELERY_TASK_ALWAYS_EAGER", False):
+        return
+    if not _ai_enabled():
         return
     try:
         from .models import Ticket
@@ -222,8 +295,14 @@ def maybe_schedule_review(ticket_id):
         return
     if any(a.ocr_estado in {TicketAttachment.OcrStatus.PENDING, TicketAttachment.OcrStatus.PROCESSING} for a in attachments):
         return
-    if ticket.events.filter(comment__startswith=REVIEW_MARKER).exists():
-        return
+    try:
+        cfg = _ai_config()
+        if not _in_scope(ticket.category, cfg.services):
+            return
+        if _recent_ai_event(ticket, cfg.cooldown_hours):
+            return
+    except Exception:
+        pass
     try:
         review_ticket_ai.apply_async(args=[ticket_id], countdown=60)
     except Exception:
@@ -237,10 +316,14 @@ def review_ticket_ai(ticket_id, force=False):
         ticket = Ticket.objects.prefetch_related("attachments", "events").get(pk=ticket_id)
     except Ticket.DoesNotExist:
         return "missing"
-    if not settings.IA_VISION_ENABLED:
+    if not _ai_enabled():
         return "disabled"
-    if not force and ticket.events.filter(comment__startswith=REVIEW_MARKER).exists():
-        return "done"
+    if ticket.status == Ticket.Status.CLOSED:
+        return "closed"
+    cfg = _ai_config()
+    scope_ok = _in_scope(ticket.category, cfg.services)
+    if not force and _recent_ai_event(ticket, cfg.cooldown_hours):
+        return "cooldown"
     evidencias = []
     for event in ticket.events.order_by("created_at"):
         if (event.comment or "").startswith(("OCR:", "IA (")):
@@ -258,9 +341,11 @@ def review_ticket_ai(ticket_id, force=False):
     import json as jsonlib
     prompt = (
         "Eres supervisor de soporte telecom. Analiza este ticket y su evidencia. "
-        "Responde EXACTAMENTE en 3 líneas: 1) Resumen de evidencia (1 línea). "
-        "2) Prioridad sugerida: CRITICA, ALTA, MEDIA o BAJA. "
-        "3) Motivo (1 línea). "
+        "Responde SOLO con un JSON válido, sin texto fuera del JSON, con estas claves: "
+        '{"resumen": "1 línea", "prioridad": "CRITICA|ALTA|MEDIA|BAJA", '
+        '"confianza": 0.0 a 1.0, "motivo": "1 línea"}. '
+        "Sube la prioridad si hay corte total, error de activación, cliente sin servicio "
+        "o falla que impide el uso. Baja solo si la evidencia muestra impacto mínimo. "
         f"Ticket: {jsonlib.dumps(datos, ensure_ascii=False)} "
         f"Evidencia: {chr(10).join(evidencias[:6]) or 'sin evidencia procesada'}"
     )
@@ -272,6 +357,7 @@ def review_ticket_ai(ticket_id, force=False):
             "model": settings.OLLAMA_REASON_MODEL,
             "prompt": prompt,
             "stream": False,
+            "format": "json",
         }).encode()
         request = urllib.request.Request(
             f"{settings.OLLAMA_HOST.rstrip('/')}/api/generate",
@@ -283,10 +369,55 @@ def review_ticket_ai(ticket_id, force=False):
         texto = (data.get("response") or "").strip()[:1500]
         if not texto:
             return "empty"
-        record_event(ticket, TicketEvent.EventType.ATTACHMENT, actor=None, comment=f"{REVIEW_MARKER}\n{texto}")
-        broadcast_ticket_update(ticket.id, "ai_done")
-        return "ok"
     except Exception as exc:
         record_event(ticket, TicketEvent.EventType.ATTACHMENT, actor=None, comment=f"IA no disponible: {exc}")
         broadcast_ticket_update(ticket.id, "ai_failed")
         return "failed"
+    parsed = _parse_review(texto)
+    if parsed is None:
+        record_event(ticket, TicketEvent.EventType.ATTACHMENT, actor=None, comment=f"{REVIEW_MARKER} No se pudo interpretar la respuesta. Texto: {texto[:500]}")
+        broadcast_ticket_update(ticket.id, "ai_done")
+        return "suggested"
+    nueva = parsed["prioridad"]
+    conf = parsed["confianza"]
+    motivo = parsed["motivo"]
+    resumen = parsed["resumen"]
+    umbral = float(cfg.threshold or 0.8)
+    try:
+        from .services import apply_priority_by_ai
+    except Exception:
+        apply_priority_by_ai = None
+    nota = ""
+    puede_aplicar = True
+    if ticket.priority == nueva:
+        return _suggest(ticket, nueva, conf, umbral, motivo, resumen, "Mantiene la prioridad actual.")
+    if not cfg.auto_apply:
+        nota, puede_aplicar = "Cambio automático desactivado por administración.", False
+    elif not scope_ok:
+        nota, puede_aplicar = f"Servicio {ticket.category} fuera de los configurados.", False
+    elif conf < umbral:
+        nota, puede_aplicar = f"Confianza {conf:.0%} bajo el umbral {umbral:.0%}.", False
+    elif SEVERITY[nueva] < SEVERITY.get(ticket.priority, 2) and not cfg.allow_lower:
+        nota, puede_aplicar = "Bajar prioridad no está permitido por administración.", False
+    elif not force and _recent_ai_event(ticket, cfg.cooldown_hours):
+        nota, puede_aplicar = "Ya hubo una revisión reciente de este ticket.", False
+    if not puede_aplicar or apply_priority_by_ai is None:
+        return _suggest(ticket, nueva, conf, umbral, motivo, resumen, nota)
+    try:
+        apply_priority_by_ai(ticket, nueva, conf, motivo or resumen)
+        return "applied"
+    except Exception as exc:
+        return _suggest(ticket, nueva, conf, umbral, motivo, resumen, f"No se pudo aplicar: {exc}")
+
+
+def _suggest(ticket, nueva, conf, umbral, motivo, resumen, nota=""):
+    etiquetas = {"CRITICA": "Crítica", "ALTA": "Alta", "MEDIA": "Media", "BAJA": "Baja"}
+    actual = etiquetas.get(ticket.priority, ticket.priority)
+    texto = (
+        f"{REVIEW_MARKER} Sugiere {etiquetas.get(nueva, nueva)} "
+        f"(confianza {conf:.0%}, umbral {float(umbral):.0%}). "
+        f"{resumen} {motivo} {nota or ''}".strip()
+    )
+    record_event(ticket, TicketEvent.EventType.ATTACHMENT, actor=None, comment=texto[:1500])
+    broadcast_ticket_update(ticket.id, "ai_done")
+    return "suggested"

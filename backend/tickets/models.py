@@ -49,6 +49,45 @@ class EscalationArea(models.Model):
         return self.name
 
 
+class AIAgentConfig(models.Model):
+    enabled = models.BooleanField(default=True, verbose_name="agente activado")
+    auto_apply = models.BooleanField(default=True, verbose_name="cambio automático de prioridad")
+    threshold = models.FloatField(default=0.8, verbose_name="confianza mínima (0-1)")
+    services = models.JSONField(default=list, blank=True, verbose_name="servicios cubiertos")
+    allow_lower = models.BooleanField(default=True, verbose_name="permite bajar prioridad")
+    cooldown_hours = models.IntegerField(default=24, verbose_name="horas entre cambios por ticket")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "configuración del agente IA"
+        verbose_name_plural = "configuración del agente IA"
+
+    def __str__(self):
+        return f"Agente IA {'activo' if self.enabled else 'apagado'} (umbral {self.threshold})"
+
+    @classmethod
+    def get_config(cls):
+        from django.conf import settings as dj_settings
+        obj = cls.objects.order_by("pk").first()
+        if obj is None:
+            obj = cls.objects.create(
+                enabled=getattr(dj_settings, "IA_VISION_ENABLED", True),
+                auto_apply=getattr(dj_settings, "IA_AUTO_APPLY", True),
+                threshold=float(getattr(dj_settings, "IA_THRESHOLD", 0.8) or 0.8),
+                services=list(getattr(dj_settings, "IA_SERVICES", ["FTTH", "HFC"]) or ["FTTH", "HFC"]),
+                allow_lower=getattr(dj_settings, "IA_ALLOW_LOWER", True),
+                cooldown_hours=int(getattr(dj_settings, "IA_COOLDOWN_HOURS", 24) or 24),
+            )
+        return obj
+
+    def clean(self):
+        from django.core.exceptions import ValidationError as VE
+        if not 0.5 <= float(self.threshold or 0) <= 0.95:
+            raise VE({"threshold": "La confianza mínima debe estar entre 0.5 y 0.95."})
+        if self.cooldown_hours is not None and self.cooldown_hours < 0:
+            raise VE({"cooldown_hours": "No admite valores negativos."})
+
+
 class Ticket(models.Model):
     class Category(models.TextChoices):
         FTTH = "FTTH", "FTTH"

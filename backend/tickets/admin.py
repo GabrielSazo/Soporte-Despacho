@@ -1,6 +1,11 @@
 from django.contrib import admin
 
-from .models import EscalationArea, RequestType, Ticket, TicketAttachment, TicketEvent
+from .models import AIAgentConfig, EscalationArea, RequestType, Ticket, TicketAttachment, TicketEvent
+
+
+@admin.register(AIAgentConfig)
+class AIAgentConfigAdmin(admin.ModelAdmin):
+    list_display = ("enabled", "auto_apply", "threshold", "allow_lower", "cooldown_hours", "updated_at")
 
 
 @admin.register(EscalationArea)

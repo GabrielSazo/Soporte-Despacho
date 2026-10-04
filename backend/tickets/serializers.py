@@ -8,8 +8,37 @@ from rest_framework import serializers
 from accounts.models import User
 from accounts.serializers import TeamSummarySerializer, UserSummarySerializer
 
-from .models import EscalationArea, RequestType, Ticket, TicketAttachment, TicketEvent
+from .models import AIAgentConfig, EscalationArea, RequestType, Ticket, TicketAttachment, TicketEvent
 from .services import create_ticket, record_event
+
+
+class AIAgentConfigSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AIAgentConfig
+        fields = ["id", "enabled", "auto_apply", "threshold", "services", "allow_lower", "cooldown_hours", "updated_at"]
+        read_only_fields = ["id", "updated_at"]
+
+    def validate_threshold(self, value):
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            raise serializers.ValidationError("La confianza mínima debe ser un número entre 0.5 y 0.95.")
+        if not 0.5 <= value <= 0.95:
+            raise serializers.ValidationError("La confianza mínima debe estar entre 0.5 y 0.95.")
+        return value
+
+    def validate_services(self, value):
+        valid = {"FTTH", "HFC", "WTTX", "DTH", "ADMINISTRATIVO"}
+        cleaned = sorted({str(s).upper() for s in (value or []) if str(s).strip()})
+        invalid = [s for s in cleaned if s not in valid]
+        if invalid:
+            raise serializers.ValidationError(f"Servicios inválidos: {', '.join(invalid)}. Usa: FTTH, HFC, WTTX, DTH.")
+        return cleaned
+
+    def validate_cooldown_hours(self, value):
+        if value is not None and value < 0:
+            raise serializers.ValidationError("No admite valores negativos.")
+        return value
 
 
 class EscalationAreaSerializer(serializers.ModelSerializer):

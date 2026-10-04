@@ -320,6 +320,14 @@ export function updateEscalationArea(id, data) {
   return request(`/escalation-areas/${id}/`, { method: "PATCH", body: data });
 }
 
+export function getIAConfig() {
+  return request("/ia-config/");
+}
+
+export function updateIAConfig(data) {
+  return request("/ia-config/1/", { method: "PATCH", body: data });
+}
+
 export function getReportsSummary(params = {}) {
   const cleaned = Object.fromEntries(Object.entries(params).filter(([, v]) => v));
   const qs = new URLSearchParams(cleaned).toString();

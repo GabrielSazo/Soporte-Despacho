@@ -10,9 +10,9 @@ from rest_framework.views import APIView
 from accounts.models import User
 from accounts.permissions import IsAdministrator
 
-from .models import EscalationArea, RequestType, Ticket, TicketEvent
+from .models import AIAgentConfig, EscalationArea, RequestType, Ticket, TicketEvent
 from .permissions import require_support_access, require_validation_access, visible_tickets_for
-from .serializers import EscalateSerializer, EscalationAreaSerializer, InstructSerializer, RequestTypeSerializer, ResolutionSerializer, TicketAttachmentSerializer, TicketCreateSerializer, TicketSerializer, ValidationSerializer
+from .serializers import AIAgentConfigSerializer, EscalateSerializer, EscalationAreaSerializer, InstructSerializer, RequestTypeSerializer, ResolutionSerializer, TicketAttachmentSerializer, TicketCreateSerializer, TicketSerializer, ValidationSerializer
 from .services import deescalate_ticket, escalate_ticket, instruct_ticket, route_ticket, take_ticket, validate_ticket
 from .services import resolve_ticket as resolve_ticket_service
 
@@ -82,6 +82,26 @@ class EscalationAreaViewSet(viewsets.ModelViewSet):
         from accounts.models import AuditLog
         audit(request.user, AuditLog.Action.CATALOG_EDITED, entidad="area", detalle="Área de escalamiento editada", request=request)
         return response
+
+class AIAgentConfigViewSet(viewsets.ModelViewSet):
+    queryset = AIAgentConfig.objects.all()
+    serializer_class = AIAgentConfigSerializer
+    permission_classes = [IsAdministrator]
+    http_method_names = ["get", "patch", "head", "options"]
+
+    def get_object(self):
+        return AIAgentConfig.get_config()
+
+    def list(self, request, *args, **kwargs):
+        return Response(AIAgentConfigSerializer(AIAgentConfig.get_config()).data)
+
+    def partial_update(self, request, *args, **kwargs):
+        response = super().partial_update(request, *args, **kwargs)
+        from accounts.audit import audit
+        from accounts.models import AuditLog
+        audit(request.user, AuditLog.Action.CATALOG_EDITED, entidad="ia-config", detalle="Configuración del agente IA editada", request=request)
+        return response
+
 
 class TicketViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
@@ -301,12 +321,14 @@ class TicketViewSet(viewsets.ModelViewSet):
     def analizar_imagen(self, request, pk=None):
         from django.conf import settings as dj_settings
 
+        from .models import AIAgentConfig
+
         ticket = self.get_object()
         require_support_access(request.user, ticket)
         if not request.user.is_administrator and request.user.role not in {User.Role.SUPPORT, User.Role.SUPERVISOR}:
             raise PermissionDenied("Solo soporte, supervisores o administración pueden usar el análisis IA.")
-        if not dj_settings.IA_VISION_ENABLED:
-            raise ValidationError("El análisis IA está desactivado en este ambiente.")
+        if not dj_settings.IA_VISION_ENABLED or not AIAgentConfig.get_config().enabled:
+            raise ValidationError("El agente IA está desactivado por administración. El flujo continúa sin IA.")
         attachment_id = request.data.get("attachment_id")
         try:
             attachment = ticket.attachments.get(pk=attachment_id)
@@ -322,10 +344,16 @@ class TicketViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="revisar")
     def revisar(self, request, pk=None):
+        from django.conf import settings as dj_settings
+
+        from .models import AIAgentConfig
+
         ticket = self.get_object()
         require_support_access(request.user, ticket)
         if not request.user.is_administrator and request.user.role not in {User.Role.SUPPORT, User.Role.SUPERVISOR}:
             raise PermissionDenied("Solo soporte, supervisores o administración pueden pedir revisión IA.")
+        if not dj_settings.IA_VISION_ENABLED or not AIAgentConfig.get_config().enabled:
+            raise ValidationError("El agente IA está desactivado por administración. El flujo continúa sin IA.")
         try:
             from .tasks import review_ticket_ai
             review_ticket_ai.delay(ticket.id, True)

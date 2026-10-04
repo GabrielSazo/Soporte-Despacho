@@ -1,11 +1,12 @@
 from django.urls import path
 from rest_framework.routers import DefaultRouter
 
-from .views import DashboardView, EscalationAreaViewSet, ReportsExportView, ReportsSummaryView, RequestTypeViewSet, TicketViewSet
+from .views import AIAgentConfigViewSet, DashboardView, EscalationAreaViewSet, ReportsExportView, ReportsSummaryView, RequestTypeViewSet, TicketViewSet
 
 
 router = DefaultRouter()
 router.register("tickets", TicketViewSet, basename="ticket")
+router.register("ia-config", AIAgentConfigViewSet, basename="ia-config")
 router.register("request-types", RequestTypeViewSet, basename="request-type")
 router.register("escalation-areas", EscalationAreaViewSet, basename="escalation-area")
 

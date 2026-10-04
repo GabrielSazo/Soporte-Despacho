@@ -194,6 +194,30 @@ def instruct_ticket(ticket, actor, instrucciones):
 
 
 @transaction.atomic
+def apply_priority_by_ai(ticket, new_priority, confidence, motivo=""):
+    from django.utils import timezone as tz
+
+    valid = {c for c, _ in Ticket.Priority.choices}
+    if new_priority not in valid:
+        raise ValueError("Prioridad sugerida inválida.")
+    if ticket.status == Ticket.Status.CLOSED or ticket.priority == new_priority:
+        return ticket
+    previous = ticket.priority
+    previous_label = ticket.get_priority_display()
+    ticket.priority = new_priority
+    ticket.sla_due_at = tz.now() + timedelta(minutes=Ticket.SLA_MINUTES[new_priority])
+    ticket.save(update_fields=["priority", "sla_due_at", "updated_at"])
+    try:
+        conf_txt = f"{float(confidence):.0%}"
+    except (TypeError, ValueError):
+        conf_txt = "alta"
+    detalle = f"IA-Aplicada: {previous_label} → {ticket.get_priority_display()} (confianza {conf_txt}). {motivo}".strip()
+    record_event(ticket, TicketEvent.EventType.ATTACHMENT, actor=None, comment=detalle[:1500])
+    broadcast_ticket_update(ticket.id, "ai_priority")
+    return ticket
+
+
+@transaction.atomic
 def auto_close_ticket(ticket):
     if ticket.status != Ticket.Status.VALIDATION:
         return ticket
