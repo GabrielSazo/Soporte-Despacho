@@ -1294,7 +1294,17 @@ function EscalationsView({ currentUser, tickets, onOpen, onDeescalate }) {
         title="Tickets escalados"
         description="Solo lectura para despacho. Soporte continúa el flujo al recibir respuesta."
       />
-      {tickets.length > 0 && <div className="table-summary"><span><b>{tickets.length}</b> {tickets.length === 1 ? "ticket escalado actualmente" : "tickets escalados actualmente"}</span><span>Tiempo desde el escalamiento por tarjeta</span></div>}
+      {(() => {
+        const porArea = {};
+        tickets.forEach((t) => {
+          const area = t.areaEscalada || "Sin área (automático)";
+          porArea[area] = (porArea[area] || 0) + 1;
+        });
+        return (<>
+          <div className="table-summary"><span><b>{tickets.length}</b> {tickets.length === 1 ? "ticket escalado actualmente" : "tickets escalados actualmente"}</span><span>Por área de destino</span></div>
+          {tickets.length > 0 && <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", margin: "0 0 16px" }}>{Object.entries(porArea).map(([area, n]) => <span key={area} className="team-label">{area} · <b>{n}</b></span>)}</div>}
+        </>);
+      })()}
       <section className="validation-grid">
         {tickets.length === 0 ? <EmptyEscalation /> : tickets.map((ticket) => (
           <article className="validation-card" key={ticket.id} onClick={() => onOpen && onOpen(ticket)} style={{ cursor: onOpen ? "pointer" : "default" }}>
