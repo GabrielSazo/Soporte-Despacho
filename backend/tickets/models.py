@@ -72,10 +72,10 @@ class Ticket(models.Model):
         ESCALATED = "ESCALADO", "Escalado"
 
     SLA_MINUTES = {
-        Priority.CRITICAL: 5,
-        Priority.HIGH: 8,
-        Priority.MEDIUM: 10,
-        Priority.LOW: 20,
+        Priority.CRITICAL: 2,
+        Priority.HIGH: 3,
+        Priority.MEDIUM: 4,
+        Priority.LOW: 5,
     }
 
     creator = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="created_tickets")

@@ -1083,7 +1083,7 @@ function Dashboard({ canCreate, criticalTickets, dashboard, onCreate, onOpen, on
 
   const metrics = [
     { label: "Tickets activos", value: activeTickets, trend: `${sla.vencido} vencidos`, detail: "necesitan atención", icon: "ticket", tone: "green" },
-    { label: "Requieren atención", value: dashboard?.metrics?.critical_tickets ?? criticalTickets, trend: `${sla.vencido} vencidos`, detail: "SLA menor a 1 hora", icon: "alert", tone: "coral" },
+    { label: "Requieren atención", value: dashboard?.metrics?.critical_tickets ?? criticalTickets, trend: `${sla.vencido} vencidos`, detail: "Compromiso máximo 5 min", icon: "alert", tone: "coral" },
     { label: "En validación", value: validationTickets.length, trend: `${validationTickets.length} casos`, detail: "pendientes de respuesta", icon: "checkCircle", tone: "violet" },
     { label: "Resueltos hoy", value: resolvedToday, trend: "", detail: "enviados a validación hoy", icon: "activity", tone: "blue" },
   ];
@@ -1294,6 +1294,7 @@ function EscalationsView({ currentUser, tickets, onOpen, onDeescalate }) {
         title="Tickets escalados"
         description="Solo lectura para despacho. Soporte continúa el flujo al recibir respuesta."
       />
+      {tickets.length > 0 && <div className="table-summary"><span><b>{tickets.length}</b> {tickets.length === 1 ? "ticket escalado actualmente" : "tickets escalados actualmente"}</span><span>Tiempo desde el escalamiento por tarjeta</span></div>}
       <section className="validation-grid">
         {tickets.length === 0 ? <EmptyEscalation /> : tickets.map((ticket) => (
           <article className="validation-card" key={ticket.id} onClick={() => onOpen && onOpen(ticket)} style={{ cursor: onOpen ? "pointer" : "default" }}>
