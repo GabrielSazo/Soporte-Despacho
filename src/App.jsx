@@ -444,14 +444,27 @@ function App() {
     const token = sessionStorage.getItem("sestel-access-token");
     if (!token) return;
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${window.location.host}/ws/tickets/?token=${token}`;
+    const wsBase = `${protocol}//${window.location.host}/ws/tickets/`;
     let ws;
     let closed = false;
+    let usedToken = null;
     function connect() {
-      ws = new WebSocket(wsUrl);
+      if (closed) return;
+      const freshToken = sessionStorage.getItem("sestel-access-token");
+      if (!freshToken) return;
+      usedToken = freshToken;
+      ws = new WebSocket(`${wsBase}?token=${freshToken}`);
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
+          if (data.type === "connected" && data.user === "anon" && !closed) {
+            const current = sessionStorage.getItem("sestel-access-token");
+            if (current && current !== usedToken) {
+              try { ws.close(); } catch {}
+              setTimeout(connect, 1000);
+            }
+            return;
+          }
           if (data.type === "presence" && Array.isArray(data.user_ids)) {
             setOnlineIds(data.user_ids.map(Number));
             return;
