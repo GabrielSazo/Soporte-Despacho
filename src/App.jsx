@@ -1080,10 +1080,14 @@ function Dashboard({ canCreate, criticalTickets, dashboard, onCreate, onOpen, on
   const slaTotal = sla.en_tiempo + sla.advertencia + sla.vencido;
   const slaScore = slaTotal ? Math.round((sla.en_tiempo / slaTotal) * 100) : 100;
   const slaPercentage = (value) => (slaTotal ? Math.round((value / slaTotal) * 100) : 0);
+  const escalatedCount = dashboard?.metrics?.escalated_tickets ?? tickets.filter((ticket) => ticket.statusCode === "ESCALADO").length;
+  const escalatedAreas = dashboard?.metrics?.escalated_by_area || [];
+  const escalatedDetail = escalatedAreas.length ? escalatedAreas.slice(0, 2).map((a) => `${a.area} · ${a.total}`).join("  ") : "en áreas externas";
 
   const metrics = [
     { label: "Tickets activos", value: activeTickets, trend: `${sla.vencido} vencidos`, detail: "necesitan atención", icon: "ticket", tone: "green" },
     { label: "Requieren atención", value: dashboard?.metrics?.critical_tickets ?? criticalTickets, trend: `${sla.vencido} vencidos`, detail: "Compromiso máximo 5 min", icon: "alert", tone: "coral" },
+    { label: "Escalados", value: escalatedCount, trend: `${escalatedCount} casos`, detail: escalatedDetail, icon: "upload", tone: "violet" },
     { label: "En validación", value: validationTickets.length, trend: `${validationTickets.length} casos`, detail: "pendientes de respuesta", icon: "checkCircle", tone: "violet" },
     { label: "Resueltos hoy", value: resolvedToday, trend: "", detail: "enviados a validación hoy", icon: "activity", tone: "blue" },
   ];

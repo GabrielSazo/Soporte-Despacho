@@ -525,6 +525,13 @@ class DashboardView(APIView):
                 sla_totals["vencido"] += 1
 
         by_status = dict(tickets.values("status").annotate(total=Count("id")).values_list("status", "total"))
+        escalated = tickets.filter(status=Ticket.Status.ESCALATED)
+        por_area = list(
+            escalated.exclude(area_escalada__isnull=True)
+            .values("area_escalada__name")
+            .annotate(total=Count("id"))
+            .order_by("-total")[:5]
+        )
         return Response(
             {
                 "metrics": {
@@ -532,6 +539,8 @@ class DashboardView(APIView):
                     "critical_tickets": active.filter(priority=Ticket.Priority.CRITICAL).count(),
                     "validation_tickets": tickets.filter(status=Ticket.Status.VALIDATION).count(),
                     "closed_today": closed_today,
+                    "escalated_tickets": escalated.count(),
+                    "escalated_by_area": [{"area": r["area_escalada__name"], "total": r["total"]} for r in por_area],
                 },
                 "sla": sla_totals,
                 "by_status": by_status,
