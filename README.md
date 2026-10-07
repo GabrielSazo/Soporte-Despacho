@@ -1,17 +1,18 @@
 # Sestel - Centro de Control
 
-Sistema web para el seguimiento y escalamiento de soporte técnico de HFC, FTTH y DTH.
+Sistema web para el seguimiento y escalamiento de soporte técnico de HFC, FTTH, WTTX y DTH.
 
-## Incluye
+## Stack real (verificado en `compose.yaml` / `compose.prod.yaml` / `backend/config/settings.py`)
 
-- React 18 con interfaz responsiva, navegación lateral y tema claro/oscuro.
-- Django 4.2, Django REST Framework y autenticación JWT.
-- PostgreSQL configurado para despliegue y SQLite para pruebas locales rápidas.
-- Grupos, equipos, usuarios y perfiles de despachador, soporte y administración.
-- Visibilidad aplicada por la API: despachadores ven sus tickets, soporte ve los de su equipo y administración tiene vista global.
-- Creación, asignación automática, toma de ticket, resolución, validación cruzada, adjuntos JPG/PNG y cierre.
-- SLA por prioridad, escalamiento automático y cierre de validaciones sin respuesta después de 24 horas.
-- Datos de demostración y pruebas automatizadas.
+- React 18 + Vite 6 (SPA, `src/App.jsx`).
+- Django 4.2 + DRF + JWT (`access` 30 min / `refresh` 1 día).
+- PostgreSQL 16 en Docker (dev y prod). SQLite solo como respaldo si no hay `POSTGRES_DB` (`settings.py:86-103`) y para ejecución sin Docker.
+- Redis 7: broker de Celery y channel layer de WebSocket.
+- Celery worker (concurrencia 2): OCR asíncrono `tickets.tasks.process_attachment_ocr` (Tesseract `spa+eng` + pyzbar).
+- Tiempo real: Django Channels + Daphne + Redis (broadcast `ticket_update` + presencia). Nginx proxea `/ws/`.
+- Nginx: `/api/`, `/ws/`, `/media/`, `/admin/`, `/static/` (ver `nginx.conf`).
+- WhiteNoise para estáticos de `/admin/`.
+- SLA: comando `process_ticket_automation` por cron/planificador (no hay Celery beat). Escala vencidos y auto-cierra validaciones de 24 h.
 
 ## Ejecución Local
 
@@ -28,8 +29,10 @@ docker compose -f compose.yaml up --build
 | Servicio | Puerto | Descripción |
 | --- | --- | --- |
 | postgres | `5433` | PostgreSQL 16, DB `sestel_dev` |
-| api | `8010` | Django runserver con auto-reload |
-| frontend | `5173` | Vite dev server con hot-reload |
+| redis | `6379` | Redis 7 (Celery + Channels) |
+| api | `8010` | Daphne + Django con auto-reload |
+| worker | — | Celery worker (OCR async, concurrencia 2) |
+| frontend | `80` | Vite dev server con hot-reload |
 
 Para reiniciar limpio (borrar datos):
 
@@ -76,12 +79,13 @@ Abre la dirección indicada por Vite (por defecto `http://127.0.0.1:5173`).
 
 ## Usuarios De Prueba
 
-Todos usan la contraseña temporal `Sestel2026!`.
+Todos usan la contraseña temporal `Sestel2026!` (ver `backend/accounts/management/commands/seed_demo.py`).
 
 | Perfil | Correo | Alcance |
 | --- | --- | --- |
 | Despachadora | `despacho@sestel.local` | Crear y validar sus tickets |
-| Agente de soporte | `soporte@sestel.local` | Atender tickets de FTTH Norte |
+| Agente de soporte | `soporte@sestel.local` | Atender tickets de su grupo |
+| Supervisor | `supervisor@sestel.local` | Su grupo + validaciones + reasignar |
 | Administradora | `admin@sestel.local` | Vista global y administración API |
 
 ## API Principal
@@ -103,13 +107,13 @@ Los endpoints de grupos, equipos y usuarios están disponibles para administrado
 
 ## Automatización SLA
 
-Ejecuta este comando periódicamente, por ejemplo cada cinco minutos mediante el programador de tareas o cron:
+Ejecuta este comando periódicamente, por ejemplo cada cinco minutos mediante el programador de tareas o cron (no existe Celery beat en este proyecto):
 
 ```powershell
 .\.venv\Scripts\python.exe backend\manage.py process_ticket_automation
 ```
 
-El proceso escala tickets abiertos, asignados o en proceso cuyo SLA venció, y cierra tickets en validación que superaron 24 horas sin respuesta.
+El proceso escala tickets abiertos, asignados o en proceso cuyo SLA venció, y cierra tickets en validación que superaron 24 horas sin respuesta. El OCR de adjuntos, en cambio, sí usa Celery worker + Redis de forma automática.
 
 ## Verificación
 
@@ -121,8 +125,9 @@ npm run build
 ## Antes De Producción
 
 1. Definir un `DJANGO_SECRET_KEY` seguro y `DJANGO_DEBUG=false`.
-2. Configurar PostgreSQL administrado, respaldo diario y restauración probada.
-3. Establecer dominio, HTTPS, `DJANGO_ALLOWED_HOSTS` y `CORS_ALLOWED_ORIGINS` definitivos.
-4. Ejecutar la automatización SLA mediante un planificador confiable, no manualmente.
-5. Cambiar o desactivar las cuentas de demostración y aplicar políticas institucionales de contraseñas.
-6. Agregar auditoría, monitoreo de errores y pruebas end-to-end antes del despliegue.
+2. Configurar PostgreSQL administrado, respaldo diario (`pg_dump` antes de cada release) y restauración probada.
+3. Establecer dominio, `DJANGO_ALLOWED_HOSTS` y `CORS_ALLOWED_ORIGINS` definitivos. `compose.prod.yaml` trae `DJANGO_ALLOWED_HOSTS:-*` y `EMAIL_BACKEND` en modo consola **por defecto**: en prod deben definirse por `.env` (nunca en git).
+4. HTTPS: `compose.prod.yaml` solo publica puerto `80`. El TLS se termina en Cloudflare Tunnel (quick/nombrado). Sin túnel, agregar TLS propio (p. ej. Let's Encrypt) delante de nginx.
+5. Ejecutar la automatización SLA mediante un planificador confiable, no manualmente.
+6. Cambiar o desactivar las cuentas de demostración y aplicar política de claves (10+, mayúscula, minúscula, número).
+7. Agregar auditoría, monitoreo de errores y pruebas end-to-end antes del despliegue.
