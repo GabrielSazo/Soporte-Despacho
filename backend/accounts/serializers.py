@@ -52,7 +52,7 @@ class CurrentUserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ["id", "name", "email", "username", "role", "group", "groups", "teams", "managed_groups", "is_locked", "failed_login_attempts", "locked_at"]
+        fields = ["id", "name", "email", "username", "role", "group", "groups", "teams", "managed_groups", "is_locked", "is_superuser", "failed_login_attempts", "locked_at"]
         read_only_fields = ["failed_login_attempts", "locked_at"]
 
     def get_group(self, user):
@@ -96,11 +96,12 @@ class UserSerializer(serializers.ModelSerializer):
             "managed_groups_detail",
             "is_active",
             "is_locked",
+            "is_superuser",
             "failed_login_attempts",
             "locked_at",
             "password",
         ]
-        read_only_fields = ["is_locked", "failed_login_attempts", "locked_at"]
+        read_only_fields = ["is_locked", "is_superuser", "failed_login_attempts", "locked_at"]
         extra_kwargs = {"password": {"write_only": True}}
 
     def create(self, validated_data):
@@ -135,6 +136,14 @@ class UserSerializer(serializers.ModelSerializer):
         teams_data = validated_data.pop("teams", None)
         mgroups_data = validated_data.pop("managed_groups", None)
         password = validated_data.pop("password", None)
+        if password:
+            request = self.context.get("request")
+            actor = getattr(request, "user", None) if request else None
+            if actor and actor != instance and not actor.is_superuser:
+                if instance.is_superuser:
+                    raise serializers.ValidationError({"password": "La contraseña del superadministrador solo puede cambiarla el propio superadministrador."})
+                if instance.role == User.Role.ADMIN:
+                    raise serializers.ValidationError({"password": "Un administrador no puede cambiar la contraseña de otro administrador."})
         user = super().update(instance, validated_data)
         if password:
             user.set_password(password)
