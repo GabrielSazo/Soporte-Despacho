@@ -72,6 +72,138 @@ async function refreshAccessToken(failedAccessToken) {
   return run();
 }
 
+// ---------------------------------------------------------------------------
+// Ciclo de vida de la sesión (v1.8.1): las pestañas comparten la sesión y
+// CERRAR EL NAVEGADOR cierra la sesión en el servidor.
+//
+// - Cada pestaña vive en su PROPIA clave de localStorage (`sestel-tab-<id>`)
+//   con heartbeat: al ser claves individuales no hay lectura-escritura
+//   compartida, así que aunque varias pestañas se cierren a la vez ninguna
+//   entrada ajena se pierde ni sobrevive la de una pestaña muerta.
+// - Al arrancar con tokens, sin otras pestañas con heartbeat vigente, sin ser
+//   una recarga (`navigation.type === "reload"`) ni un retorno desde el mismo
+//   origen (p. ej. /admin/), el navegador se cerró: se limpian los tokens
+//   locales antes de pintar la app y, en segundo plano, se rota + cierra la
+//   sesión en el servidor (refresh + logout).
+// - La "restauración de pestañas" del navegador cuenta como cierre real.
+// - Un crash no emite `pagehide`: el respaldo es la caducidad del refresh
+//   token (<= 24 h) y el "un solo login global".
+// ---------------------------------------------------------------------------
+const tabPrefix = "sestel-tab-";
+const legacyTabsKey = "sestel-tabs"; // mapa compartido de la primera versión (se elimina)
+const TAB_HEARTBEAT_MS = 5000;
+const TAB_TTL_MS = 20000;
+
+let lifecycleStarted = false;
+let closedByBrowserClose = false;
+
+function getTabId() {
+  try {
+    let id = sessionStorage.getItem("sestel-tab-id");
+    if (!id) {
+      id = (typeof crypto !== "undefined" && crypto.randomUUID && crypto.randomUUID())
+        || `tab-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      sessionStorage.setItem("sestel-tab-id", id);
+    }
+    return id;
+  } catch {
+    return "tab-unknown";
+  }
+}
+
+// Claves de pestañas con heartbeat vigente; las caducas se podan (dueño muerto).
+function listLiveTabs() {
+  const live = [];
+  const stale = [];
+  try {
+    const now = Date.now();
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith(tabPrefix)) continue;
+      if (now - Number(localStorage.getItem(key) || 0) < TAB_TTL_MS) live.push(key);
+      else stale.push(key);
+    }
+    stale.forEach((key) => localStorage.removeItem(key));
+  } catch {
+    // Almacenamiento no disponible: la detección queda desactivada (a prueba de fallos).
+  }
+  return live;
+}
+
+function beat(remove = false) {
+  try {
+    const key = tabPrefix + getTabId();
+    if (remove) localStorage.removeItem(key);
+    else localStorage.setItem(key, String(Date.now()));
+  } catch {}
+}
+
+function browserClosedWithSession() {
+  try {
+    if (!localStorage.getItem(accessTokenKey) && !localStorage.getItem(refreshTokenKey)) return false;
+    const nav = typeof performance !== "undefined" && performance.getEntriesByType
+      ? performance.getEntriesByType("navigation")[0]
+      : null;
+    if (nav && nav.type === "reload") return false; // F5 o recarga: misma sesión
+    // Retorno desde una página del mismo origen (p. ej. /admin/ del superadmin).
+    if (document.referrer && document.referrer.startsWith(`${window.location.origin}/`)) return false;
+    // Si otra pestaña de esta app tiene heartbeat vigente, el navegador sigue abierto.
+    const ownKey = tabPrefix + getTabId();
+    if (listLiveTabs().some((key) => key !== ownKey)) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function closeAbandonedSession(refresh) {
+  try {
+    const refreshResponse = await fetch(`${apiUrl}/auth/token/refresh/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh }),
+    });
+    if (!refreshResponse.ok) return; // ya venció: no hay sesión que cerrar
+    const pair = await refreshResponse.json();
+    await fetch(`${apiUrl}/auth/logout/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${pair.access}` },
+      body: JSON.stringify({ refresh: pair.refresh }),
+    });
+  } catch {
+    // Sin red en este momento: el refresh vence solo (<= 24 h) y el próximo arranque reintenta.
+  }
+}
+
+export function peekSessionClosedNotice() {
+  return closedByBrowserClose;
+}
+
+// Debe llamarse UNA vez, antes del primer render (main.jsx).
+export function initSessionLifecycle() {
+  if (lifecycleStarted || typeof window === "undefined") return;
+  lifecycleStarted = true;
+
+  try {
+    localStorage.removeItem(legacyTabsKey); // limpieza del mapa compartido
+  } catch {}
+
+  if (browserClosedWithSession()) {
+    closedByBrowserClose = true;
+    const refresh = localStorage.getItem(refreshTokenKey);
+    clearTokens();
+    try {
+      localStorage.removeItem("sestel-user");
+    } catch {}
+    if (refresh) closeAbandonedSession(refresh); // segundo plano, no bloquea el arranque
+  }
+
+  beat(); // alta de esta pestaña
+  window.setInterval(() => beat(), TAB_HEARTBEAT_MS);
+  window.addEventListener("pagehide", () => beat(true)); // si era la última, el próximo arranque cierra la sesión
+  window.addEventListener("pageshow", () => beat()); // restauración desde bfcache
+}
+
 async function request(path, { body, headers = {}, method = "GET", retry = true, useAuth = true } = {}) {
   const requestHeaders = { ...headers };
   const isFormData = body instanceof FormData;
@@ -145,6 +277,7 @@ export async function signIn(email, password) {
     useAuth: false,
   });
   saveTokens(payload);
+  closedByBrowserClose = false; // el aviso de "sesión cerrada al cerrar el navegador" ya no aplica
   return payload.user;
 }
 

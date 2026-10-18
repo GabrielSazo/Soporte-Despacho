@@ -28,6 +28,7 @@ import {
   updateIAConfig as updateIAConfigRequest,
   hasActiveSession,
   instructTicket as instructTicketRequest,
+  peekSessionClosedNotice,
   requestPasswordReset,
   resetPassword,
   resolveTicket as resolveTicketRequest,
@@ -995,7 +996,7 @@ const BASE_FAVICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/sv
   }
 
   if (!session) {
-    return <LoginScreen brand={brand} onLogin={startSession} onToggleTheme={() => setTheme((currentTheme) => (currentTheme === "light" ? "dark" : "light"))} theme={theme} />;
+    return <LoginScreen brand={brand} notice={peekSessionClosedNotice()} onLogin={startSession} onToggleTheme={() => setTheme((currentTheme) => (currentTheme === "light" ? "dark" : "light"))} theme={theme} />;
   }
 
   return (
@@ -2542,7 +2543,7 @@ function Toast({ message, onClose }) {
   return <div className="toast" role="status"><span><Icon name="checkCircle" size={19} /></span><p>{message}</p><button type="button" aria-label="Cerrar mensaje" onClick={onClose}><Icon name="close" size={16} /></button></div>;
 }
 
-function LoginScreen({ brand, onLogin, onToggleTheme, theme }) {
+function LoginScreen({ brand, onLogin, onToggleTheme, theme, notice }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -2617,6 +2618,7 @@ function LoginScreen({ brand, onLogin, onToggleTheme, theme }) {
           <label className="login-field"><span>Correo institucional</span><input autoComplete="email" required type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="nombre@empresa.com" /></label>
           <label className="login-field"><span>Contraseña</span><input autoComplete="current-password" required type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Tu contraseña" /></label>
           <div className="login-forgot"><button type="button" className="text-button" onClick={openReset}>¿Olvidaste tu contraseña?</button></div>
+          {notice && <p className="form-info" role="status"><Icon name="shield" size={16} /> Se cerró la sesión al cerrar el navegador. Inicia sesión de nuevo.</p>}
           {error && <p className="login-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}
           <button className="primary-button login-submit" disabled={submitting} type="submit">{submitting ? "Verificando acceso..." : "Ingresar al centro de control"} <Icon name="arrowRight" size={18} /></button>
         </form>
