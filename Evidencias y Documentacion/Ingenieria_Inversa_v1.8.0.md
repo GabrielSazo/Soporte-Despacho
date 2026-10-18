@@ -12,7 +12,7 @@ Documento reconstruido desde el código fuente (rama `dev`, pre-release `v1.8.0`
 
 ## 1. Visión y alcance
 
-Sistema web para el seguimiento y escalamiento de soporte técnico de HFC, FTTH, WTTX y DTH. Un despachador crea tickets, el sistema los enruta al equipo de soporte que corresponda, soporte los atiende y resuelve, el despachador valida la solución. Incluye escalamientos a áreas externas, control de SLA con compromiso de respuesta en minutos, evidencia fotográfica con OCR asíncrono, reportes e informes, administración con auditoría y **agente IA de prioridad (apagado por defecto, configurable por admin)**.
+Sistema web para el seguimiento y escalamiento de soporte técnico de HFC, FTTH, WTTX y DTH. Un despachador crea tickets, el sistema los enruta al equipo de soporte que corresponda, soporte los atiende y resuelve, el despachador valida la solución. Incluye escalamientos a áreas externas, control de SLA con compromiso de respuesta en minutos, evidencia fotográfica con OCR asíncrono, reportes e informes, administración con auditoría y **agente IA de prioridad (apagado por defecto; modo automático o solo sugerencia, configurable por admin)**.
 
 Fuera de alcance (a la fecha): envío de correos de escalamiento (solo se guarda motivo/destino), app móvil, RPA/automatización de respuestas, IA encendida en frío (viene apagada; solo se activa desde el panel), dominio público/túnel Cloudflare (redescartado: acceso por VPN).
 
@@ -69,7 +69,7 @@ Productivo (v1.8.0): **server local Ubuntu LTS, IP fija en LAN**; sin exposició
 - RF-005 Crear ticket (despachador/supervisor): tipo solicitud (Cliente/Técnico) → servicio → solicitud específica; título auto editable.
 - RF-006 Campos: Contrato (CLIENTE) u OT (TECNICO), solo números; cliente, nodo, descripción, prioridad (Media automática al crear).
 - RF-007 Duplicados: no repetir Contrato ni OT en tickets abiertos; bloquea y enlaza al INC abierto.
-- RF-008/009/010 Tabla con Contrato/OT separados, búsqueda, orden desplegable, filtros por rol.
+- RF-008/009/010 Tabla con Contrato/OT separados, búsqueda, orden desplegable (**defecto: prioridad** — Crítica→Alta→Media→Baja, a igual prioridad las más antiguas; desde v1.8.5), filtros por rol.
 - RF-011 Columna Tiempo total (creado→resuelto o al momento) en `[h]:mm:ss`.
 - RF-012 Tomar, iniciar atención, liberar, reasignar dentro del grupo, resolver con notas (mín 8). Sin reasignar en validación.
 - RF-012b Rechazar con motivo obligatorio + evidencia opcional (lista y detalle, pegar Ctrl+V).
@@ -106,8 +106,8 @@ Productivo (v1.8.0): **server local Ubuntu LTS, IP fija en LAN**; sin exposició
 
 ### RF-IA — Agente IA de prioridad (nuevo v1.8.0, apagado por defecto)
 - RF-038 Análisis de imagen de ticket con modelo de visión local (Ollama `qwen2.5vl:3b`) y revisión con `qwen3:4b` en worker Celery; si Ollama no responde, evento "IA no disponible" y **el flujo continúa sin IA** (nunca bloquea el ticket).
-- RF-039 **Interruptor maestro doble:** env `IA_VISION_ENABLED` + registro `AIAgentConfig.enabled` (ambos en `False` por defecto); `IA_AUTO_APPLY=False` = solo sugiere, nunca cambia prioridad.
-- RF-040 Panel **Administración → Agente IA** (solo ADMIN): activar/desactivar, cambio automático on/off, umbral de confianza 50–95% (default 80%), servicios donde actúa (default FTTH+HFC), permitir bajar prioridad y **"Horas mínimas entre cambios de la IA en el mismo ticket"** (cooldown anti-rebote, default 24 h; no confundir con el SLA, que se recalcula en cada cambio de prioridad).
+- RF-039 **Modos de operación configurables:** interruptor maestro doble (`IA_VISION_ENABLED` env + registro `AIAgentConfig.enabled`, ambos en `False` al arrancar). Una vez encendido, el modo lo elige el admin: `auto_apply=True` → **la IA aplica sola** los cambios que superan el umbral (sin autorización humana por ticket, con los frenos de abajo); `auto_apply=False` → solo sugiere y el cambio lo decide una persona.
+- RF-040 Panel **Administración → Agente IA** (solo ADMIN): activar/desactivar, **cambio automático on/off (por defecto off en el arranque; on = la IA escribe sola sin autorización por ticket)**, umbral de confianza 50–95% (default 80%), servicios donde actúa (default FTTH+HFC), permitir bajar prioridad y **"Horas mínimas entre cambios de la IA en el mismo ticket"** (cooldown anti-rebote, default 24 h; no confundir con el SLA, que se recalcula en cada cambio de prioridad). El orden de frenos al aplicar: agente encendido → ticket no cerrado → servicio en alcance → cooldown vigente → confianza ≥ umbral → `allow_lower` si baja prioridad.
 - RF-041 Cambios aplicados quedan en el historial como `IA-Aplicada:` con confianza y motivo y **recalculan el SLA**; sugerencias bajo el umbral quedan como `IA-Revisor:`. Endpoint `GET/PATCH /api/ia-config/` (solo admin, auditado).
 - RF-042 Endpoints de análisis: `POST /api/tickets/{id}/analizar-imagen/` y `POST /api/tickets/{id}/revisar/`; con agente apagado responden 400 "El agente IA está desactivado por administración. El flujo continúa sin IA."
 
@@ -172,7 +172,7 @@ Productivo (v1.8.0): **server local Ubuntu LTS, IP fija en LAN**; sin exposició
 - US-036 Como despacho quiero un compromiso de respuesta real de 2–5 min para no perder casos críticos. [RF-013]
 - US-037 Como despacho quiero la métrica de escalados con su área destino en Resumen para vigilar sin abrir otra vista. [RF-014b]
 - US-038 Como admin quiero encender/apagar el agente IA desde un panel para probarlo sin arriesgar la operación. [RF-039/040]
-- US-039 Como admin quiero que la IA solo sugiera (no aplique) y con umbral configurable para mantener el criterio humano. [RF-039/041]
+- US-039 Como admin quiero decidir si la IA **aplica los cambios sola** (con umbral y frenos configurables) o si solo sugiere y decide el humano. [RF-039/041]
 - US-040 Como admin quiero que nadie cambie la clave de otro admin ni la del superadmin para blindar la escalada de privilegios. [RF-026b]
 - US-041 Como soporte quiero cambiarme solo entre Soporte A/B y los demás perfiles no toquen su equipo. [RF-026b]
 - US-042 Como equipo quiero desplegar en un server Ubuntu local con backups internos y acceso por VPN. [RNF-04/05/08]
@@ -236,7 +236,8 @@ Migraciones en `dev`: `tickets` hasta `0012_ai_agent_config`; `accounts` hasta `
 | v1.8.1 | **Cierre de sesión al cerrar el navegador** (heartbeat por pestaña, claves individuales sin carreras; F5 y retornos del mismo origen conservan la sesión) | Tag publicado |
 | v1.8.2 | **Anti-enumeración en restablecimiento de contraseña** (respuesta genérica siempre; correo asíncrono vía Celery) | Tag publicado |
 | v1.8.3 | **TLS (HTTPS) en el server local** — nginx termina TLS (443) con certificado autofirmado generado por `scripts/generar_certificado.sh` (SAN con IP fija, 397 días), redirect 80→443, HSTS activo, `SECURE_PROXY_SSL_HEADER` para Django; certificado de arranque automático si no hay propios | Tag publicado (pendiente de deploy) |
-| v1.8.4 | **Alcance de datos por rol (RF-004g)** — `/groups/` y `/teams/` acotados a los grupos del usuario (admin: catálogo completo; detalle ajeno: 404); `/dashboard/` solo para ADMIN/SUPERVISOR/SOPORTE (DESPACHADOR: 403) y el front deja de pedirlo | **Release actual** |
+| v1.8.4 | **Alcance de datos por rol (RF-004g)** — `/groups/` y `/teams/` acotados a los grupos del usuario (admin: catálogo completo; detalle ajeno: 404); `/dashboard/` solo para ADMIN/SUPERVISOR/SOPORTE (DESPACHADOR: 403) y el front deja de pedirlo | Tag publicado |
+| v1.8.5 | **Bandeja ordenada por prioridad por defecto** (antes "recientes"; el selector conserva recientes/antiguos) + ingeniería inversa delimina los modos de la IA: **cambio automático posible y configurable** (apagado en el arranque, con frenos: umbral, servicios, allow_lower, cooldown 24 h) | **Release actual** |
 
 ## 12. Despliegue y evidencias
 

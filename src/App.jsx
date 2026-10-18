@@ -1237,7 +1237,7 @@ function Dashboard({ canCreate, criticalTickets, dashboard, onCreate, onOpen, on
 
 function TicketsView({ canCreate, currentUser, filter, filteredTickets, onCreate, onFilterChange, onNotify, onOpen, onResolve, onTake, query, setQuery }) {
   const filters = currentUser?.role === "SOPORTE" ? ["Trabajables", "Míos", "Validación", "Escalados", "Todos"] : currentUser?.role === "DESPACHADOR" ? ["Míos", "Validación", "Escalados", "Todos"] : ["Todos", "Abierto", "Asignado", "En proceso", "Validación", "Escalados", "Cerrados"];
-  const [sort, setSort] = useState("recientes");
+  const [sort, setSort] = useState("prioridad");
   const priorityRank = { CRITICA: 0, ALTA: 1, MEDIA: 2, BAJA: 3 };
   const sortedTickets = [...filteredTickets].sort((a, b) => {
     if (sort === "recientes") return new Date(b.createdAt) - new Date(a.createdAt);
@@ -1266,7 +1266,7 @@ function TicketsView({ canCreate, currentUser, filter, filteredTickets, onCreate
             ))}
           </div>
         </div>
-        <div className="table-summary"><span><b>{filteredTickets.length}</b> tickets encontrados</span><label className="sort-select">Ordenar: <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Ordenar tickets"><option value="recientes">recientes</option><option value="antiguos">antiguos</option><option value="prioridad">prioridad</option></select></label></div>
+        <div className="table-summary"><span><b>{filteredTickets.length}</b> tickets encontrados</span><label className="sort-select">Ordenar: <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Ordenar tickets"><option value="prioridad">prioridad</option><option value="recientes">recientes</option><option value="antiguos">antiguos</option></select></label></div>
         <div className="ticket-table-wrap"><TicketTable currentUser={currentUser} onNotify={onNotify} onOpen={onOpen} onResolve={onResolve} onTake={onTake} tickets={sortedTickets} /></div>
         {filteredTickets.length === 0 && <EmptyState />}
       </article>
