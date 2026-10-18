@@ -69,7 +69,7 @@ Productivo (v1.8.0): **server local Ubuntu LTS, IP fija en LAN**; sin exposició
 - RF-005 Crear ticket (despachador/supervisor): tipo solicitud (Cliente/Técnico) → servicio → solicitud específica; título auto editable.
 - RF-006 Campos: Contrato (CLIENTE) u OT (TECNICO), solo números; cliente, nodo, descripción, prioridad (Media automática al crear).
 - RF-007 Duplicados: no repetir Contrato ni OT en tickets abiertos; bloquea y enlaza al INC abierto.
-- RF-008/009/010 Tabla con Contrato/OT separados, búsqueda, orden desplegable (**defecto: prioridad** — Crítica→Alta→Media→Baja, a igual prioridad las más antiguas; desde v1.8.5), filtros por rol.
+- RF-008/009/010 Tabla con Contrato/OT separados, búsqueda, orden desplegable (**defecto: estado + prioridad** — los tickets cerrados van siempre al fondo; dentro de cada estado, prioridad Crítica→Alta→Media→Baja y a igual prioridad las más antiguas; desde v1.8.5 y regla de cerrados desde v1.8.6), filtros por rol.
 - RF-011 Columna Tiempo total (creado→resuelto o al momento) en `[h]:mm:ss`.
 - RF-012 Tomar, iniciar atención, liberar, reasignar dentro del grupo, resolver con notas (mín 8). Sin reasignar en validación.
 - RF-012b Rechazar con motivo obligatorio + evidencia opcional (lista y detalle, pegar Ctrl+V).
@@ -237,7 +237,8 @@ Migraciones en `dev`: `tickets` hasta `0012_ai_agent_config`; `accounts` hasta `
 | v1.8.2 | **Anti-enumeración en restablecimiento de contraseña** (respuesta genérica siempre; correo asíncrono vía Celery) | Tag publicado |
 | v1.8.3 | **TLS (HTTPS) en el server local** — nginx termina TLS (443) con certificado autofirmado generado por `scripts/generar_certificado.sh` (SAN con IP fija, 397 días), redirect 80→443, HSTS activo, `SECURE_PROXY_SSL_HEADER` para Django; certificado de arranque automático si no hay propios | Tag publicado (pendiente de deploy) |
 | v1.8.4 | **Alcance de datos por rol (RF-004g)** — `/groups/` y `/teams/` acotados a los grupos del usuario (admin: catálogo completo; detalle ajeno: 404); `/dashboard/` solo para ADMIN/SUPERVISOR/SOPORTE (DESPACHADOR: 403) y el front deja de pedirlo | Tag publicado |
-| v1.8.5 | **Bandeja ordenada por prioridad por defecto** (antes "recientes"; el selector conserva recientes/antiguos) + ingeniería inversa delimina los modos de la IA: **cambio automático posible y configurable** (apagado en el arranque, con frenos: umbral, servicios, allow_lower, cooldown 24 h) | **Release actual** |
+| v1.8.5 | **Bandeja ordenada por prioridad por defecto** (antes "recientes"; el selector conserva recientes/antiguos) + ingeniería inversa delimina los modos de la IA: **cambio automático posible y configurable** (apagado en el arranque, con frenos: umbral, servicios, allow_lower, cooldown 24 h) | Tag publicado |
+| v1.8.6 | **Orden de la bandeja por estado + prioridad** — cerrados siempre al fondo y, dentro de cada estado, prioridad (Crítica→Alta→Media→Baja); selector renombrado a "estado + prioridad" (solo frontend) | **Release actual** |
 
 ## 12. Despliegue y evidencias
 
