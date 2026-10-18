@@ -57,7 +57,7 @@ Productivo (v1.8.0): **server local Ubuntu LTS, IP fija en LAN**; sin exposició
 - RF-001 Login con correo + contraseña (JWT).
 - RF-002 Bloqueo tras 5 intentos fallidos; desbloqueo solo vía restablecimiento por correo (`AuditLog.CUENTA_BLOQUEADA`).
 - RF-003 Restablecimiento/invitación por correo con enlace de 1 hora a módulo exclusivo.
-- RF-004 Mensajes de error en español; sin enumerar usuarios.
+- RF-004 Mensajes de error en español; sin enumerar usuarios. **Reforzado en v1.8.2:** el restablecimiento de contraseña responde **siempre igual** (HTTP 200, *"Si existe una cuenta con ese correo, recibirás un mensaje…"*), exista o no el correo y esté o no activa la cuenta —sin la rama "No existe una cuenta" que solo aparecía con `DEBUG`—, y el correo se envía en una tarea de Celery para que ni el tiempo de respuesta delate la existencia de la cuenta (respaldo síncrono solo si no hay broker).
 - RF-004b Clave fuerte: mínimo 10 caracteres, mayúscula, minúscula y número; checklist rojo/verde en vivo.
 - RF-004c Invitación individual por correo + carga masiva CSV con plantilla y reporte por fila.
 - RF-004d **Sesión única global:** al iniciar sesión se rota el id de sesión del usuario (`User.session_id`, claim `sid` en access y refresh) y todos los tokens emitidos antes quedan inválidos; aplica también al cerrar sesión y al cambiar/restablecer contraseña. Un nuevo login desde cualquier equipo o pestaña "expulsa" a la sesión anterior (el token viejo recibe 401 con "Tu sesión se cerró desde otro dispositivo").
@@ -231,7 +231,8 @@ Migraciones en `dev`: `tickets` hasta `0012_ai_agent_config`; `accounts` hasta `
 | v1.7.0 | Claves fuertes, invitación + bulk CSV, evidencia al rechazar, manual | Prod (EC2) |
 | v1.7.1 | Fix presencia WS (token fresco en reconexión) | Prod (EC2) |
 | v1.8.0 | SLA 2/3/4/5, tarjeta Escalados, IA apagada por defecto, Django 5.2 + headers, seguridad de cuentas/equipos, **sesión única global + pestañas compartidas**, purga de adjuntos, docs server local | Tag publicado |
-| v1.8.1 | **Cierre de sesión al cerrar el navegador** (heartbeat por pestaña, claves individuales sin carreras; F5 y retornos del mismo origen conservan la sesión) | **Release actual (pendiente de tag y deploy)** |
+| v1.8.1 | **Cierre de sesión al cerrar el navegador** (heartbeat por pestaña, claves individuales sin carreras; F5 y retornos del mismo origen conservan la sesión) | Tag publicado |
+| v1.8.2 | **Anti-enumeración en restablecimiento de contraseña** (respuesta genérica siempre; correo asíncrono vía Celery) | **Release actual (pendiente de tag y deploy)** |
 
 ## 12. Despliegue y evidencias
 

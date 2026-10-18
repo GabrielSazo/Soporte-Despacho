@@ -322,3 +322,49 @@ class SingleSessionTests(APITestCase):
         payload = AccessToken(login.data["access"]).payload
         self.user.refresh_from_db()
         self.assertEqual(payload.get("sid"), str(self.user.session_id))
+
+
+class PasswordResetNoEnumerationTests(APITestCase):
+    """RF-004 (sin enumerar usuarios): el restablecimiento responde SIEMPRE igual,
+    exista o no el correo y esté o no activa la cuenta."""
+
+    def setUp(self):
+        group, _ = WorkGroup.objects.get_or_create(name="Tigo", defaults={"code": "tigo"})
+        team, _ = Team.objects.get_or_create(group=group, name="FTTH Norte", defaults={"code": "ftth-norte"})
+        self.user = User.objects.create_user(
+            username="despacho@sestel.local",
+            email="despacho@sestel.local",
+            password="Sestel2026!",
+            role=User.Role.DISPATCHER,
+        )
+        self.user.teams.set([team])
+        self.inactive = User.objects.create_user(
+            username="baja@sestel.local",
+            email="baja@sestel.local",
+            password="Sestel2026!",
+            role=User.Role.DISPATCHER,
+        )
+        self.inactive.is_active = False
+        self.inactive.save(update_fields=["is_active"])
+
+    def _request(self, email):
+        return self.client.post(reverse("password_reset"), {"email": email}, format="json")
+
+    def _assert_generic(self, resp):
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.data.get("detail", "").startswith("Si existe una cuenta con ese correo"))
+        self.assertNotIn("No existe", resp.data.get("detail", ""))
+        self.assertNotIn("desactivada", resp.data.get("detail", ""))
+
+    def test_unknown_email_gets_the_generic_answer(self):
+        self._assert_generic(self._request("noexiste@sestel.local"))
+
+    def test_existing_email_gets_the_same_generic_answer(self):
+        self._assert_generic(self._request(self.user.email))
+
+    def test_inactive_account_gets_the_same_generic_answer(self):
+        self._assert_generic(self._request(self.inactive.email))
+
+    def test_empty_email_is_still_a_validation_error(self):
+        resp = self._request("")
+        self.assertEqual(resp.status_code, 400)

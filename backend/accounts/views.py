@@ -217,37 +217,39 @@ class PasswordResetRequestView(APIView):
         email = (request.data.get("email") or "").strip().lower()
         if not email:
             raise ValidationError({"email": "Debes indicar el correo."})
+
+        # RF-004 (sin enumerar usuarios): la respuesta es SIEMPRE la misma,
+        # exista o no el correo y esté o no activa la cuenta — ni el mensaje
+        # ni el tiempo de respuesta revelan nada (el correo sale en una tarea
+        # de Celery). Los debug_* solo se emiten con DEBUG para desarrollo local.
+        response_data = {
+            "detail": (
+                "Si existe una cuenta con ese correo, recibirás un mensaje con las "
+                "instrucciones para restablecer tu contraseña (el enlace caduca en 1 hora)."
+            )
+        }
+
         try:
             user = User.objects.get(email__iexact=email)
         except User.DoesNotExist:
-            if settings.DEBUG:
-                raise ValidationError({"email": "No existe una cuenta con ese correo."})
-            return Response({"detail": "Si el correo existe, recibirás instrucciones para restablecer tu contraseña."})
+            return Response(response_data)
         if not user.is_active:
-            raise ValidationError({"email": "La cuenta está desactivada. Contacta a un administrador."})
+            return Response(response_data)
 
         uid = urlsafe_base64_encode(force_bytes(user.pk))
         token = password_reset_token_generator.make_token(user)
         reset_link = f"{settings.FRONTEND_URL.rstrip('/')}/reset-password?uid={uid}&token={token}"
-        subject = "Soporte Despacho Tigo - Restablece tu contraseña"
-        html_message = f"""
-        <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; background: #f3f6ff; border-radius: 12px;">
-          <h2 style="color: #001eb4; margin: 0 0 12px;">Hola {user.display_name},</h2>
-          <p style="color: #0f1a4a; font-size: 14px; line-height: 1.6;">Recibimos una solicitud para restablecer tu contraseña en <b>Soporte Despacho Tigo</b>.</p>
-          <p style="text-align: center; margin: 28px 0;">
-            <a href="{reset_link}" style="display: inline-block; padding: 12px 28px; background: #001eb4; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 700; font-size: 14px;">Restablecer contraseña</a>
-          </p>
-          <p style="color: #5a658d; font-size: 12px;">Este botón es válido por 1 hora. Si no solicitaste este cambio, ignora este correo.</p>
-          <p style="color: #8d97b5; font-size: 11px; word-break: break-all;">Si el botón no funciona, copia este enlace: {reset_link}</p>
-        </div>
-        """
-        message = f"Hola {user.display_name},\n\nRestablece tu contraseña aquí: {reset_link}\n\nVálido por 1 hora."
-        send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [user.email], fail_silently=False, html_message=html_message)
 
         from .audit import audit
         from .models import AuditLog
         audit(None, AuditLog.Action.PASSWORD_RESET_REQUESTED, entidad="usuario", entidad_id=str(user.pk), detalle=user.email, request=request)
-        response_data = {"detail": "Se envió un correo con instrucciones para restablecer tu contraseña. Revisa tu bandeja de entrada."}
+
+        from .tasks import send_password_reset_email
+        try:
+            send_password_reset_email.delay(user.pk, reset_link)
+        except Exception:  # sin broker: no perder la recuperación de contraseña
+            send_password_reset_email(user.pk, reset_link)
+
         if settings.DEBUG:
             response_data["debug_token"] = token
             response_data["debug_uid"] = uid

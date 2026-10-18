@@ -2576,7 +2576,7 @@ function LoginScreen({ brand, onLogin, onToggleTheme, theme, notice }) {
     setResetting(true);
     try {
       const res = await requestPasswordReset(resetEmail.trim().toLowerCase());
-      setResetSuccess(res.detail || "Se envió un correo con el enlace para restablecer tu contraseña. Revisa tu bandeja de entrada (válido 1 hora).");
+      setResetSuccess(res.detail || "Si existe una cuenta con ese correo, recibirás un mensaje con las instrucciones (válido 1 hora).");
       if (res.debug_link) {
         setRequestInfo(`Modo desarrollo: ${res.debug_link} (también en logs del contenedor api)`);
       }
