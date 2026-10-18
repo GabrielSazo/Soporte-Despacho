@@ -1239,9 +1239,15 @@ function TicketsView({ canCreate, currentUser, filter, filteredTickets, onCreate
   const filters = currentUser?.role === "SOPORTE" ? ["Trabajables", "Míos", "Validación", "Escalados", "Todos"] : currentUser?.role === "DESPACHADOR" ? ["Míos", "Validación", "Escalados", "Todos"] : ["Todos", "Abierto", "Asignado", "En proceso", "Validación", "Escalados", "Cerrados"];
   const [sort, setSort] = useState("prioridad");
   const priorityRank = { CRITICA: 0, ALTA: 1, MEDIA: 2, BAJA: 3 };
+  // Regla 1: los cerrados siempre al fondo. Regla 2: dentro de cada grupo de estado, la prioridad manda.
+  // El estado agrupa por orden de flujo (abierto → validación); la fecha solo desempata a igual estado y prioridad.
+  const statusRank = { ABIERTO: 0, ASIGNADO: 1, EN_PROCESO: 2, ESCALADO: 3, VALIDACION: 4, CERRADO: 9 };
   const sortedTickets = [...filteredTickets].sort((a, b) => {
     if (sort === "recientes") return new Date(b.createdAt) - new Date(a.createdAt);
     if (sort === "antiguos") return new Date(a.createdAt) - new Date(b.createdAt);
+    const aRank = statusRank[a.statusCode] ?? 5;
+    const bRank = statusRank[b.statusCode] ?? 5;
+    if (aRank !== bRank) return aRank - bRank;
     return (priorityRank[a.priorityCode] ?? 9) - (priorityRank[b.priorityCode] ?? 9) || (new Date(a.createdAt) - new Date(b.createdAt));
   });
 
@@ -1266,7 +1272,7 @@ function TicketsView({ canCreate, currentUser, filter, filteredTickets, onCreate
             ))}
           </div>
         </div>
-        <div className="table-summary"><span><b>{filteredTickets.length}</b> tickets encontrados</span><label className="sort-select">Ordenar: <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Ordenar tickets"><option value="prioridad">prioridad</option><option value="recientes">recientes</option><option value="antiguos">antiguos</option></select></label></div>
+        <div className="table-summary"><span><b>{filteredTickets.length}</b> tickets encontrados</span><label className="sort-select">Ordenar: <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Ordenar tickets"><option value="prioridad">estado + prioridad</option><option value="recientes">recientes</option><option value="antiguos">antiguos</option></select></label></div>
         <div className="ticket-table-wrap"><TicketTable currentUser={currentUser} onNotify={onNotify} onOpen={onOpen} onResolve={onResolve} onTake={onTake} tickets={sortedTickets} /></div>
         {filteredTickets.length === 0 && <EmptyState />}
       </article>
