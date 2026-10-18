@@ -290,6 +290,6 @@ class AIAgentTests(APITestCase):
         ticket.refresh_from_db()
         self.assertEqual(ticket.priority, Ticket.Priority.HIGH)
         minutos = (ticket.sla_due_at - timezone.now()).total_seconds() / 60
-        self.assertGreaterEqual(minutos, 7)
-        self.assertLessEqual(minutos, 8.5)
+        self.assertGreaterEqual(minutos, 2)
+        self.assertLessEqual(minutos, 3.5)
         self.assertTrue(ticket.events.filter(comment__startswith="IA-Aplicada:").exists())

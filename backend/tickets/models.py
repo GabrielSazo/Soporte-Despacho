@@ -71,8 +71,8 @@ class AIAgentConfig(models.Model):
         obj = cls.objects.order_by("pk").first()
         if obj is None:
             obj = cls.objects.create(
-                enabled=getattr(dj_settings, "IA_VISION_ENABLED", True),
-                auto_apply=getattr(dj_settings, "IA_AUTO_APPLY", True),
+                enabled=getattr(dj_settings, "IA_VISION_ENABLED", False),
+                auto_apply=getattr(dj_settings, "IA_AUTO_APPLY", False),
                 threshold=float(getattr(dj_settings, "IA_THRESHOLD", 0.8) or 0.8),
                 services=list(getattr(dj_settings, "IA_SERVICES", ["FTTH", "HFC"]) or ["FTTH", "HFC"]),
                 allow_lower=getattr(dj_settings, "IA_ALLOW_LOWER", True),

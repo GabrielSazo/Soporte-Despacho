@@ -218,8 +218,8 @@ def _ai_config():
     except Exception:
         from types import SimpleNamespace
         return SimpleNamespace(
-            enabled=getattr(settings, "IA_VISION_ENABLED", True),
-            auto_apply=getattr(settings, "IA_AUTO_APPLY", True),
+            enabled=getattr(settings, "IA_VISION_ENABLED", False),
+            auto_apply=getattr(settings, "IA_AUTO_APPLY", False),
             threshold=float(getattr(settings, "IA_THRESHOLD", 0.8) or 0.8),
             services=list(getattr(settings, "IA_SERVICES", ["FTTH", "HFC"]) or ["FTTH", "HFC"]),
             allow_lower=getattr(settings, "IA_ALLOW_LOWER", True),
@@ -228,12 +228,12 @@ def _ai_config():
 
 
 def _ai_enabled():
-    if not getattr(settings, "IA_VISION_ENABLED", True):
+    if not getattr(settings, "IA_VISION_ENABLED", False):
         return False
     try:
         return bool(_ai_config().enabled)
     except Exception:
-        return True
+        return False
 
 
 def _in_scope(category, services):
