@@ -171,3 +171,18 @@ Los certificados de `./certs/` persisten entre checkouts (fuera de git): no hace
 - **Disco sin cifrar:** si el server es robado, los datos viajan legibles. Habilitar LUKS/BitLocker si la política lo exige.
 - **Sin monitoreo externo:** no hay nube vigilando. Al menos revisar `docker compose ps` y el log de automatización SLA semanalmente.
 - **Certificado autofirmado:** requiere confianza manual en cada equipo y renovación anual (397 días). Si la empresa dispone de CA interna, basta con emitir el certificado con ella y sustituir `certs/cert.pem` y `certs/key.pem` (mismos nombres, mismos pasos).
+
+## 14. Portabilidad (si el server no es Ubuntu)
+
+Todo el despliegue corre en **Docker**: los contenedores no dependen del SO del host, así que el stack funciona igual en cualquier Linux. **Mínimo real:** Linux (x86_64 o ARM64) + Docker Engine + plugin Compose v2 + 4 GB RAM (8 GB si se enciende el agente IA con Ollama).
+
+Si el server fuera de otra familia, solo cambian 4 pasos de administración del host — el resto del runbook (`.env`, TLS, levantamiento, IA, respaldos, actualizaciones) es idéntico:
+
+| Paso | Ubuntu/Debian | RHEL/Rocky/Fedora | Alpine |
+|---|---|---|---|
+| §2 Instalar Docker | `apt install docker.io docker-compose-v2` | `dnf install docker docker-compose` | `apk add docker docker-cli-compose` |
+| §7 Arranque automático | `systemctl enable docker` | igual (systemd) | `rc-update add docker default` |
+| §8/§9 Crones (SLA + respaldos) | incluidos | instalar `cronie` | instalar `cronie` + iniciar `crond` |
+| §10 Firewall | `ufw` | `firewall-cmd` (firewalld) | `iptables`/`nftables` |
+
+**No soportado como server de producción:** Windows Server (los contenedores de este stack son Linux; vía WSL2 es frágil), un NAS sin Docker y macOS. Para una prueba rápida en un PC de escritorio, basta con Docker Desktop y el mismo `compose.prod.yaml`.
