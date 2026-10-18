@@ -41,7 +41,7 @@ Reglas verificadas en código:
 | Tiempo real | Django Channels + Daphne + Redis (broadcast `ticket_update` por WebSocket, presencia En línea; el WS relee el token fresco en cada reconexión) |
 | Jobs fondo | Celery + Redis, concurrencia 2, tarea `tickets.tasks.process_attachment_ocr` |
 | OCR imagen | Tesseract OCR (`spa+eng`) + pyzbar, 100% asíncrono; compresión previa en navegador (1600px, JPEG 0.82) |
-| IA (opcional) | Ollama local — `qwen2.5vl:3b` (visión) + `qwen3:4b` (razonamiento); **apagada por defecto** (`IA_VISION_ENABLED=False`, `IA_AUTO_APPLY=False`) |
+| IA (opcional) | Ollama local — `qwen2.5vl:3b` (visión) + `qwen3:4b` (razonamiento); **apagada por defecto** (`IA_VISION_ENABLED=False`, `IA_AUTO_APPLY=False`); en prod corre como servicio del stack (compose `ollama`, volumen de modelos, sin puerto público — Runbook §6) |
 | DB | PostgreSQL 16 (`postgres:16-alpine`), SQLite (tests) |
 | Estáticos admin | WhiteNoise para `/admin/` |
 | Despliegue | Docker Compose: `compose.yaml` (dev hot-reload) y `compose.prod.yaml` (nginx + build estático + worker) |
@@ -125,12 +125,12 @@ Productivo (v1.8.0): **server local Ubuntu LTS, IP fija en LAN**; sin exposició
 
 - RNF-01 Subida de foto responde < 1 s (OCR en fondo).
 - RNF-02 Soporta 200 tickets/día × 10 fotos (worker + cola Redis; retención 90 días con comando de purga).
-- RNF-03 Sin GPU obligatoria (Tesseract CPU). IA de visión: **requiere Ollama con ~8 GB RAM para los modelos**; opcional y apagada por defecto — el sistema funciona completo sin ella.
+- RNF-03 Sin GPU obligatoria (Tesseract CPU). IA de visión: **requiere Ollama con ~8 GB RAM para los modelos**; opcional y apagada por defecto — el sistema funciona completo sin ella. En prod corre como servicio del stack (imagen `ollama/ollama`, pesos en el volumen `ollama_models`, puerto no publicado).
 - RNF-04 **Sin HTTPS público:** red interna + VPN corporativa (la VPN cifra el acceso externo; en LAN el tráfico es HTTP — opcional CA interna si la política lo exige). Secretos en `.env` (nunca en git).
 - RNF-05 Backups: **`pg_dump` diario a almacenamiento interno (NAS)** con retención 30 días + 12 mensuales y restauración probada; respaldo previo a cada release; tags por despliegue.
 - RNF-06 Ramas: `main`=prod, `dev`=integración, `test/*`=experimentos; migraciones automáticas al arrancar `api`.
 - RNF-07 Suite backend verde antes de cada release (**30/30 en v1.8.0**; incluye tests de IA, contraseñas entre admins, auto-asignación de equipos y sesión única global).
-- RNF-08 Arranque automático en el server local: `systemd enable docker` + `restart: unless-stopped` (ver Runbook §5).
+- RNF-08 Arranque automático en el server local: `systemd enable docker` + `restart: unless-stopped` (ver Runbook §7).
 
 ## 6. User stories (trazabilidad a releases)
 
@@ -207,7 +207,7 @@ Migraciones en `dev`: `tickets` hasta `0012_ai_agent_config`; `accounts` hasta `
 - ADR-12 RapidOCR como spike en `test/fix-ocr` (Python 3.12 + `libgl1`), **no mergeado** en v1.8.0.
 - ADR-13 **SLA 2/3/4/5 min** (antes 5/8/10/20): el compromiso real de atención es minutos, no horas; sin migración (se calcula al crear el ticket; los tickets abiertos conservan su `sla_due_at` original).
 - ADR-14 **Seguridad de privilegios:** contraseñas entre admins, `is_superuser` solo lectura, roles solo por ADMIN, auto-asignación acotada por rol — todo validado en backend (el frontend solo oculta, no protege).
-- ADR-15 **Prod en server local Ubuntu + VPN** en vez de EC2: sin costos de nube ni exposición a internet; contrapartida — backups internos obligatorios y sin redundancia (Runbook §11).
+- ADR-15 **Prod en server local Ubuntu + VPN** en vez de EC2: sin costos de nube ni exposición a internet; contrapartida — backups internos obligatorios y sin redundancia (Runbook §13).
 - ADR-16 Django 4.2 (EOL ago/2026) → **5.2 LTS** con suite verde; headers de seguridad en nginx.
 - ADR-17 **Sesión única global + pestañas compartidas:** claim `sid` (UUID de `User.session_id`) en access y refresh, validado en API, refresh y WebSocket; se rota en login/logout/cambio de contraseña (mata sesiones previas, incluso las no expiradas). En el navegador, tokens en `localStorage` + bloqueo `navigator.locks` para el refresco concurrente + sincronización por evento `storage` (logout/login en una pestaña se propaga a todas). **Enmendado en v1.8.1:** los tokens ya **no** sobreviven al cierre del navegador — el heartbeat por pestaña detecta el cierre y la sesión se cierra en el servidor al próximo arranque de la app (se conserva en F5/recargas y retornos del mismo origen; un crash queda al refresh ≤ 24 h). Contrapartida vigente: al desplegar v1.8.0/v1.8.1 todos los usuarios deben iniciar sesión una vez más.
 
@@ -238,11 +238,12 @@ Migraciones en `dev`: `tickets` hasta `0012_ai_agent_config`; `accounts` hasta `
 | v1.8.3 | **TLS (HTTPS) en el server local** — nginx termina TLS (443) con certificado autofirmado generado por `scripts/generar_certificado.sh` (SAN con IP fija, 397 días), redirect 80→443, HSTS activo, `SECURE_PROXY_SSL_HEADER` para Django; certificado de arranque automático si no hay propios | Tag publicado (pendiente de deploy) |
 | v1.8.4 | **Alcance de datos por rol (RF-004g)** — `/groups/` y `/teams/` acotados a los grupos del usuario (admin: catálogo completo; detalle ajeno: 404); `/dashboard/` solo para ADMIN/SUPERVISOR/SOPORTE (DESPACHADOR: 403) y el front deja de pedirlo | Tag publicado |
 | v1.8.5 | **Bandeja ordenada por prioridad por defecto** (antes "recientes"; el selector conserva recientes/antiguos) + ingeniería inversa delimina los modos de la IA: **cambio automático posible y configurable** (apagado en el arranque, con frenos: umbral, servicios, allow_lower, cooldown 24 h) | Tag publicado |
-| v1.8.6 | **Orden de la bandeja por estado + prioridad** — cerrados siempre al fondo y, dentro de cada estado, prioridad (Crítica→Alta→Media→Baja); selector renombrado a "estado + prioridad" (solo frontend) | **Release actual** |
+| v1.8.6 | **Orden de la bandeja por estado + prioridad** — cerrados siempre al fondo y, dentro de cada estado, prioridad (Crítica→Alta→Media→Baja); selector renombrado a "estado + prioridad" (solo frontend) | Tag publicado |
+| v1.8.7 | **Ollama como servicio en prod** — servicio `ollama` en `compose.prod.yaml` (volumen `ollama_models`, puerto 11434 no publicado; `api`/`worker` lo alcanzan por red interna), env de IA parametrizado por `.env` y Runbook §6 con la descarga de modelos y la activación por doble interruptor | **Release actual** |
 
 ## 12. Despliegue y evidencias
 
-- Prod (v1.8.0): server local Ubuntu, IP fija, `docker compose -f compose.prod.yaml up --build -d`, `pg_dump` diario al NAS + previo a cada release, tags por versión. **Runbook: `Runbook_Servidor_Local.md`** (instalación, `.env`, arranque auto, cron SLA, backups, firewall, releases).
+- Prod (v1.8.0): server local Ubuntu, IP fija, `docker compose -f compose.prod.yaml up --build -d`, `pg_dump` diario al NAS + previo a cada release, tags por versión. **Runbook: `Runbook_Servidor_Local.md`** (instalación, `.env`, TLS, IA/Ollama, arranque auto, cron SLA, backups, firewall, releases).
 - Dev: `http://localhost`, `docker compose up --build -d`.
 - Pruebas: `manage.py test accounts tickets` **25/25 OK** en v1.8.0 (Django 5.2.18, verificado en Docker y Python local); **40/40 OK en v1.8.4** (RF-004g incluida); `npm run build` verde.
 - Evidencias: `Evidencias y Documentacion/` (este documento, `Manual_Usuario.md/.docx`, `Onboarding_Desde_Cero.md`, `Runbook_Servidor_Local.md`, `REPORTE_5/6*.xlsx`, `REPORTE_7*.xlsx`).

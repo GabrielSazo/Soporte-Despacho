@@ -46,6 +46,13 @@ services:
       DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-noreply@sestel.local}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost}
       SECURE_PROXY_SSL_HEADER: "true"   # nginx termina TLS y envía X-Forwarded-Proto
+      # --- Agente IA (apagado por defecto; ver Runbook §6) ---
+      IA_VISION_ENABLED: ${IA_VISION_ENABLED:-false}
+      IA_AUTO_APPLY: ${IA_AUTO_APPLY:-false}
+      OLLAMA_HOST: http://ollama:11434   # red interna del compose; el puerto NO se publica al exterior
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5vl:3b}
+      OLLAMA_REASON_MODEL: ${OLLAMA_REASON_MODEL:-qwen3:4b}
+      OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-180}
     volumes:
       - media:/app/media
       - static:/app/staticfiles
@@ -53,6 +60,8 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_started
+      ollama:
         condition: service_started
 
   worker:
@@ -73,6 +82,13 @@ services:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
       EMAIL_BACKEND: ${EMAIL_BACKEND:-django.core.mail.backends.console.EmailBackend}
+      # --- Agente IA (el worker ejecuta los análisis; ver Runbook §6) ---
+      IA_VISION_ENABLED: ${IA_VISION_ENABLED:-false}
+      IA_AUTO_APPLY: ${IA_AUTO_APPLY:-false}
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5vl:3b}
+      OLLAMA_REASON_MODEL: ${OLLAMA_REASON_MODEL:-qwen3:4b}
+      OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-180}
     volumes:
       - media:/app/media
     depends_on:
@@ -80,6 +96,23 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+      ollama:
+        condition: service_started
+
+  ollama:
+    # Modelos locales para el agente IA (visión + razonamiento). Opcional: el sistema
+    # funciona completo sin ella (flujo continúa sin IA). Puerto NO publicado: solo
+    # la red interna del compose lo alcanza en http://ollama:11434.
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama_models:/root/.ollama   # pesos de los modelos; sobreviven a rebuilds
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
   frontend:
     build:
@@ -102,3 +135,4 @@ volumes:
   postgres_data:
   media:
   static:
+  ollama_models:

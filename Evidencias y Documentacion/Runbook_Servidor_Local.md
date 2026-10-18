@@ -42,6 +42,10 @@ CORS_ALLOWED_ORIGINS=https://<IP_FIJA_DEL_SERVER>
 FRONTEND_URL=https://<IP_FIJA_DEL_SERVER>   # los enlaces de restablecimiento saldrán en https
 POSTGRES_PASSWORD=<generar y guardar en el gestor de la empresa>
 EMAIL_BACKEND=...   # solo si se quiere correo real; si no, dejar consola
+
+# --- Agente IA (opcional; apagado por defecto. Ver §6) ---
+#IA_VISION_ENABLED=true      # enciende el 1er interruptor (el 2º es el panel Agente IA)
+#IA_AUTO_APPLY=false         # false = solo sugiere; true = aplica sola con umbral y frenos
 ```
 
 ## 4. TLS (HTTPS) con certificado autofirmado
@@ -72,7 +76,29 @@ docker compose -f compose.prod.yaml exec api python manage.py createsuperuser
 
 Verificación: abrir `https://<IP_FIJA>` desde un equipo de la red y desde la VPN (sin avisos tras confiar el certificado). `http://<IP_FIJA>` debe redirigir a HTTPS.
 
-## 6. Arranque automático
+## 6. Agente IA (Ollama, opcional)
+
+El agente de prioridad usa **Ollama con modelos locales** corriendo como servicio del propio stack (imagen `ollama/ollama`, volumen `ollama_models` con los pesos). El puerto 11434 **no se publica**: solo `api` y `worker` lo alcanzan por la red interna (`http://ollama:11434`).
+
+La IA tiene **doble interruptor** y ambos deben estar encendidos para que funcione:
+
+1. **Entorno:** `IA_VISION_ENABLED=true` en `.env` (§3) y recrear los servicios: `docker compose -f compose.prod.yaml up -d`.
+2. **Panel:** Administración → Agente IA → encender el agente (guarda en BD).
+
+Una vez encendido, el modo lo decide el admin en el mismo panel: **cambio automático** (la IA aplica sola, con umbral y frenos) o **solo sugerencia** (`IA_AUTO_APPLY=false` por defecto).
+
+**Descarga de modelos (una sola vez):**
+
+```bash
+docker compose -f compose.prod.yaml exec ollama ollama pull qwen2.5vl:3b   # visión (~3.2 GB)
+docker compose -f compose.prod.yaml exec ollama ollama pull qwen3:4b      # razonamiento (~2.5 GB)
+```
+
+**Recursos:** ~6 GB de disco (volumen `ollama_models`) y ~8 GB de RAM disponibles mientras dura un análisis (CPU; sin GPU obligatoria). Si el server queda ajustado, no actives la IA: el sistema funciona completo sin ella.
+
+**Verificación:** con el agente encendido en el panel, usar "Analizar con IA" en un ticket; el resultado aparece en el historial como `IA (qwen2.5vl): …` en ~1–2 minutos (worker Celery). Si el servicio de Ollama está apagado, el historial marca "IA no disponible" y el flujo del ticket continúa normal.
+
+## 7. Arranque automático
 
 Todos los servicios llevan `restart: unless-stopped`, así que Docker los levanta tras un reboot **siempre que el demonio arranque**:
 
@@ -82,7 +108,7 @@ sudo systemctl enable docker
 
 No hace falta nada más (sin EventBridge ni programación externa).
 
-## 7. Automatización SLA
+## 8. Automatización SLA
 
 `process_ticket_automation` debe correr periódicamente (no hay Celery beat):
 
@@ -92,7 +118,7 @@ sudo crontab -e
 */5 * * * * cd /home/$USER/Soporte-Despacho && docker compose -f compose.prod.yaml exec -T api python manage.py process_ticket_automation >> /tmp/sla_automation.log 2>&1
 ```
 
-## 8. Respaldos (obligatorio)
+## 9. Respaldos (obligatorio)
 
 El Postgres vive en un volumen Docker; **un volumen sin respaldo es un solo punto de fallo**. Destino: almacenamiento interno (NAS/disco externo de la empresa).
 
@@ -111,14 +137,14 @@ Retención sugerida: 30 días diarios + 12 mensuales. **Restauración probada al
 
 Los adjuntos (volumen `media`) no viajan en `pg_dump`: respaldarlos aparte con `tar` del volumen o `docker cp`.
 
-## 9. Seguridad de red
+## 10. Seguridad de red
 
 - El server **no expone puertos a internet**. Solo la VPN da acceso externo.
 - Firewall local: `sudo ufw allow from <RED_INTERNA> to any port 80 proto tcp` y `... port 443 proto tcp`, SSH solo desde la red/VPN: `sudo ufw allow OpenSSH && sudo ufw enable`.
 - Tanto en LAN como por VPN el tráfico va **cifrado con TLS** (HTTPS en 443; el puerto 80 solo redirige). El certificado autofirmado requiere confianza manual en cada equipo (sección 4).
 - Tras la instalación: **rotar la clave del superadmin local** (`superadmin`/`SestelRoot2026!` era solo para desarrollo).
 
-## 10. Actualizaciones (cada release)
+## 11. Actualizaciones (cada release)
 
 ```bash
 cd ~/Soporte-Despacho
@@ -130,7 +156,7 @@ docker compose -f compose.prod.yaml exec api python manage.py showmigrations   #
 
 Los certificados de `./certs/` persisten entre checkouts (fuera de git): no hace falta regenerarlos en cada release.
 
-## 11. Corte de servicio esperado
+## 12. Corte de servicio esperado
 
 | Paso | Tiempo |
 |---|---|
@@ -139,7 +165,7 @@ Los certificados de `./certs/` persisten entre checkouts (fuera de git): no hace
 | Verificación | ~5 min |
 | **Total** | **~15-20 min** (ventana sugerida: sábado temprano) |
 
-## 12. Riesgos del server local
+## 13. Riesgos del server local
 
 - **Sin redundancia:** si el server cae, el sistema cae. Mitigación: UPS + respaldos restaurables + PC de repuesto con el mismo stack.
 - **Disco sin cifrar:** si el server es robado, los datos viajan legibles. Habilitar LUKS/BitLocker si la política lo exige.
