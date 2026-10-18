@@ -1,3 +1,5 @@
+import uuid
+
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 
@@ -46,6 +48,7 @@ class User(AbstractUser):
     last_assigned_at = models.DateTimeField(null=True, blank=True)
     failed_login_attempts = models.PositiveIntegerField(default=0)
     locked_at = models.DateTimeField(null=True, blank=True)
+    session_id = models.UUIDField(default=uuid.uuid4, editable=False, help_text="Identificador de sesión única; rotar invalida todos los tokens emitidos")
 
     @property
     def group(self):

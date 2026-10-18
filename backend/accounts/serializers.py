@@ -148,6 +148,9 @@ class UserSerializer(serializers.ModelSerializer):
         if password:
             user.set_password(password)
             user.save(update_fields=["password"])
+            from .tokens import rotate_session
+            # Cambio de contraseña: invalida cualquier sesión abierta del usuario.
+            rotate_session(user)
             if user.is_account_locked:
                 user.unlock_via_password_reset()
         if teams_data is not None:

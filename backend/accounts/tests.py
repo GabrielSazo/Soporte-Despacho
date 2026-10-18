@@ -238,3 +238,73 @@ class AuthenticationTests(APITestCase):
 
         own_account = self.client.patch(reverse("user-detail", args=[self.admin.id]), {"is_active": False}, format="json")
         self.assertEqual(own_account.status_code, 400)
+
+
+class SingleSessionTests(APITestCase):
+    """Un solo login global: el nuevo login (o un reset de contraseña) invalida todos los tokens anteriores."""
+
+    def setUp(self):
+        group, _ = WorkGroup.objects.get_or_create(name="Tigo", defaults={"code": "tigo"})
+        self.team, _ = Team.objects.get_or_create(group=group, name="FTTH Norte", defaults={"code": "ftth-norte"})
+        self.user = User.objects.create_user(
+            username="despacho@sestel.local",
+            email="despacho@sestel.local",
+            password="Sestel2026!",
+            role=User.Role.DISPATCHER,
+        )
+        self.user.teams.set([self.team])
+
+    def _login(self):
+        return self.client.post(
+            reverse("token_obtain_pair"),
+            {"email": self.user.email, "password": "Sestel2026!"},
+            format="json",
+        )
+
+    def _me(self, access):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {access}")
+        return self.client.get("/api/auth/me/")
+
+    def test_new_login_invalidates_previous_tokens(self):
+        first = self._login()
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(self._me(first.data["access"]).status_code, 200)
+
+        second = self._login()
+        self.assertEqual(second.status_code, 200)
+
+        # El access anterior deja de servir aunque no haya expirado.
+        self.assertEqual(self._me(first.data["access"]).status_code, 401)
+        # El refresh anterior también queda invalidado.
+        stale_refresh = self.client.post(reverse("token_refresh"), {"refresh": first.data["refresh"]}, format="json")
+        self.assertEqual(stale_refresh.status_code, 401)
+        # La sesión nueva funciona.
+        self.assertEqual(self._me(second.data["access"]).status_code, 200)
+
+    def test_refresh_within_same_session_still_works(self):
+        login = self._login()
+        refresh = self.client.post(reverse("token_refresh"), {"refresh": login.data["refresh"]}, format="json")
+        self.assertEqual(refresh.status_code, 200)
+        self.assertIn("access", refresh.data)
+        self.assertEqual(self._me(refresh.data["access"]).status_code, 200)
+
+    def test_logout_invalidates_the_access_token(self):
+        login = self._login()
+        self.assertEqual(self._me(login.data["access"]).status_code, 200)
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+        logout = self.client.post(reverse("logout"), {"refresh": login.data["refresh"]}, format="json")
+        self.assertEqual(logout.status_code, 204)
+
+        # Ni el access ni el refresh sobreviven al cierre de sesión.
+        self.assertEqual(self._me(login.data["access"]).status_code, 401)
+        reuse = self.client.post(reverse("token_refresh"), {"refresh": login.data["refresh"]}, format="json")
+        self.assertEqual(reuse.status_code, 401)
+
+    def test_tokens_carry_the_session_claim(self):
+        from rest_framework_simplejwt.tokens import AccessToken
+
+        login = self._login()
+        payload = AccessToken(login.data["access"]).payload
+        self.user.refresh_from_db()
+        self.assertEqual(payload.get("sid"), str(self.user.session_id))

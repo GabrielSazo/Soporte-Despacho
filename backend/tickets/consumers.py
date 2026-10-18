@@ -28,7 +28,12 @@ def get_user_from_token(token_str):
     try:
         token = AccessToken(token_str)
         user_id = token.get("user_id")
-        return User.objects.get(id=user_id)
+        sid = token.get("sid")
+        user = User.objects.get(id=user_id)
+        # Sesión única: si el token no porta el id de sesión vigente, se ignora.
+        if sid is None or str(getattr(user, "session_id", "")) != sid:
+            return AnonymousUser()
+        return user
     except (TokenError, User.DoesNotExist, Exception):
         return AnonymousUser()
 

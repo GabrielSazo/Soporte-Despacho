@@ -127,7 +127,7 @@ CORS_ALLOWED_ORIGINS = environment_list("CORS_ALLOWED_ORIGINS", "http://localhos
 CORS_ALLOW_CREDENTIALS = True
 
 REST_FRAMEWORK = {
-    "DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework_simplejwt.authentication.JWTAuthentication"],
+    "DEFAULT_AUTHENTICATION_CLASSES": ["accounts.tokens.SessionJWTAuthentication"],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 25,
@@ -139,6 +139,8 @@ SIMPLE_JWT = {
     "ROTATE_REFRESH_TOKENS": True,
     "BLACKLIST_AFTER_ROTATION": True,
     "AUTH_HEADER_TYPES": ("Bearer",),
+    # Sesión única: el refresh también valida el id de sesión vigente.
+    "TOKEN_REFRESH_SERIALIZER": "accounts.tokens.SessionTokenRefreshSerializer",
 }
 
 MAX_TICKET_ATTACHMENT_SIZE = 5 * 1024 * 1024

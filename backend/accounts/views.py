@@ -18,6 +18,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from .models import AuditLog, Team, User, WorkGroup
 from .permissions import IsAdministrator, IsAdminOrSupervisor
 from .serializers import AuditLogSerializer, CurrentUserSerializer, TeamSerializer, UserSerializer, WorkGroupSerializer
+from .tokens import SessionRefreshToken, rotate_session
 
 password_reset_token_generator = PasswordResetTokenGenerator()
 
@@ -44,6 +45,13 @@ def send_invitation_email(user):
 
 class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
     username_field = "email"
+    token_class = SessionRefreshToken
+
+    @classmethod
+    def get_token(cls, user):
+        # Un solo login global: rota el id de sesión y así invalida todos los tokens anteriores.
+        rotate_session(user)
+        return super().get_token(user)
 
     def validate(self, attrs):
         email = (attrs.get("email") or "").strip().lower()
@@ -152,6 +160,8 @@ class LogoutView(APIView):
             RefreshToken(refresh).blacklist()
         except Exception:
             return Response({"detail": "El token no es válido."}, status=status.HTTP_400_BAD_REQUEST)
+        # Cerrar sesión también invalida el access token vigente (sesión única).
+        rotate_session(request.user)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -269,6 +279,8 @@ class PasswordResetConfirmView(APIView):
         user.set_password(new_password)
         user.save(update_fields=["password"])
         user.unlock_via_password_reset()
+        # Cambio de contraseña: cualquier sesión abierta queda invalidada.
+        rotate_session(user)
         from .audit import audit
         from .models import AuditLog
         audit(None, AuditLog.Action.PASSWORD_RESET_DONE, entidad="usuario", entidad_id=str(user.pk), detalle=user.email, request=request)
