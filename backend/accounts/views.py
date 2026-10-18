@@ -110,8 +110,31 @@ class CurrentUserView(generics.RetrieveUpdateAPIView):
         # Solo permite cambiar teams/managed_groups propios
         allowed = {"teams", "managed_groups"}
         data = {k: v for k, v in serializer.validated_data.items() if k in allowed}
-        # Actualizar solo esos campos
         user = self.get_object()
+
+        if "managed_groups" in data and not user.is_administrator:
+            raise ValidationError({"managed_groups": "Solo un administrador puede cambiar los grupos supervisados."})
+
+        if "teams" in data:
+            new_teams = list(data["teams"])
+            if not new_teams:
+                raise ValidationError({"teams": "Debes atender al menos un equipo."})
+            if not user.is_administrator:
+                if user.role == User.Role.SUPERVISOR:
+                    # Supervisores: solo dentro de los grupos que ya supervisa
+                    allowed_codes = set(user.managed_groups.values_list("code", flat=True))
+                    scope = "grupos que supervisas"
+                elif user.role == User.Role.SUPPORT:
+                    # Soporte: solo entre los grupos de autoasignación (por defecto Soporte A/B)
+                    allowed_codes = set(getattr(settings, "SUPPORT_SELF_ASSIGN_GROUPS", []))
+                    scope = "grupos de soporte permitidos"
+                else:
+                    raise ValidationError({"teams": "Tu perfil no puede cambiar de equipo. Solicita el cambio a administración."})
+                new_codes = {t.group.code for t in new_teams}
+                if not new_codes <= allowed_codes:
+                    raise ValidationError({"teams": f"Solo puedes cambiarte dentro de los {scope}."})
+
+        # Actualizar solo esos campos
         if "teams" in data:
             user.teams.set(data["teams"])
         if "managed_groups" in data:

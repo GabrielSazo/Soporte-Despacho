@@ -4,6 +4,64 @@ from rest_framework.test import APITestCase
 from .models import Team, User, WorkGroup
 
 
+class SelfAssignGuardTests(APITestCase):
+    """Solo SOPORTE se autoasigna (Soporte A/B); supervisores solo en sus grupos; el resto no cambia de equipo."""
+
+    def setUp(self):
+        g_tigo, _ = WorkGroup.objects.get_or_create(name="Tigo", defaults={"code": "tigo"})
+        g_sa, _ = WorkGroup.objects.get_or_create(name="Soporte A", defaults={"code": "soporte-a"})
+        g_sb, _ = WorkGroup.objects.get_or_create(name="Soporte B", defaults={"code": "soporte-b"})
+        self.team_tigo, _ = Team.objects.get_or_create(code="tigo", defaults={"group": g_tigo, "name": "Tigo"})
+        self.team_sa, _ = Team.objects.get_or_create(code="soporte-a", defaults={"group": g_sa, "name": "Soporte A"})
+        self.team_sb, _ = Team.objects.get_or_create(code="soporte-b", defaults={"group": g_sb, "name": "Soporte B"})
+        self.support = User.objects.create_user(
+            username="sup-a@sestel.local", email="sup-a@sestel.local", password="Sestel2026!", role=User.Role.SUPPORT
+        )
+        self.support.teams.set([self.team_sa])
+        self.dispatcher = User.objects.create_user(
+            username="desp@sestel.local", email="desp@sestel.local", password="Sestel2026!", role=User.Role.DISPATCHER
+        )
+        self.dispatcher.teams.set([self.team_tigo])
+        self.supervisor = User.objects.create_user(
+            username="supv@sestel.local", email="supv@sestel.local", password="Sestel2026!", role=User.Role.SUPERVISOR
+        )
+        self.supervisor.managed_groups.set([g_sa])
+
+    def _patch_teams(self, actor, team_ids):
+        self.client.force_authenticate(actor)
+        return self.client.patch("/api/auth/me/", {"teams": team_ids}, format="json")
+
+    def test_support_can_switch_between_allowed_support_groups(self):
+        response = self._patch_teams(self.support, [self.team_sa.id, self.team_sb.id])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(set(self.support.teams.values_list("code", flat=True)), {"soporte-a", "soporte-b"})
+
+    def test_support_cannot_join_other_groups(self):
+        response = self._patch_teams(self.support, [self.team_sa.id, self.team_tigo.id])
+        self.assertEqual(response.status_code, 400)
+        self.support.refresh_from_db()
+        self.assertEqual(set(self.support.teams.values_list("code", flat=True)), {"soporte-a"})
+
+    def test_dispatcher_cannot_change_teams(self):
+        response = self._patch_teams(self.dispatcher, [self.team_sa.id])
+        self.assertEqual(response.status_code, 400)
+        self.dispatcher.refresh_from_db()
+        self.assertEqual(set(self.dispatcher.teams.values_list("code", flat=True)), {"tigo"})
+
+    def test_supervisor_only_within_supervised_groups(self):
+        ok = self._patch_teams(self.supervisor, [self.team_sa.id])
+        self.assertEqual(ok.status_code, 200)
+        bad = self._patch_teams(self.supervisor, [self.team_tigo.id])
+        self.assertEqual(bad.status_code, 400)
+
+    def test_cannot_empty_teams_nor_touch_managed_groups(self):
+        response = self._patch_teams(self.support, [])
+        self.assertEqual(response.status_code, 400)
+        self.client.force_authenticate(self.support)
+        response = self.client.patch("/api/auth/me/", {"managed_groups": [1]}, format="json")
+        self.assertEqual(response.status_code, 400)
+
+
 class PasswordChangeGuardTests(APITestCase):
     """Un administrador no puede cambiar la clave de otro administrador; nadie toca la del superadmin."""
 

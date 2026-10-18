@@ -183,3 +183,5 @@ IA_THRESHOLD = float(os.getenv("IA_THRESHOLD", "0.8") or "0.8")
 IA_SERVICES = [s.strip().upper() for s in os.getenv("IA_SERVICES", "FTTH,HFC").split(",") if s.strip()]
 IA_ALLOW_LOWER = environment_flag("IA_ALLOW_LOWER", True)
 IA_COOLDOWN_HOURS = int(os.getenv("IA_COOLDOWN_HOURS", "24") or "24")
+# Grupos a los que un agente SOPORTE puede autoasignarse desde su menú (los demás roles no cambian de equipo)
+SUPPORT_SELF_ASSIGN_GROUPS = [s.strip().lower() for s in os.getenv("SUPPORT_SELF_ASSIGN_GROUPS", "soporte-a,soporte-b").split(",") if s.strip()]
