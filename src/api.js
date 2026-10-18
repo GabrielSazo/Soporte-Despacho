@@ -19,45 +19,63 @@ function getErrorMessage(payload, fallback) {
 }
 
 function saveTokens({ access, refresh }) {
-  if (access) sessionStorage.setItem(accessTokenKey, access);
-  if (refresh) sessionStorage.setItem(refreshTokenKey, refresh);
+  if (access) localStorage.setItem(accessTokenKey, access);
+  if (refresh) localStorage.setItem(refreshTokenKey, refresh);
 }
 
 function clearTokens() {
-  sessionStorage.removeItem(accessTokenKey);
-  sessionStorage.removeItem(refreshTokenKey);
+  localStorage.removeItem(accessTokenKey);
+  localStorage.removeItem(refreshTokenKey);
 }
 
 export function hasActiveSession() {
-  return Boolean(sessionStorage.getItem(accessTokenKey));
+  return Boolean(localStorage.getItem(accessTokenKey));
 }
 
-async function refreshAccessToken() {
-  const refresh = sessionStorage.getItem(refreshTokenKey);
-  if (!refresh) return false;
+async function refreshAccessToken(failedAccessToken) {
+  const run = async () => {
+    // Otra pestaña pudo haber refrescado ya mientras esperábamos el bloqueo:
+    // si el access token guardado ya no es el que falló, no hay nada que hacer.
+    const currentAccess = localStorage.getItem(accessTokenKey);
+    if (currentAccess && failedAccessToken && currentAccess !== failedAccessToken) return true;
 
-  try {
-    const response = await fetch(`${apiUrl}/auth/token/refresh/`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refresh }),
-    });
-    const payload = await response.json();
-    if (!response.ok) {
-      clearTokens();
+    const refresh = localStorage.getItem(refreshTokenKey);
+    if (!refresh) return false;
+
+    try {
+      const response = await fetch(`${apiUrl}/auth/token/refresh/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        // Si otra pestaña ya rotó el refresh token, el nuestro quedó obsoleto
+        // pero la sesión sigue viva: no cerrar la sesión.
+        const laterRefresh = localStorage.getItem(refreshTokenKey);
+        if (laterRefresh && laterRefresh !== refresh) return true;
+        clearTokens();
+        return false;
+      }
+      saveTokens(payload);
+      return true;
+    } catch {
       return false;
     }
-    saveTokens(payload);
-    return true;
-  } catch {
-    return false;
+  };
+
+  // Serializa el refresco entre pestañas para no malgastar el refresh token
+  // (el backend lo rota y pone en lista negra al usarlo).
+  if (navigator.locks?.request) {
+    return navigator.locks.request("sestel-token-refresh", run);
   }
+  return run();
 }
 
 async function request(path, { body, headers = {}, method = "GET", retry = true, useAuth = true } = {}) {
   const requestHeaders = { ...headers };
   const isFormData = body instanceof FormData;
-  const accessToken = sessionStorage.getItem(accessTokenKey);
+  const accessToken = localStorage.getItem(accessTokenKey);
 
   if (useAuth && accessToken) requestHeaders.Authorization = `Bearer ${accessToken}`;
   if (body && !isFormData) requestHeaders["Content-Type"] = "application/json";
@@ -73,7 +91,7 @@ async function request(path, { body, headers = {}, method = "GET", retry = true,
     throw new ApiError(`No se pudo conectar con la API en ${apiUrl}. Verifica que Django esté ejecutándose.`);
   }
 
-  if (response.status === 401 && useAuth && retry && await refreshAccessToken()) {
+  if (response.status === 401 && useAuth && retry && await refreshAccessToken(accessToken)) {
     return request(path, { body, headers, method, retry: false, useAuth });
   }
 
@@ -156,7 +174,7 @@ export function resetPassword(email, newPassword) {
 }
 
 export async function signOut() {
-  const refresh = sessionStorage.getItem(refreshTokenKey);
+  const refresh = localStorage.getItem(refreshTokenKey);
   try {
     if (refresh) await request("/auth/logout/", { method: "POST", body: { refresh } });
   } finally {
@@ -338,7 +356,7 @@ export async function downloadReportsCsv(params = {}) {
   const cleaned = Object.fromEntries(Object.entries(params).filter(([, v]) => v));
   const qs = new URLSearchParams(cleaned).toString();
   const base = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
-  const token = sessionStorage.getItem("sestel-access-token");
+  const token = localStorage.getItem("sestel-access-token");
   const response = await fetch(`${base}/reports/export/${qs ? `?${qs}` : ""}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });

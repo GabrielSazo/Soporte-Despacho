@@ -83,7 +83,7 @@ const roleLabels = {
 function readStoredSession() {
   try {
     if (!hasActiveSession()) return null;
-    const savedSession = window.sessionStorage.getItem("sestel-user");
+    const savedSession = window.localStorage.getItem("sestel-user");
     return savedSession ? JSON.parse(savedSession) : null;
   } catch {
     return null;
@@ -424,6 +424,31 @@ function App() {
     };
   }, [sidebarOpen, newTicketOpen, ticketToResolve, ticketToEscalate, areaModal, ticketDetail, lightbox, userModal, bulkModal, teamModal, groupModal, passwordModal, showProfile]);
 
+  // Sincronización entre pestañas: la sesión es por navegador, no por pestaña.
+  useEffect(() => {
+    function onStorage(event) {
+      // El evento storage solo se dispara en OTRAS pestañas que la que escribió.
+      if (event.key === "sestel-access-token" && !event.newValue) {
+        // Cerraron sesión en otra pestaña: salir también aquí.
+        localStorage.removeItem("sestel-user");
+        setSession(null);
+        setTickets([]);
+        setDashboard(null);
+        setToast("");
+        return;
+      }
+      if (event.key === "sestel-user" && event.newValue) {
+        // Iniciaron sesión (como este u otro usuario) en otra pestaña: adoptarla.
+        try {
+          const next = JSON.parse(event.newValue);
+          setSession((current) => (current && current.id === next.id ? current : next));
+        } catch {}
+      }
+    }
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
   useEffect(() => {
     if (session) {
       refreshWorkspace();
@@ -441,7 +466,7 @@ function App() {
 
   useEffect(() => {
     if (!session) return;
-    const token = sessionStorage.getItem("sestel-access-token");
+    const token = localStorage.getItem("sestel-access-token");
     if (!token) return;
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const wsBase = `${protocol}//${window.location.host}/ws/tickets/`;
@@ -450,7 +475,7 @@ function App() {
     let usedToken = null;
     function connect() {
       if (closed) return;
-      const freshToken = sessionStorage.getItem("sestel-access-token");
+      const freshToken = localStorage.getItem("sestel-access-token");
       if (!freshToken) return;
       usedToken = freshToken;
       ws = new WebSocket(`${wsBase}?token=${freshToken}`);
@@ -458,7 +483,7 @@ function App() {
         try {
           const data = JSON.parse(event.data);
           if (data.type === "connected" && data.user === "anon" && !closed) {
-            const current = sessionStorage.getItem("sestel-access-token");
+            const current = localStorage.getItem("sestel-access-token");
             if (current && current !== usedToken) {
               try { ws.close(); } catch {}
               setTimeout(connect, 1000);
@@ -523,7 +548,7 @@ function App() {
       getEscalationAreas().then((p) => setEscalationAreas(p.results || p || [])).catch(() => undefined);
     } catch (error) {
       if (error.status === 401) {
-        sessionStorage.removeItem("sestel-user");
+        localStorage.removeItem("sestel-user");
         setSession(null);
       } else {
         setLoadError(error.message || "No fue posible cargar los datos de operación.");
@@ -561,16 +586,16 @@ function App() {
 
   async function startSession({ email, password }) {
     const user = mapUser(await signIn(email, password));
-    sessionStorage.setItem("sestel-user", JSON.stringify(user));
-    sessionStorage.removeItem("sestel-session");
+    localStorage.setItem("sestel-user", JSON.stringify(user));
+    localStorage.removeItem("sestel-session");
     setSession(user);
     notify(`Sesión iniciada como ${user.roleLabel.toLowerCase()}.`);
   }
 
   async function endSession() {
     await signOut().catch(() => undefined);
-    sessionStorage.removeItem("sestel-user");
-    sessionStorage.removeItem("sestel-session");
+    localStorage.removeItem("sestel-user");
+    localStorage.removeItem("sestel-session");
     setSession(null);
     setTickets([]);
     setDashboard(null);
@@ -834,14 +859,14 @@ function App() {
   const trabajables = tickets.filter((t) => ["ABIERTO", "ASIGNADO"].includes(t.statusCode) && !t.assigneeId);
   const [seenNotifs, setSeenNotifs] = useState(() => {
     try {
-      return JSON.parse(sessionStorage.getItem(`sestel-seen-${session?.id}`) || "{}");
+      return JSON.parse(localStorage.getItem(`sestel-seen-${session?.id}`) || "{}");
     } catch {
       return {};
     }
   });
   useEffect(() => {
     try {
-      sessionStorage.setItem(`sestel-seen-${session?.id}`, JSON.stringify(seenNotifs));
+      localStorage.setItem(`sestel-seen-${session?.id}`, JSON.stringify(seenNotifs));
     } catch {}
   }, [seenNotifs, session?.id]);
   function markSeen(key) {
@@ -991,7 +1016,7 @@ const BASE_FAVICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/sv
             <button className="dropdown-overlay" type="button" aria-label="Cerrar grupos" onClick={() => setShowGroupMenu(false)} />
             <div className="user-dropdown" role="menu" style={{ left: 0, right: 0, width: "100%" }}>
               <div className="user-dropdown-menu" style={{ maxHeight: "220px", overflowY: "auto" }}>
-                {groups.filter((g) => ["soporte-a", "soporte-b"].includes((g.code || "").toLowerCase())).map((g) => { const checked = session.teams?.some((t) => t.group?.id === g.id) || session.groups?.some((sg) => sg.id === g.id); return <label key={g.id} className="user-dropdown-item" style={{ cursor: "pointer" }}><input type="checkbox" checked={checked} onChange={async () => { const teamIds = teams.filter((t) => t.group === g.id || t.group_detail?.id === g.id).map((t) => t.id); const currentTeamIds = (session.teams || []).map((t) => t.id).filter(Boolean); const hasAll = teamIds.length > 0 && teamIds.every((id) => currentTeamIds.includes(id)); const newTeamIds = hasAll ? currentTeamIds.filter((id) => !teamIds.includes(id)) : [...new Set([...currentTeamIds, ...teamIds])]; if (!newTeamIds.length) { notify("Debes atender al menos un grupo."); return; } try { await updateMyTeams(newTeamIds, null); const fresh = await getCurrentUser(); const mapped = mapUser(fresh); setSession(mapped); sessionStorage.setItem("sestel-user", JSON.stringify(mapped)); notify(hasAll ? `Ya no atiendes ${g.name}` : `Ahora atiendes ${g.name}`); refreshWorkspace(true); } catch (e) { notify(e.message || "No se pudo actualizar"); } }} />{g.name}</label>; })}
+                {groups.filter((g) => ["soporte-a", "soporte-b"].includes((g.code || "").toLowerCase())).map((g) => { const checked = session.teams?.some((t) => t.group?.id === g.id) || session.groups?.some((sg) => sg.id === g.id); return <label key={g.id} className="user-dropdown-item" style={{ cursor: "pointer" }}><input type="checkbox" checked={checked} onChange={async () => { const teamIds = teams.filter((t) => t.group === g.id || t.group_detail?.id === g.id).map((t) => t.id); const currentTeamIds = (session.teams || []).map((t) => t.id).filter(Boolean); const hasAll = teamIds.length > 0 && teamIds.every((id) => currentTeamIds.includes(id)); const newTeamIds = hasAll ? currentTeamIds.filter((id) => !teamIds.includes(id)) : [...new Set([...currentTeamIds, ...teamIds])]; if (!newTeamIds.length) { notify("Debes atender al menos un grupo."); return; } try { await updateMyTeams(newTeamIds, null); const fresh = await getCurrentUser(); const mapped = mapUser(fresh); setSession(mapped); localStorage.setItem("sestel-user", JSON.stringify(mapped)); notify(hasAll ? `Ya no atiendes ${g.name}` : `Ahora atiendes ${g.name}`); refreshWorkspace(true); } catch (e) { notify(e.message || "No se pudo actualizar"); } }} />{g.name}</label>; })}
               </div>
             </div>
           </>}
@@ -1685,7 +1710,7 @@ function AIAgentPanel() {
           <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>{SERVICES.map((s) => <label key={s} style={{ display: "flex", gap: "6px", alignItems: "center" }}><input type="checkbox" checked={draft.services.includes(s)} onChange={() => toggleService(s)} disabled={!draft.enabled} /> {s}</label>)}</div>
         </div>
         <label style={{ display: "flex", gap: "8px", alignItems: "center" }}><input type="checkbox" checked={draft.allow_lower} onChange={(e) => setDraft({ ...draft, allow_lower: e.target.checked })} disabled={!draft.enabled} /> Permitir bajar prioridad (si está apagado, solo puede subirla)</label>
-        <label style={{ display: "grid", gap: "4px", maxWidth: "220px" }}>Horas entre cambios por ticket
+        <label style={{ display: "grid", gap: "4px", maxWidth: "300px" }} title="Enfriamiento del agente: una vez que la IA cambia la prioridad de un ticket, no vuelve a cambiarla en ese mismo ticket hasta pasadas estas horas. No tiene relación con el SLA de atención.">Horas mínimas entre cambios de la IA en el mismo ticket
           <input type="number" min="0" max="168" value={draft.cooldown_hours} onChange={(e) => setDraft({ ...draft, cooldown_hours: e.target.value })} disabled={!draft.enabled} />
         </label>
         <div><button className="primary-button" type="button" onClick={save} disabled={saving}>{saving ? "Guardando…" : "Guardar configuración"}</button></div>
