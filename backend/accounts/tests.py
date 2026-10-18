@@ -60,6 +60,32 @@ class PasswordChangeGuardTests(APITestCase):
         self.support.refresh_from_db()
         self.assertTrue(self.support.check_password("NuevaClave2026!"))
 
+    def test_supervisor_cannot_create_users_nor_admins(self):
+        supervisor = User.objects.create_user(
+            username="sup@sestel.local", email="sup@sestel.local", password="Sestel2026!", role=User.Role.SUPERVISOR
+        )
+        self.client.force_authenticate(supervisor)
+        payload = {
+            "username": "nuevo@sestel.local",
+            "email": "nuevo@sestel.local",
+            "first_name": "Nuevo",
+            "last_name": "Usuario",
+            "password": "Sestel2026!",
+            "role": User.Role.ADMIN,
+            "teams": [self.team.id],
+            "is_active": True,
+        }
+        response = self.client.post(reverse("user-list"), payload, format="json")
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(User.objects.filter(email="nuevo@sestel.local").exists())
+
+        bulk = self.client.post(
+            reverse("users_bulk"),
+            {"file": __import__("io").BytesIO(b"email,first_name,last_name,role,team_codes\nx@sestel.local,X,Y,ADMIN,soporte-a\n")},
+            format="multipart",
+        )
+        self.assertEqual(bulk.status_code, 403)
+
 
 class AuthenticationTests(APITestCase):
     def setUp(self):
