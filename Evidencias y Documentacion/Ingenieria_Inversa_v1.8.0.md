@@ -189,7 +189,7 @@ Migraciones en `dev`: `tickets` hasta `0012_ai_agent_config`; `accounts` hasta `
 
 ## 8. API principal
 
-`POST /api/auth/token|refresh|logout` (**nuevo login o logout invalida todos los tokens anteriores; refresh valida el claim `sid`**) · `GET /api/auth/me` (PATCH: solo `teams` con reglas de auto-asignación) · `POST /api/auth/password-reset/` + `confirm/` · CRUD `/api/users` + `POST /api/users/bulk/` (crear solo ADMIN) · `GET /api/audit-logs` · CRUD `/api/tickets/` + `take/resolve/validate/reassign/release/escalar/desescalar/instruir/attachments` + **`analizar-imagen`/`revisar` (IA)** · CRUD `/api/teams|groups|request-types|escalation-areas` · **`GET/PATCH /api/ia-config/` (solo admin)** · `GET /api/dashboard|reports/summary|reports/export` · WS `/ws/tickets/` (el token WS también valida `sid`).
+`POST /api/auth/token|refresh|logout` (**nuevo login o logout invalida todos los tokens anteriores; refresh valida el claim `sid`**) · `GET /api/auth/me` (PATCH: solo `teams` con reglas de auto-asignación) · `POST /api/auth/password-reset/` + `confirm/` · CRUD `/api/users` + `POST /api/users/bulk/` (crear solo ADMIN; listado acotado por rol) · `GET /api/audit-logs` · CRUD `/api/tickets/` + `take/resolve/validate/reassign/release/escalar/desescalar/instruir/attachments` + **`analizar-imagen`/`revisar` (IA)** · CRUD `/api/teams|groups|request-types|escalation-areas` (**lectura de `teams`/`groups` acotada a los grupos del usuario; escritura solo ADMIN**, RF-004g) · **`GET/PATCH /api/ia-config/` (solo admin)** · **`GET /api/dashboard/` (solo ADMIN/SUPERVISOR/SOPORTE; DESPACHADOR recibe 403**, RF-004g) · `GET /api/reports/summary|reports/export` · WS `/ws/tickets/` (el token WS también valida `sid`).
 
 ## 9. Decisiones (ADRs breves)
 
