@@ -105,6 +105,10 @@ services:
     # la red interna del compose lo alcanza en http://ollama:11434.
     image: ollama/ollama:latest
     restart: unless-stopped
+    environment:
+      # Modelos residentes en RAM 30 min tras cada uso: tickets seguidos sin recargar
+      # (~5.5 GB de RAM ocupados mientras están residentes).
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
     volumes:
       - ollama_models:/root/.ollama   # pesos de los modelos; sobreviven a rebuilds
     healthcheck:

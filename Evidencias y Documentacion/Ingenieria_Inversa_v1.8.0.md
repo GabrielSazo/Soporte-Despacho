@@ -239,7 +239,8 @@ Migraciones en `dev`: `tickets` hasta `0012_ai_agent_config`; `accounts` hasta `
 | v1.8.4 | **Alcance de datos por rol (RF-004g)** — `/groups/` y `/teams/` acotados a los grupos del usuario (admin: catálogo completo; detalle ajeno: 404); `/dashboard/` solo para ADMIN/SUPERVISOR/SOPORTE (DESPACHADOR: 403) y el front deja de pedirlo | Tag publicado |
 | v1.8.5 | **Bandeja ordenada por prioridad por defecto** (antes "recientes"; el selector conserva recientes/antiguos) + ingeniería inversa delimina los modos de la IA: **cambio automático posible y configurable** (apagado en el arranque, con frenos: umbral, servicios, allow_lower, cooldown 24 h) | Tag publicado |
 | v1.8.6 | **Orden de la bandeja por estado + prioridad** — cerrados siempre al fondo y, dentro de cada estado, prioridad (Crítica→Alta→Media→Baja); selector renombrado a "estado + prioridad" (solo frontend) | Tag publicado |
-| v1.8.7 | **Ollama como servicio en prod** — servicio `ollama` en `compose.prod.yaml` (volumen `ollama_models`, puerto 11434 no publicado; `api`/`worker` lo alcanzan por red interna), env de IA parametrizado por `.env` y Runbook §6 con la descarga de modelos y la activación por doble interruptor | **Release actual** |
+| v1.8.7 | **Ollama como servicio en prod** — servicio `ollama` en `compose.prod.yaml` (volumen `ollama_models`, puerto 11434 no publicado; `api`/`worker` lo alcanzan por red interna), env de IA parametrizado por `.env` y Runbook §6 con la descarga de modelos y la activación por doble interruptor | Tag publicado |
+| v1.8.8 | **Agente IA ~3× más rápido (medido con imagen y prompts reales)** — revisor con `think:false` (qwen3:4b directo al JSON: 54 s → 7 s), espera entre etapas 60→20 s y `OLLAMA_KEEP_ALIVE=30m` en el servicio Ollama; análisis completo ~2 min → **~40-60 s**. moondream descartado como alternativa (más lento y salida vacía en CPU) | **Release actual** |
 
 ## 12. Despliegue y evidencias
 

@@ -304,7 +304,9 @@ def maybe_schedule_review(ticket_id):
     except Exception:
         pass
     try:
-        review_ticket_ai.apply_async(args=[ticket_id], countdown=60)
+        # 20 s de margen para que aterricen eventos/OCR recientes; el OCR pendiente
+        # ya se espera por separado en el guard de arriba (v1.8.8: era 60 s).
+        review_ticket_ai.apply_async(args=[ticket_id], countdown=20)
     except Exception:
         pass
 
@@ -358,6 +360,9 @@ def review_ticket_ai(ticket_id, force=False):
             "prompt": prompt,
             "stream": False,
             "format": "json",
+            # qwen3 es un modelo "piensa antes de responder"; sin esto genera cientos
+            # de tokens de razonamiento ocultos y tarda ~3x más en CPU (v1.8.8).
+            "think": False,
         }).encode()
         request = urllib.request.Request(
             f"{settings.OLLAMA_HOST.rstrip('/')}/api/generate",

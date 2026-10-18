@@ -94,9 +94,9 @@ docker compose -f compose.prod.yaml exec ollama ollama pull qwen2.5vl:3b   # vis
 docker compose -f compose.prod.yaml exec ollama ollama pull qwen3:4b      # razonamiento (~2.5 GB)
 ```
 
-**Recursos:** ~6 GB de disco (volumen `ollama_models`) y ~8 GB de RAM disponibles mientras dura un análisis (CPU; sin GPU obligatoria). Si el server queda ajustado, no actives la IA: el sistema funciona completo sin ella.
+**Recursos:** ~6 GB de disco (volumen `ollama_models`) y ~8 GB de RAM disponibles mientras dura un análisis (CPU; sin GPU obligatoria). Con `OLLAMA_KEEP_ALIVE=30m` (default del compose) los modelos quedan **residentes en RAM 30 min tras cada uso** — ~5.5 GB ocupados en ese periodo — para que tickets seguidos no paguen de nuevo la carga del modelo. Si el server queda ajustado, no actives la IA: el sistema funciona completo sin ella.
 
-**Verificación:** con el agente encendido en el panel, usar "Analizar con IA" en un ticket; el resultado aparece en el historial como `IA (qwen2.5vl): …` en ~1–2 minutos (worker Celery). Si el servicio de Ollama está apagado, el historial marca "IA no disponible" y el flujo del ticket continúa normal.
+**Verificación:** con el agente encendido en el panel, usar "Analizar con IA" en un ticket; el resultado aparece en el historial como `IA (qwen2.5vl): …` en **~40-60 segundos** (visión ~10 s + espera 20 s + revisión ~10 s; v1.8.8). Si el servicio de Ollama está apagado, el historial marca "IA no disponible" y el flujo del ticket continúa normal.
 
 ## 7. Arranque automático
 
