@@ -8,7 +8,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import User
-from accounts.permissions import IsAdministrator
+from accounts.permissions import HasDashboardAccess, IsAdministrator
 
 from .models import AIAgentConfig, EscalationArea, RequestType, Ticket, TicketEvent
 from .permissions import require_support_access, require_validation_access, visible_tickets_for
@@ -567,7 +567,7 @@ class ReportsExportView(APIView):
 
 
 class DashboardView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [HasDashboardAccess]
 
     def get(self, request):
         tickets = visible_tickets_for(request.user)

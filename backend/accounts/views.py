@@ -170,6 +170,18 @@ class WorkGroupViewSet(viewsets.ModelViewSet):
     queryset = WorkGroup.objects.all()
     serializer_class = WorkGroupSerializer
 
+    def get_queryset(self):
+        """Alcance por rol: los no-administradores solo ven sus propios grupos
+        (RF-004g: sin catálogos globales que revelen los demás clientes/grupos)."""
+        qs = super().get_queryset()
+        user = self.request.user
+        if user.is_administrator:
+            return qs
+        codes = user.group_codes
+        if codes:
+            return qs.filter(code__in=codes)
+        return qs.none()
+
     def get_permissions(self):
         if self.action in ["list", "retrieve"]:
             return [IsAuthenticated()]
@@ -191,6 +203,18 @@ class WorkGroupViewSet(viewsets.ModelViewSet):
 class TeamViewSet(viewsets.ModelViewSet):
     queryset = Team.objects.select_related("group").all()
     serializer_class = TeamSerializer
+
+    def get_queryset(self):
+        """Alcance por rol: los no-administradores solo ven equipos de sus grupos
+        (RF-004g). Los administradores ven el catálogo completo."""
+        qs = super().get_queryset()
+        user = self.request.user
+        if user.is_administrator:
+            return qs
+        codes = user.group_codes
+        if codes:
+            return qs.filter(group__code__in=codes)
+        return qs.none()
 
     def get_permissions(self):
         if self.action in ["list", "retrieve"]:

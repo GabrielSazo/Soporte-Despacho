@@ -368,3 +368,57 @@ class PasswordResetNoEnumerationTests(APITestCase):
     def test_empty_email_is_still_a_validation_error(self):
         resp = self._request("")
         self.assertEqual(resp.status_code, 400)
+
+
+def _items(payload):
+    """Adapta la respuesta paginada o en lista a una lista simple."""
+    return payload["results"] if isinstance(payload, dict) else payload
+
+
+class CatalogVisibilityTests(APITestCase):
+    """RF-004g: los catálogos de grupos y equipos se acotan al grupo del usuario;
+    el administrador conserva el catálogo completo."""
+
+    def setUp(self):
+        self.g_tigo, _ = WorkGroup.objects.get_or_create(name="Tigo", defaults={"code": "tigo"})
+        self.g_ajeno, _ = WorkGroup.objects.get_or_create(name="Cliente Ajeno", defaults={"code": "ajeno"})
+        self.team_tigo, _ = Team.objects.get_or_create(group=self.g_tigo, name="FTTH Norte", defaults={"code": "ftth-norte"})
+        self.team_ajeno, _ = Team.objects.get_or_create(group=self.g_ajeno, name="Equipo Ajeno", defaults={"code": "ajeno"})
+        self.admin = User.objects.create_user(
+            username="admin-cat@sestel.local", email="admin-cat@sestel.local", password="Sestel2026!", role=User.Role.ADMIN
+        )
+        self.dispatcher = User.objects.create_user(
+            username="desp-cat@sestel.local", email="desp-cat@sestel.local", password="Sestel2026!", role=User.Role.DISPATCHER
+        )
+        self.dispatcher.teams.set([self.team_tigo])
+        self.sin_grupos = User.objects.create_user(
+            username="sin-grupo@sestel.local", email="sin-grupo@sestel.local", password="Sestel2026!", role=User.Role.SUPPORT
+        )
+
+    def test_admin_keeps_the_full_catalog(self):
+        self.client.force_authenticate(self.admin)
+        grupos = _items(self.client.get("/api/groups/").json())
+        equipos = _items(self.client.get("/api/teams/").json())
+        self.assertIn("tigo", [g["code"] for g in grupos])
+        self.assertIn("ajeno", [g["code"] for g in grupos])
+        self.assertIn("ftth-norte", [t["code"] for t in equipos])
+        self.assertIn("ajeno", [t["code"] for t in equipos])
+
+    def test_dispatcher_only_sees_his_own_groups_and_teams(self):
+        self.client.force_authenticate(self.dispatcher)
+        grupos = _items(self.client.get("/api/groups/").json())
+        equipos = _items(self.client.get("/api/teams/").json())
+        self.assertEqual({g["code"] for g in grupos}, {"tigo"})
+        codes = [t["code"] for t in equipos]
+        self.assertIn("ftth-norte", codes)
+        self.assertNotIn("ajeno", codes)
+
+    def test_dispatcher_cannot_retrieve_foreign_catalog_details(self):
+        self.client.force_authenticate(self.dispatcher)
+        self.assertEqual(self.client.get(f"/api/groups/{self.g_ajeno.id}/").status_code, 404)
+        self.assertEqual(self.client.get(f"/api/teams/{self.team_ajeno.id}/").status_code, 404)
+
+    def test_user_without_groups_sees_empty_catalogs(self):
+        self.client.force_authenticate(self.sin_grupos)
+        self.assertEqual(_items(self.client.get("/api/groups/").json()), [])
+        self.assertEqual(_items(self.client.get("/api/teams/").json()), [])

@@ -543,9 +543,11 @@ function App() {
     if (!silent) setIsLoading(true);
     setLoadError("");
     try {
-      const [ticketPayload, dashboardPayload] = await Promise.all([getTickets(), getDashboard()]);
+      // El DESPACHADOR no tiene la vista "Resumen": no existe el endpoint de dashboard para su rol (RF-004g).
+      const dashboardRequest = session?.role === "DESPACHADOR" ? Promise.resolve(null) : getDashboard();
+      const [ticketPayload, dashboardPayload] = await Promise.all([getTickets(), dashboardRequest]);
       setTickets((ticketPayload.results || ticketPayload).map(mapTicket));
-      setDashboard(dashboardPayload);
+      if (dashboardPayload) setDashboard(dashboardPayload);
       getEscalationAreas().then((p) => setEscalationAreas(p.results || p || [])).catch(() => undefined);
     } catch (error) {
       if (error.status === 401) {

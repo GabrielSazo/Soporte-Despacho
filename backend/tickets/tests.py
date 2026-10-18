@@ -293,3 +293,34 @@ class AIAgentTests(APITestCase):
         self.assertGreaterEqual(minutos, 2)
         self.assertLessEqual(minutos, 3.5)
         self.assertTrue(ticket.events.filter(comment__startswith="IA-Aplicada:").exists())
+
+
+class DashboardAccessTests(APITestCase):
+    """RF-004g: el panel de resumen pertenece a ADMIN, SUPERVISOR y SOPORTE;
+    el DESPACHADOR no lo tiene en su navegación y la API lo rechaza."""
+
+    def setUp(self):
+        group, _ = WorkGroup.objects.get_or_create(name="Tigo", defaults={"code": "tigo"})
+        team, _ = Team.objects.get_or_create(group=group, name="Tigo", defaults={"code": "tigo"})
+        self.users = {}
+        for role, email in [
+            (User.Role.ADMIN, "admin-dash@sestel.local"),
+            (User.Role.SUPERVISOR, "supv-dash@sestel.local"),
+            (User.Role.SUPPORT, "soporte-dash@sestel.local"),
+            (User.Role.DISPATCHER, "desp-dash@sestel.local"),
+        ]:
+            user = User.objects.create_user(username=email, email=email, password="Sestel2026!", role=role)
+            user.teams.set([team])
+            self.users[role] = user
+
+    def test_dispatcher_receives_403_on_dashboard(self):
+        self.client.force_authenticate(self.users[User.Role.DISPATCHER])
+        response = self.client.get("/api/dashboard/")
+        self.assertEqual(response.status_code, 403)
+
+    def test_operational_roles_keep_dashboard_access(self):
+        for role in [User.Role.ADMIN, User.Role.SUPERVISOR, User.Role.SUPPORT]:
+            with self.subTest(role=role):
+                self.client.force_authenticate(self.users[role])
+                response = self.client.get("/api/dashboard/")
+                self.assertEqual(response.status_code, 200)

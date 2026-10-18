@@ -63,6 +63,7 @@ Productivo (v1.8.0): **server local Ubuntu LTS, IP fija en LAN**; sin exposició
 - RF-004d **Sesión única global:** al iniciar sesión se rota el id de sesión del usuario (`User.session_id`, claim `sid` en access y refresh) y todos los tokens emitidos antes quedan inválidos; aplica también al cerrar sesión y al cambiar/restablecer contraseña. Un nuevo login desde cualquier equipo o pestaña "expulsa" a la sesión anterior (el token viejo recibe 401 con "Tu sesión se cerró desde otro dispositivo").
 - RF-004e **Sesión compartida entre pestañas:** tokens y usuario en `localStorage` (antes `sessionStorage`), de modo que una pestaña nueva abre con la sesión ya activa; el logout en una pestaña sincroniza a las demás (evento `storage`) y el refresco del token se serializa con `navigator.locks` para no malgastar el refresh token rotado.
 - RF-004f **Cierre de sesión al cerrar el navegador (nuevo v1.8.1):** cada pestaña mantiene un heartbeat en su propia clave de `localStorage` (`sestel-tab-<id>`, cada 5 s, caducidad 20 s — sin lectura-escritura compartida, por lo que no hay carreras al cerrar varias pestañas a la vez). Al arrancar la app con tokens, **sin otras pestañas con heartbeat vigente, sin ser una recarga (`navigation.type=reload`) ni un retorno del mismo origen** (p. ej. `/admin/`), se asume que el navegador se cerró: se limpian los tokens locales antes de pintar la app y, en segundo plano, se rota y cierra la sesión en el servidor (refresh + logout), mostrando *"Se cerró la sesión al cerrar el navegador"*. La restauración de pestañas del navegador cuenta como cierre real; un crash (sin `pagehide`) queda cubierto por la caducidad del refresh (≤ 24 h) y por el "un solo login global".
+- RF-004g **Alcance de datos por rol (nuevo v1.8.4):** la API no sirve catálogos ni métricas globales a perfiles que no los usan en su navegación. `GET /groups/` y `GET /teams/` devuelven solo los grupos/equipos del usuario (`group_codes` = equipos + grupos supervisados); los administradores conservan el catálogo completo y el detalle de un grupo/equipo ajeno responde 404. `GET /dashboard/` pertenece a ADMIN, SUPERVISOR y SOPORTE (los roles con vista "Resumen"): el DESPACHADOR recibe 403 *"Tu perfil no tiene acceso al panel de resumen"* y el front deja de solicitarlo. Tickets, usuarios, áreas de escalamiento y tipos de solicitud mantienen su alcance previo (visibilidad por grupo / catálogos operativos).
 
 ### RF-TCK — Tickets
 - RF-005 Crear ticket (despachador/supervisor): tipo solicitud (Cliente/Técnico) → servicio → solicitud específica; título auto editable.
@@ -178,6 +179,7 @@ Productivo (v1.8.0): **server local Ubuntu LTS, IP fija en LAN**; sin exposició
 - US-043 Como administrador quiero que un solo login quede activo por usuario, para que una sesión olvidada en otro equipo o pestaña no siga viva. [RF-004d]
 - US-044 Como usuario quiero que una pestaña nueva abra con mi sesión activa y que al cerrar sesión se cierren todas, sin reingresar pestaña por pestaña. [RF-004e]
 - US-045 Como usuario quiero que al cerrar el navegador la sesión no quede viva en el equipo, sin que por eso se pierda al recargar la página. [RF-004f]
+- US-046 Como administrador quiero que cada rol solo reciba los datos que su pantalla utiliza, para que un perfil de despacho no pueda consultar catálogos de otros grupos ni el panel de resumen vía API. [RF-004g]
 
 ## 7. Modelo de datos (resumen)
 
@@ -233,12 +235,13 @@ Migraciones en `dev`: `tickets` hasta `0012_ai_agent_config`; `accounts` hasta `
 | v1.8.0 | SLA 2/3/4/5, tarjeta Escalados, IA apagada por defecto, Django 5.2 + headers, seguridad de cuentas/equipos, **sesión única global + pestañas compartidas**, purga de adjuntos, docs server local | Tag publicado |
 | v1.8.1 | **Cierre de sesión al cerrar el navegador** (heartbeat por pestaña, claves individuales sin carreras; F5 y retornos del mismo origen conservan la sesión) | Tag publicado |
 | v1.8.2 | **Anti-enumeración en restablecimiento de contraseña** (respuesta genérica siempre; correo asíncrono vía Celery) | Tag publicado |
-| v1.8.3 | **TLS (HTTPS) en el server local** — nginx termina TLS (443) con certificado autofirmado generado por `scripts/generar_certificado.sh` (SAN con IP fija, 397 días), redirect 80→443, HSTS activo, `SECURE_PROXY_SSL_HEADER` para Django; certificado de arranque automático si no hay propios | **Release actual (pendiente de tag y deploy)** |
+| v1.8.3 | **TLS (HTTPS) en el server local** — nginx termina TLS (443) con certificado autofirmado generado por `scripts/generar_certificado.sh` (SAN con IP fija, 397 días), redirect 80→443, HSTS activo, `SECURE_PROXY_SSL_HEADER` para Django; certificado de arranque automático si no hay propios | Tag publicado (pendiente de deploy) |
+| v1.8.4 | **Alcance de datos por rol (RF-004g)** — `/groups/` y `/teams/` acotados a los grupos del usuario (admin: catálogo completo; detalle ajeno: 404); `/dashboard/` solo para ADMIN/SUPERVISOR/SOPORTE (DESPACHADOR: 403) y el front deja de pedirlo | **Release actual** |
 
 ## 12. Despliegue y evidencias
 
 - Prod (v1.8.0): server local Ubuntu, IP fija, `docker compose -f compose.prod.yaml up --build -d`, `pg_dump` diario al NAS + previo a cada release, tags por versión. **Runbook: `Runbook_Servidor_Local.md`** (instalación, `.env`, arranque auto, cron SLA, backups, firewall, releases).
 - Dev: `http://localhost`, `docker compose up --build -d`.
-- Pruebas: `manage.py test accounts tickets` **25/25 OK** en v1.8.0 (Django 5.2.18, verificado en Docker y Python local); `npm run build` verde.
+- Pruebas: `manage.py test accounts tickets` **25/25 OK** en v1.8.0 (Django 5.2.18, verificado en Docker y Python local); **40/40 OK en v1.8.4** (RF-004g incluida); `npm run build` verde.
 - Evidencias: `Evidencias y Documentacion/` (este documento, `Manual_Usuario.md/.docx`, `Onboarding_Desde_Cero.md`, `Runbook_Servidor_Local.md`, `REPORTE_5/6*.xlsx`, `REPORTE_7*.xlsx`).
 - Experimentos no mergeados: `test/fix-ocr` (RapidOCR).
