@@ -62,6 +62,7 @@ Productivo (v1.8.0): **server local Ubuntu LTS, IP fija en LAN**; sin exposició
 - RF-004c Invitación individual por correo + carga masiva CSV con plantilla y reporte por fila.
 - RF-004d **Sesión única global:** al iniciar sesión se rota el id de sesión del usuario (`User.session_id`, claim `sid` en access y refresh) y todos los tokens emitidos antes quedan inválidos; aplica también al cerrar sesión y al cambiar/restablecer contraseña. Un nuevo login desde cualquier equipo o pestaña "expulsa" a la sesión anterior (el token viejo recibe 401 con "Tu sesión se cerró desde otro dispositivo").
 - RF-004e **Sesión compartida entre pestañas:** tokens y usuario en `localStorage` (antes `sessionStorage`), de modo que una pestaña nueva abre con la sesión ya activa; el logout en una pestaña sincroniza a las demás (evento `storage`) y el refresco del token se serializa con `navigator.locks` para no malgastar el refresh token rotado.
+- RF-004f **Cierre de sesión al cerrar el navegador (nuevo v1.8.1):** cada pestaña mantiene un heartbeat en su propia clave de `localStorage` (`sestel-tab-<id>`, cada 5 s, caducidad 20 s — sin lectura-escritura compartida, por lo que no hay carreras al cerrar varias pestañas a la vez). Al arrancar la app con tokens, **sin otras pestañas con heartbeat vigente, sin ser una recarga (`navigation.type=reload`) ni un retorno del mismo origen** (p. ej. `/admin/`), se asume que el navegador se cerró: se limpian los tokens locales antes de pintar la app y, en segundo plano, se rota y cierra la sesión en el servidor (refresh + logout), mostrando *"Se cerró la sesión al cerrar el navegador"*. La restauración de pestañas del navegador cuenta como cierre real; un crash (sin `pagehide`) queda cubierto por la caducidad del refresh (≤ 24 h) y por el "un solo login global".
 
 ### RF-TCK — Tickets
 - RF-005 Crear ticket (despachador/supervisor): tipo solicitud (Cliente/Técnico) → servicio → solicitud específica; título auto editable.
@@ -176,6 +177,7 @@ Productivo (v1.8.0): **server local Ubuntu LTS, IP fija en LAN**; sin exposició
 - US-042 Como equipo quiero desplegar en un server Ubuntu local con backups internos y acceso por VPN. [RNF-04/05/08]
 - US-043 Como administrador quiero que un solo login quede activo por usuario, para que una sesión olvidada en otro equipo o pestaña no siga viva. [RF-004d]
 - US-044 Como usuario quiero que una pestaña nueva abra con mi sesión activa y que al cerrar sesión se cierren todas, sin reingresar pestaña por pestaña. [RF-004e]
+- US-045 Como usuario quiero que al cerrar el navegador la sesión no quede viva en el equipo, sin que por eso se pierda al recargar la página. [RF-004f]
 
 ## 7. Modelo de datos (resumen)
 
@@ -205,7 +207,7 @@ Migraciones en `dev`: `tickets` hasta `0012_ai_agent_config`; `accounts` hasta `
 - ADR-14 **Seguridad de privilegios:** contraseñas entre admins, `is_superuser` solo lectura, roles solo por ADMIN, auto-asignación acotada por rol — todo validado en backend (el frontend solo oculta, no protege).
 - ADR-15 **Prod en server local Ubuntu + VPN** en vez de EC2: sin costos de nube ni exposición a internet; contrapartida — backups internos obligatorios y sin redundancia (Runbook §11).
 - ADR-16 Django 4.2 (EOL ago/2026) → **5.2 LTS** con suite verde; headers de seguridad en nginx.
-- ADR-17 **Sesión única global + pestañas compartidas:** claim `sid` (UUID de `User.session_id`) en access y refresh, validado en API, refresh y WebSocket; se rota en login/logout/cambio de contraseña (mata sesiones previas, incluso las no expiradas). En el navegador, tokens en `localStorage` + bloqueo `navigator.locks` para el refresco concurrente + sincronización por evento `storage` (logout/login en una pestaña se propaga a todas). Contrapartida aceptada: los tokens sobreviven al cierre del navegador (máx. 1 día por el refresh); al desplegar v1.8.0 todos los usuarios deben iniciar sesión una vez más.
+- ADR-17 **Sesión única global + pestañas compartidas:** claim `sid` (UUID de `User.session_id`) en access y refresh, validado en API, refresh y WebSocket; se rota en login/logout/cambio de contraseña (mata sesiones previas, incluso las no expiradas). En el navegador, tokens en `localStorage` + bloqueo `navigator.locks` para el refresco concurrente + sincronización por evento `storage` (logout/login en una pestaña se propaga a todas). **Enmendado en v1.8.1:** los tokens ya **no** sobreviven al cierre del navegador — el heartbeat por pestaña detecta el cierre y la sesión se cierra en el servidor al próximo arranque de la app (se conserva en F5/recargas y retornos del mismo origen; un crash queda al refresh ≤ 24 h). Contrapartida vigente: al desplegar v1.8.0/v1.8.1 todos los usuarios deben iniciar sesión una vez más.
 
 ## 10. Backlog pendiente (post-v1.8.0)
 
@@ -228,7 +230,8 @@ Migraciones en `dev`: `tickets` hasta `0012_ai_agent_config`; `accounts` hasta `
 | v1.6.0 | Rangos rápidos, filtros auditoría | Histórico |
 | v1.7.0 | Claves fuertes, invitación + bulk CSV, evidencia al rechazar, manual | Prod (EC2) |
 | v1.7.1 | Fix presencia WS (token fresco en reconexión) | Prod (EC2) |
-| v1.8.0 | SLA 2/3/4/5, tarjeta Escalados, IA apagada por defecto, Django 5.2 + headers, seguridad de cuentas/equipos, **sesión única global + pestañas compartidas**, purga de adjuntos, docs server local | **Release actual (pendiente de tag y deploy)** |
+| v1.8.0 | SLA 2/3/4/5, tarjeta Escalados, IA apagada por defecto, Django 5.2 + headers, seguridad de cuentas/equipos, **sesión única global + pestañas compartidas**, purga de adjuntos, docs server local | Tag publicado |
+| v1.8.1 | **Cierre de sesión al cerrar el navegador** (heartbeat por pestaña, claves individuales sin carreras; F5 y retornos del mismo origen conservan la sesión) | **Release actual (pendiente de tag y deploy)** |
 
 ## 12. Despliegue y evidencias
 
