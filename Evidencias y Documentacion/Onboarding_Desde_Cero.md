@@ -5,7 +5,7 @@ Guía inicial para un desarrollador que parte **sin nada** y debe llegar al sist
 ## 1. Punto de partida y meta
 
 - **Punto de partida:** repo vacío, sin infraestructura.
-- **Meta:** sistema web de seguimiento y escalamiento de soporte (HFC/FTTH/WTTX/DTH) con 4 roles, SLA automático, evidencia con OCR, escalamientos, informes y despliegue Docker en AWS. Ver alcance completo en `Ingenieria_Inversa_v1.2.0.md` §1–§5.
+- **Meta:** sistema web de seguimiento y escalamiento de soporte (HFC/FTTH/WTTX/DTH) con 4 roles, SLA automático, evidencia con OCR, escalamientos, informes y despliegue Docker en un server local Ubuntu de la red interna (acceso externo por VPN). Ver alcance completo en `Ingenieria_Inversa_v1.2.0.md` §1–§5.
 
 ## 2. Stack decidido (no reinventar)
 
@@ -18,7 +18,7 @@ Guía inicial para un desarrollador que parte **sin nada** y debe llegar al sist
 | OCR | Tesseract `spa+eng` + pyzbar, **async**; compresión en navegador (1600px, JPEG 0.82) | Respuesta de subida < 1 s |
 | DB | PostgreSQL 16 (SQLite solo tests) | Concurrencia y tipos reales |
 | Despliegue | Docker Compose doble: `compose.yaml` (dev hot-reload) + `compose.prod.yaml` (nginx + build + worker) | Mismo artefacto en todos los ambientes |
-| Exposición | Cloudflare Tunnel (SSL automático) o Let's Encrypt | Sin gestionar certificados |
+| Exposición | Red interna con IP fija + acceso externo por VPN corporativa | Sin puertos abiertos a internet; la VPN cifra el acceso remoto |
 
 ## 3. Reglas de negocio cerradas (no negociables sin PO)
 
@@ -59,5 +59,5 @@ Funciona en dev Docker + tests verdes + build verde + probado con los 4 roles + 
 
 - Bind mounts sobre OneDrive + polling de Vite = lentitud en Windows (frontend nativo como alternativa).
 - Fotos de 3-4 MB bloquean el request si el OCR es síncrono (usar worker desde el día 1).
-- IPs dinámicas en EC2 (usar Elastic IP) y Docker sin plugin compose en Amazon Linux (usar `docker-compose`).
+- Server local sin redundancia de nube: planificar respaldo interno (NAS/disco) y arranque automático de Docker tras cortes (`systemd`/`@reboot`).
 - Nombres de columnas/índices en migraciones escritas a mano (generar con `makemigrations` y verificar `--check`).

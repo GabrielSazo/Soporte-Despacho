@@ -125,9 +125,9 @@ npm run build
 ## Antes De Producción
 
 1. Definir un `DJANGO_SECRET_KEY` seguro y `DJANGO_DEBUG=false`.
-2. Configurar PostgreSQL administrado, respaldo diario (`pg_dump` antes de cada release) y restauración probada.
-3. Establecer dominio, `DJANGO_ALLOWED_HOSTS` y `CORS_ALLOWED_ORIGINS` definitivos. `compose.prod.yaml` trae `DJANGO_ALLOWED_HOSTS:-*` y `EMAIL_BACKEND` en modo consola **por defecto**: en prod deben definirse por `.env` (nunca en git).
-4. HTTPS: `compose.prod.yaml` solo publica puerto `80`. El TLS se termina en Cloudflare Tunnel (quick/nombrado). Sin túnel, agregar TLS propio (p. ej. Let's Encrypt) delante de nginx.
+2. PostgreSQL corre en Docker con volumen persistente en el server local: definir respaldo diario (`pg_dump` hacia almacenamiento interno — NAS o disco externo) y restauración probada.
+3. Establecer `DJANGO_ALLOWED_HOSTS` (IP fija o nombre interno del server) y `CORS_ALLOWED_ORIGINS` definitivos. `compose.prod.yaml` trae `DJANGO_ALLOWED_HOSTS:-*` y `EMAIL_BACKEND` en modo consola **por defecto**: en prod deben definirse por `.env` (nunca en git).
+4. Sin exposición a internet: el sistema se sirve en la red interna (IP fija) y el acceso externo es por VPN corporativa. En LAN el tráfico va por HTTP; el acceso remoto viaja cifrado dentro del túnel de la VPN. Si se requiere TLS en LAN, agregar un proxy con certificado de CA interna.
 5. Ejecutar la automatización SLA mediante un planificador confiable, no manualmente.
 6. Cambiar o desactivar las cuentas de demostración y aplicar política de claves (10+, mayúscula, minúscula, número).
 7. Agregar auditoría, monitoreo de errores y pruebas end-to-end antes del despliegue.
