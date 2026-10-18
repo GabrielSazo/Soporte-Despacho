@@ -232,7 +232,8 @@ Migraciones en `dev`: `tickets` hasta `0012_ai_agent_config`; `accounts` hasta `
 | v1.7.1 | Fix presencia WS (token fresco en reconexión) | Prod (EC2) |
 | v1.8.0 | SLA 2/3/4/5, tarjeta Escalados, IA apagada por defecto, Django 5.2 + headers, seguridad de cuentas/equipos, **sesión única global + pestañas compartidas**, purga de adjuntos, docs server local | Tag publicado |
 | v1.8.1 | **Cierre de sesión al cerrar el navegador** (heartbeat por pestaña, claves individuales sin carreras; F5 y retornos del mismo origen conservan la sesión) | Tag publicado |
-| v1.8.2 | **Anti-enumeración en restablecimiento de contraseña** (respuesta genérica siempre; correo asíncrono vía Celery) | **Release actual (pendiente de tag y deploy)** |
+| v1.8.2 | **Anti-enumeración en restablecimiento de contraseña** (respuesta genérica siempre; correo asíncrono vía Celery) | Tag publicado |
+| v1.8.3 | **TLS (HTTPS) en el server local** — nginx termina TLS (443) con certificado autofirmado generado por `scripts/generar_certificado.sh` (SAN con IP fija, 397 días), redirect 80→443, HSTS activo, `SECURE_PROXY_SSL_HEADER` para Django; certificado de arranque automático si no hay propios | **Release actual (pendiente de tag y deploy)** |
 
 ## 12. Despliegue y evidencias
 

@@ -38,13 +38,31 @@ Valores obligatorios para prod local:
 DJANGO_SECRET_KEY=<generar: python -c "import secrets; print(secrets.token_urlsafe(50))">
 DJANGO_DEBUG=false
 DJANGO_ALLOWED_HOSTS=<IP_FIJA_DEL_SERVER>
-CORS_ALLOWED_ORIGINS=http://<IP_FIJA_DEL_SERVER>
-FRONTEND_URL=http://<IP_FIJA_DEL_SERVER>
+CORS_ALLOWED_ORIGINS=https://<IP_FIJA_DEL_SERVER>
+FRONTEND_URL=https://<IP_FIJA_DEL_SERVER>   # los enlaces de restablecimiento saldrán en https
 POSTGRES_PASSWORD=<generar y guardar en el gestor de la empresa>
 EMAIL_BACKEND=...   # solo si se quiere correo real; si no, dejar consola
 ```
 
-## 4. Levantar
+## 4. TLS (HTTPS) con certificado autofirmado
+
+Todo el tráfico (credenciales, tokens, tickets y adjuntos) viaja **cifrado**; el puerto 80 solo redirige a HTTPS. Los certificados viven en `./certs/` (fuera de git) y se generan **una vez** en el servidor:
+
+```bash
+cd ~/Soporte-Despacho
+./scripts/generar_certificado.sh <IP_FIJA> [hostname]   # p. ej.: ./scripts/generar_certificado.sh 192.168.1.50 sestel.local
+```
+
+**Confianza del certificado en cada equipo** (al ser autofirmado, sin esto los navegadores avisan):
+
+- *Windows (Edge/Chrome):* doble clic sobre `certs/cert.pem` → Instalar certificado → Siguientes → Colocar en **Certificados raíz de confianza** → Personal. (Alternativa: `certmgr.msc` → *Certificados raíz de confianza* → *Personales* → Importar.)
+- *Firefox:* Ajustes → Privacidad y seguridad → Ver certificados → Entidades de confianza → Importar → `certs/cert.pem` → marcar **TLS**.
+
+Si no hay certificados, nginx genera uno **temporal de 30 días (CN=localhost)** al arrancar: el sistema funciona con HTTPS pero los navegadores avisarán hasta confiar el definitivo.
+
+**Renovación (anual, cada 397 días):** repetir `generar_certificado.sh`, confiar el nuevo certificado en los equipos y `docker compose -f compose.prod.yaml up -d frontend`.
+
+## 5. Levantar
 
 ```bash
 cd ~/Soporte-Despacho
@@ -52,9 +70,9 @@ docker compose -f compose.prod.yaml up --build -d
 docker compose -f compose.prod.yaml exec api python manage.py createsuperuser
 ```
 
-Verificación: abrir `http://<IP_FIJA>` desde un equipo de la red y desde la VPN.
+Verificación: abrir `https://<IP_FIJA>` desde un equipo de la red y desde la VPN (sin avisos tras confiar el certificado). `http://<IP_FIJA>` debe redirigir a HTTPS.
 
-## 5. Arranque automático
+## 6. Arranque automático
 
 Todos los servicios llevan `restart: unless-stopped`, así que Docker los levanta tras un reboot **siempre que el demonio arranque**:
 
@@ -64,7 +82,7 @@ sudo systemctl enable docker
 
 No hace falta nada más (sin EventBridge ni programación externa).
 
-## 6. Automatización SLA
+## 7. Automatización SLA
 
 `process_ticket_automation` debe correr periódicamente (no hay Celery beat):
 
@@ -74,7 +92,7 @@ sudo crontab -e
 */5 * * * * cd /home/$USER/Soporte-Despacho && docker compose -f compose.prod.yaml exec -T api python manage.py process_ticket_automation >> /tmp/sla_automation.log 2>&1
 ```
 
-## 7. Respaldos (obligatorio)
+## 8. Respaldos (obligatorio)
 
 El Postgres vive en un volumen Docker; **un volumen sin respaldo es un solo punto de fallo**. Destino: almacenamiento interno (NAS/disco externo de la empresa).
 
@@ -93,14 +111,14 @@ Retención sugerida: 30 días diarios + 12 mensuales. **Restauración probada al
 
 Los adjuntos (volumen `media`) no viajan en `pg_dump`: respaldarlos aparte con `tar` del volumen o `docker cp`.
 
-## 8. Seguridad de red
+## 9. Seguridad de red
 
 - El server **no expone puertos a internet**. Solo la VPN da acceso externo.
-- Firewall local: `sudo ufw allow from <RED_INTERNA> to any port 80`, SSH solo desde la red/VPN: `sudo ufw allow OpenSSH && sudo ufw enable`.
-- En LAN el tráfico es HTTP (sin TLS). El acceso por VPN va cifrado dentro del túnel corporativo. Si la política exige TLS en LAN, instalar CA interna o proxy con certificado propio delante de nginx.
+- Firewall local: `sudo ufw allow from <RED_INTERNA> to any port 80 proto tcp` y `... port 443 proto tcp`, SSH solo desde la red/VPN: `sudo ufw allow OpenSSH && sudo ufw enable`.
+- Tanto en LAN como por VPN el tráfico va **cifrado con TLS** (HTTPS en 443; el puerto 80 solo redirige). El certificado autofirmado requiere confianza manual en cada equipo (sección 4).
 - Tras la instalación: **rotar la clave del superadmin local** (`superadmin`/`SestelRoot2026!` era solo para desarrollo).
 
-## 9. Actualizaciones (cada release)
+## 10. Actualizaciones (cada release)
 
 ```bash
 cd ~/Soporte-Despacho
@@ -110,7 +128,9 @@ docker compose -f compose.prod.yaml up --build -d
 docker compose -f compose.prod.yaml exec api python manage.py showmigrations   # migraciones aplicadas
 ```
 
-## 10. Corte de servicio esperado
+Los certificados de `./certs/` persisten entre checkouts (fuera de git): no hace falta regenerarlos en cada release.
+
+## 11. Corte de servicio esperado
 
 | Paso | Tiempo |
 |---|---|
@@ -119,8 +139,9 @@ docker compose -f compose.prod.yaml exec api python manage.py showmigrations   #
 | Verificación | ~5 min |
 | **Total** | **~15-20 min** (ventana sugerida: sábado temprano) |
 
-## 11. Riesgos del server local
+## 12. Riesgos del server local
 
 - **Sin redundancia:** si el server cae, el sistema cae. Mitigación: UPS + respaldos restaurables + PC de repuesto con el mismo stack.
 - **Disco sin cifrar:** si el server es robado, los datos viajan legibles. Habilitar LUKS/BitLocker si la política lo exige.
 - **Sin monitoreo externo:** no hay nube vigilando. Al menos revisar `docker compose ps` y el log de automatización SLA semanalmente.
+- **Certificado autofirmado:** requiere confianza manual en cada equipo y renovación anual (397 días). Si la empresa dispone de CA interna, basta con emitir el certificado con ella y sustituir `certs/cert.pem` y `certs/key.pem` (mismos nombres, mismos pasos).

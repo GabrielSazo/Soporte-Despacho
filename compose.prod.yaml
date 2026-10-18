@@ -45,6 +45,7 @@ services:
       EMAIL_USE_TLS: ${EMAIL_USE_TLS:-true}
       DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-noreply@sestel.local}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost}
+      SECURE_PROXY_SSL_HEADER: "true"   # nginx termina TLS y envía X-Forwarded-Proto
     volumes:
       - media:/app/media
       - static:/app/staticfiles
@@ -89,7 +90,9 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
+      - "443:443"
     volumes:
+      - ./certs:/etc/nginx/certs        # certificados TLS (fuera de git; scripts/generar_certificado.sh)
       - media:/srv/media:ro
       - static:/srv/static:ro
     depends_on:

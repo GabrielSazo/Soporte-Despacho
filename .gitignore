@@ -8,4 +8,5 @@ backend/media/
 backend/staticfiles/
 .env
 backend/.env
+/certs/
 Documento_Planificacion_Fase1_v1.2_Implementado.docx

@@ -165,6 +165,11 @@ EMAIL_USE_TLS = environment_flag("EMAIL_USE_TLS", True)
 EMAIL_USE_SSL = environment_flag("EMAIL_USE_SSL", False)
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "Soporte Despacho Tigo <noreply@sestel.local>")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://127.0.0.1:5175")
+
+# Detrás de nginx con TLS (producción): Django confía en X-Forwarded-Proto para
+# is_secure() → cookies seguras y /admin/ sin avisos. Solo con flag (dev no usa TLS).
+if environment_flag("SECURE_PROXY_SSL_HEADER", False):
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 PASSWORD_RESET_TIMEOUT = int(os.getenv("PASSWORD_RESET_TIMEOUT", "3600"))
 
 REDIS_URL = f"redis://{os.getenv('REDIS_HOST', 'redis')}:{os.getenv('REDIS_PORT', '6379')}/0"
