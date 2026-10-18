@@ -25,6 +25,15 @@ export default defineConfig({
         target: 'http://api:8000',
         changeOrigin: true,
       },
+      // Paridad con nginx de prod (nginx.conf): admin de Django y sus estáticos.
+      '/admin': {
+        target: 'http://api:8000',
+        changeOrigin: true,
+      },
+      '/static': {
+        target: 'http://api:8000',
+        changeOrigin: true,
+      },
     },
   },
 });
