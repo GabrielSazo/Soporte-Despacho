@@ -154,13 +154,14 @@ class LogoutView(APIView):
 
     def post(self, request):
         refresh = request.data.get("refresh")
-        if not refresh:
-            return Response({"detail": "Se requiere el token de actualización."}, status=status.HTTP_400_BAD_REQUEST)
-        try:
-            RefreshToken(refresh).blacklist()
-        except Exception:
-            return Response({"detail": "El token no es válido."}, status=status.HTTP_400_BAD_REQUEST)
-        # Cerrar sesión también invalida el access token vigente (sesión única).
+        if refresh:
+            # Blacklist best-effort: si el refresh ya estaba obsoleto/no válido,
+            # el cierre de sesión debe funcionar igual.
+            try:
+                RefreshToken(refresh).blacklist()
+            except Exception:
+                pass
+        # Cerrar sesión siempre invalida el access token vigente (sesión única).
         rotate_session(request.user)
         return Response(status=status.HTTP_204_NO_CONTENT)
 

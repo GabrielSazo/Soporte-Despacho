@@ -301,6 +301,20 @@ class SingleSessionTests(APITestCase):
         reuse = self.client.post(reverse("token_refresh"), {"refresh": login.data["refresh"]}, format="json")
         self.assertEqual(reuse.status_code, 401)
 
+    def test_logout_with_stale_refresh_still_closes_session(self):
+        """El logout es idempotente: un refresh ya rotado no impide cerrar la sesión."""
+        login = self._login()
+        # Rota el refresh (queda en lista negra el original).
+        rotated = self.client.post(reverse("token_refresh"), {"refresh": login.data["refresh"]}, format="json")
+        self.assertEqual(rotated.status_code, 200)
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {rotated.data['access']}")
+        logout = self.client.post(reverse("logout"), {"refresh": login.data["refresh"]}, format="json")
+        self.assertEqual(logout.status_code, 204)
+
+        # El access vigente queda invalidado aunque el refresh enviado estuviera obsoleto.
+        self.assertEqual(self._me(rotated.data["access"]).status_code, 401)
+
     def test_tokens_carry_the_session_claim(self):
         from rest_framework_simplejwt.tokens import AccessToken
 
