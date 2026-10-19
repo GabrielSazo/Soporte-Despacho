@@ -422,3 +422,71 @@ class CatalogVisibilityTests(APITestCase):
         self.client.force_authenticate(self.sin_grupos)
         self.assertEqual(_items(self.client.get("/api/groups/").json()), [])
         self.assertEqual(_items(self.client.get("/api/teams/").json()), [])
+
+class UserEditSecurityTests(APITestCase):
+    """RF-045: la edicion de usuarios no toca credenciales; correo y
+    restablecimiento de clave son exclusivos del administrador."""
+
+    def setUp(self):
+        group, _ = WorkGroup.objects.get_or_create(name="Tigo", defaults={"code": "tigo"})
+        self.team, _ = Team.objects.get_or_create(code="soporte-a", defaults={"group": group, "name": "Soporte A"})
+        self.admin = User.objects.create_user(
+            username="admin-edicion@sestel.local", email="admin-edicion@sestel.local",
+            password="Sestel2026!", role=User.Role.ADMIN,
+        )
+        self.supervisor = User.objects.create_user(
+            username="superv-edicion@sestel.local", email="superv-edicion@sestel.local",
+            password="Sestel2026!", role=User.Role.SUPERVISOR,
+        )
+        self.supervisor.managed_groups.set([group])
+        self.target = User.objects.create_user(
+            username="despacho-edicion@sestel.local", email="despacho-edicion@sestel.local",
+            password="Sestel2026!", role=User.Role.DISPATCHER,
+        )
+        self.target.teams.set([self.team])
+
+    def test_supervisor_no_puede_cambiar_password_por_patch(self):
+        self.client.force_authenticate(self.supervisor)
+        response = self.client.patch(
+            reverse("user-detail", args=[self.target.pk]),
+            {"password": "NuevaClave2026!"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.target.refresh_from_db()
+        self.assertTrue(self.target.check_password("Sestel2026!"))
+
+    def test_supervisor_no_puede_cambiar_correo(self):
+        self.client.force_authenticate(self.supervisor)
+        response = self.client.patch(
+            reverse("user-detail", args=[self.target.pk]),
+            {"email": "nuevo-correo@sestel.local"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.target.refresh_from_db()
+        self.assertEqual(self.target.email, "despacho-edicion@sestel.local")
+
+    def test_supervisor_edita_con_el_mismo_correo(self):
+        # El frontend siempre envia el correo; con valor sin cambios la edicion
+        # normal del supervisor debe seguir funcionando.
+        self.client.force_authenticate(self.supervisor)
+        response = self.client.patch(
+            reverse("user-detail", args=[self.target.pk]),
+            {"email": "despacho-edicion@sestel.local", "first_name": "NombreEditado"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.target.refresh_from_db()
+        self.assertEqual(self.target.first_name, "NombreEditado")
+
+    def test_admin_sigue_pudiendo_restablecer_password(self):
+        self.client.force_authenticate(self.admin)
+        response = self.client.patch(
+            reverse("user-detail", args=[self.target.pk]),
+            {"password": "NuevaClave2026!"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.target.refresh_from_db()
+        self.assertTrue(self.target.check_password("NuevaClave2026!"))

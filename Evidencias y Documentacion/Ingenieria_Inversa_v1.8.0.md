@@ -116,6 +116,7 @@ Productivo (v1.8.0): **server local Ubuntu LTS, IP fija en LAN**; sin exposició
 - RF-032 Notificaciones por rol con toast+sonido+navegador, campana, título parpadeante, favicon con insignia.
 - RF-033 Detalle en vivo por WS; pegar Excel como texto/imagen según contexto.
 - RF-044 **Mostrar/ocultar contraseña (nuevo v1.8.10):** los cinco campos de clave de la aplicación (login, restablecimiento por enlace de correo, modal de usuario en Administración y los dos del restablecimiento por admin) incluyen un botón de ojo que alterna entre puntos y texto visible, con etiqueta accesible "Mostrar contraseña" / "Ocultar contraseña"; el valor, el autocomplete y las validaciones no cambian.
+- RF-045 **Cuentas blindadas en edición (nuevo v1.8.11):** la edición de usuario ya no incluye el campo de contraseña para ningún rol (la clave solo se restablece con el botón «Contraseña», hoy exclusivo de ADMIN, o por el propio usuario con «Olvidé mi contraseña») y el correo solo lo puede cambiar un administrador (para supervisor el campo queda de solo lectura); la API rechaza con 400 el `password` o un cambio real de `email` en `PATCH /users/{id}` cuando el actor no es administrador, y conserva las reglas previas (admin no cambia la clave de otro admin ni la del superadmin).
 - RF-034 Tema claro/oscuro, paleta Tigo (#001EB4/#667EEA), responsive.
 
 ### RF-AUD — Auditoría y superadmin
@@ -184,6 +185,7 @@ Productivo (v1.8.0): **server local Ubuntu LTS, IP fija en LAN**; sin exposició
 - US-046 Como administrador quiero que cada rol solo reciba los datos que su pantalla utiliza, para que un perfil de despacho no pueda consultar catálogos de otros grupos ni el panel de resumen vía API. [RF-004g]
 - US-047 Como despacho quiero que la bandeja muestre páginas de 25 tickets y que el sistema no descargue el histórico completo en cada carga. [RF-043]
 - US-048 Como usuario quiero poder ver la contraseña que estoy escribiendo para comprobar que está bien antes de enviarla. [RF-044]
+- US-049 Como administrador quiero que solo los administradores puedan restablecer contraseñas y cambiar el correo de las cuentas, y que la edición de usuarios no incluya la contraseña, para cerrar esa vía de cambio de credenciales. [RF-045]
 
 ## 7. Modelo de datos (resumen)
 
@@ -246,12 +248,13 @@ Migraciones en `dev`: `tickets` hasta `0012_ai_agent_config`; `accounts` hasta `
 | v1.8.7 | **Ollama como servicio en prod** — servicio `ollama` en `compose.prod.yaml` (volumen `ollama_models`, puerto 11434 no publicado; `api`/`worker` lo alcanzan por red interna), env de IA parametrizado por `.env` y Runbook §6 con la descarga de modelos y la activación por doble interruptor | Tag publicado |
 | v1.8.8 | **Agente IA ~3× más rápido (medido con imagen y prompts reales)** — revisor con `think:false` (qwen3:4b directo al JSON: 54 s → 7 s), espera entre etapas 60→20 s y `OLLAMA_KEEP_ALIVE=30m` en el servicio Ollama; análisis completo ~2 min → **~40-60 s**. moondream descartado como alternativa (más lento y salida vacía en CPU) | Tag publicado |
 | v1.8.9 | **Bandeja paginada y acotada (RF-043)** — 25 tickets por página con paginador sobre la lista ya ordenada por estado + prioridad (la página 1 siempre es lo más urgente; cambiar filtro u orden vuelve a la página 1); la API por defecto deja de cargar el histórico: todos los no cerrados (cualquier antigüedad) + cerrados de los últimos 30 días, con `?todo=1` para el histórico completo. Consumo del listado estable con el tiempo (RNF-02) | Tag publicado |
-| v1.8.10 | **Mostrar/ocultar contraseña (RF-044)** — botón de ojo en los 5 campos de clave (login, restablecimiento por enlace de correo, modal de usuario en Administración y restablecimiento por admin) que alterna entre puntos y texto visible con etiqueta accesible; cambio solo de frontend | **Release actual** |
+| v1.8.10 | **Mostrar/ocultar contraseña (RF-044)** — botón de ojo en los 5 campos de clave (login, restablecimiento por enlace de correo, modal de usuario en Administración y restablecimiento por admin) que alterna entre puntos y texto visible con etiqueta accesible; cambio solo de frontend | Tag publicado |
+| v1.8.11 | **Cuentas blindadas en edición (RF-045)** — el modal de edición ya no ofrece contraseña (ningún rol), el correo queda de solo lectura para supervisores y el botón «Contraseña» es exclusivo de ADMIN (antes también un supervisor podía restablecer claves); la API rechaza `password` o un cambio de `email` en PATCH de perfiles no administradores. Solo frontend+backend, sin migraciones | **Release actual** |
 
 ## 12. Despliegue y evidencias
 
 - Prod (v1.8.0): server local Ubuntu, IP fija, `docker compose -f compose.prod.yaml up --build -d`, `pg_dump` diario al NAS + previo a cada release, tags por versión. **Runbook: `Runbook_Servidor_Local.md`** (instalación, `.env`, TLS, IA/Ollama, arranque auto, cron SLA, backups, firewall, releases).
 - Dev: `http://localhost`, `docker compose up --build -d`.
-- Pruebas: `manage.py test accounts tickets` **25/25 OK** en v1.8.0 (Django 5.2.18, verificado en Docker y Python local); **40/40 OK en v1.8.4** (RF-004g incluida); **42/42 OK en v1.8.9** (RF-043: ventana de la bandeja con pruebas de cerrado viejo/reciente y `?todo=1`); `npm run build` verde.
+- Pruebas: `manage.py test accounts tickets` **25/25 OK** en v1.8.0 (Django 5.2.18, verificado en Docker y Python local); **40/40 OK en v1.8.4** (RF-004g incluida); **42/42 OK en v1.8.9** (RF-043: ventana de la bandeja con pruebas de cerrado viejo/reciente y `?todo=1`); **45/45 OK en v1.8.11** (RF-045: contraseña y correo blindados en edición de usuarios); `npm run build` verde.
 - Evidencias: `Evidencias y Documentacion/` (este documento, `Manual_Usuario.md/.docx`, `Onboarding_Desde_Cero.md`, `Runbook_Servidor_Local.md`, `REPORTE_5/6*.xlsx`, `REPORTE_7*.xlsx`).
 - Experimentos no mergeados: `test/fix-ocr` (RapidOCR).

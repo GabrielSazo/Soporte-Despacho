@@ -363,6 +363,14 @@ class UserViewSet(viewsets.ModelViewSet):
         if target.pk == requester.pk and serializer.validated_data.get("is_active") is False:
             raise ValidationError({"is_active": "No puedes desactivar tu propia cuenta."})
         if not requester.is_administrator:
+            # RF-045: la edición no toca credenciales. La contraseña solo la
+            # restablece un administrador (o el propio usuario con «Olvidé mi
+            # contraseña») y el correo solo lo cambia administración.
+            if "password" in serializer.validated_data:
+                raise ValidationError({"password": "Solo los administradores pueden restablecer contraseñas; el usuario puede hacerlo con «Olvidé mi contraseña»."})
+            new_email = serializer.validated_data.get("email")
+            if new_email is not None and new_email.strip().lower() != target.email.lower():
+                raise ValidationError({"email": "Solo un administrador puede cambiar el correo de una cuenta."})
             # Supervisor solo puede tocar usuarios de sus grupos y nunca cuentas ADMIN
             if target.role == User.Role.ADMIN or target.is_superuser:
                 raise ValidationError({"detail": "Solo un administrador puede modificar cuentas de administración."})
