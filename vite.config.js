@@ -26,13 +26,15 @@ export default defineConfig({
         changeOrigin: true,
       },
       // Paridad con nginx de prod (nginx.conf): admin de Django y sus estáticos.
+      // changeOrigin: false conserva el Host "localhost" — con true Django ve
+      // "api:8000" y el login admin muere en verificación CSRF (403).
       '/admin': {
         target: 'http://api:8000',
-        changeOrigin: true,
+        changeOrigin: false,
       },
       '/static': {
         target: 'http://api:8000',
-        changeOrigin: true,
+        changeOrigin: false,
       },
     },
   },
