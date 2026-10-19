@@ -115,6 +115,7 @@ Productivo (v1.8.0): **server local Ubuntu LTS, IP fija en LAN**; sin exposició
 ### RF-NOT — Notificaciones y UX
 - RF-032 Notificaciones por rol con toast+sonido+navegador, campana, título parpadeante, favicon con insignia.
 - RF-033 Detalle en vivo por WS; pegar Excel como texto/imagen según contexto.
+- RF-044 **Mostrar/ocultar contraseña (nuevo v1.8.10):** los cinco campos de clave de la aplicación (login, restablecimiento por enlace de correo, modal de usuario en Administración y los dos del restablecimiento por admin) incluyen un botón de ojo que alterna entre puntos y texto visible, con etiqueta accesible "Mostrar contraseña" / "Ocultar contraseña"; el valor, el autocomplete y las validaciones no cambian.
 - RF-034 Tema claro/oscuro, paleta Tigo (#001EB4/#667EEA), responsive.
 
 ### RF-AUD — Auditoría y superadmin
@@ -182,6 +183,7 @@ Productivo (v1.8.0): **server local Ubuntu LTS, IP fija en LAN**; sin exposició
 - US-045 Como usuario quiero que al cerrar el navegador la sesión no quede viva en el equipo, sin que por eso se pierda al recargar la página. [RF-004f]
 - US-046 Como administrador quiero que cada rol solo reciba los datos que su pantalla utiliza, para que un perfil de despacho no pueda consultar catálogos de otros grupos ni el panel de resumen vía API. [RF-004g]
 - US-047 Como despacho quiero que la bandeja muestre páginas de 25 tickets y que el sistema no descargue el histórico completo en cada carga. [RF-043]
+- US-048 Como usuario quiero poder ver la contraseña que estoy escribiendo para comprobar que está bien antes de enviarla. [RF-044]
 
 ## 7. Modelo de datos (resumen)
 
@@ -243,7 +245,8 @@ Migraciones en `dev`: `tickets` hasta `0012_ai_agent_config`; `accounts` hasta `
 | v1.8.6 | **Orden de la bandeja por estado + prioridad** — cerrados siempre al fondo y, dentro de cada estado, prioridad (Crítica→Alta→Media→Baja); selector renombrado a "estado + prioridad" (solo frontend) | Tag publicado |
 | v1.8.7 | **Ollama como servicio en prod** — servicio `ollama` en `compose.prod.yaml` (volumen `ollama_models`, puerto 11434 no publicado; `api`/`worker` lo alcanzan por red interna), env de IA parametrizado por `.env` y Runbook §6 con la descarga de modelos y la activación por doble interruptor | Tag publicado |
 | v1.8.8 | **Agente IA ~3× más rápido (medido con imagen y prompts reales)** — revisor con `think:false` (qwen3:4b directo al JSON: 54 s → 7 s), espera entre etapas 60→20 s y `OLLAMA_KEEP_ALIVE=30m` en el servicio Ollama; análisis completo ~2 min → **~40-60 s**. moondream descartado como alternativa (más lento y salida vacía en CPU) | Tag publicado |
-| v1.8.9 | **Bandeja paginada y acotada (RF-043)** — 25 tickets por página con paginador sobre la lista ya ordenada por estado + prioridad (la página 1 siempre es lo más urgente; cambiar filtro u orden vuelve a la página 1); la API por defecto deja de cargar el histórico: todos los no cerrados (cualquier antigüedad) + cerrados de los últimos 30 días, con `?todo=1` para el histórico completo. Consumo del listado estable con el tiempo (RNF-02) | **Release actual** |
+| v1.8.9 | **Bandeja paginada y acotada (RF-043)** — 25 tickets por página con paginador sobre la lista ya ordenada por estado + prioridad (la página 1 siempre es lo más urgente; cambiar filtro u orden vuelve a la página 1); la API por defecto deja de cargar el histórico: todos los no cerrados (cualquier antigüedad) + cerrados de los últimos 30 días, con `?todo=1` para el histórico completo. Consumo del listado estable con el tiempo (RNF-02) | Tag publicado |
+| v1.8.10 | **Mostrar/ocultar contraseña (RF-044)** — botón de ojo en los 5 campos de clave (login, restablecimiento por enlace de correo, modal de usuario en Administración y restablecimiento por admin) que alterna entre puntos y texto visible con etiqueta accesible; cambio solo de frontend | **Release actual** |
 
 ## 12. Despliegue y evidencias
 

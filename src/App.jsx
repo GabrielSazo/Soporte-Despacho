@@ -126,6 +126,19 @@ function PasswordChecklist({ value }) {
   );
 }
 
+// RF-044: campo de clave con botón de ojo para mostrar u ocultar lo que se escribe.
+function PasswordToggle({ ...props }) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <span className="password-wrap">
+      <input {...props} type={visible ? "text" : "password"} />
+      <button type="button" className="password-eye" aria-label={visible ? "Ocultar contraseña" : "Mostrar contraseña"} onClick={() => setVisible((v) => !v)}>
+        <Icon name={visible ? "eyeOff" : "eye"} size={16} />
+      </button>
+    </span>
+  );
+}
+
 function avatarClass(name = "") {
   if (name.includes("Andrea")) return "avatar-andrea";
   if (name.includes("Mario")) return "avatar-mario";
@@ -1867,7 +1880,7 @@ function UserFormModal({ onClose, onSave, teams, groups, user }) {
             <label className="field field-wide"><span>Correo institucional <b>*</b></span><input required type="email" name="email" value={form.email} onChange={updateField} placeholder="nombre@empresa.com" /></label>
             <label className="field"><span>Rol <b>*</b></span><select name="role" value={form.role} onChange={updateField}><option value="DESPACHADOR">Despachador</option><option value="SOPORTE">Agente de soporte</option><option value="SUPERVISOR">Supervisor</option><option value="ADMIN">Administrador</option></select></label>
             {form.role === "SUPERVISOR" ? <label className="field field-wide"><span>Grupos supervisados <b>*</b></span><div className="teams-checklist compact">{groups.map((g) => <label key={g.id} className="team-check"><input type="checkbox" checked={form.managedGroups.includes(String(g.id))} onChange={() => toggleGroup(g.id)} /><span>{g.name} <small>· {g.code}</small></span></label>)}{groups.length === 0 && <small>Sin grupos registrados</small>}</div></label> : <label className="field field-wide"><span>Grupos {(form.role !== "ADMIN") && <b>*</b>}</span><div className="teams-checklist compact">{groups.map((g) => { const groupTeams = teams.filter((t) => String(t.group) === String(g.id) || String(t.group_detail?.id) === String(g.id)); if (!groupTeams.length) return null; const allSelected = groupTeams.every((t) => form.teams.includes(String(t.id))); return <label key={g.id} className="team-check"><input type="checkbox" checked={allSelected} onChange={() => toggleGroupTeams(g.id)} /><span>{g.name} <small>· {g.code}</small></span></label>; })}{groups.length === 0 && <small>Sin grupos registrados</small>}</div></label>}
-            <label className="field field-wide"><span>{isNew ? "Contraseña temporal" : "Nueva contraseña"}</span><input minLength="10" name="password" type="password" value={form.password} onChange={updateField} placeholder={isNew ? "Vacía para enviar invitación por correo" : "Déjalo vacío para conservarla"} /><PasswordChecklist value={form.password} /></label>
+            <label className="field field-wide"><span>{isNew ? "Contraseña temporal" : "Nueva contraseña"}</span><PasswordToggle minLength="10" name="password" value={form.password} onChange={updateField} placeholder={isNew ? "Vacía para enviar invitación por correo" : "Déjalo vacío para conservarla"} /><PasswordChecklist value={form.password} /></label>
             {isNew && !form.password && <p className="form-info" role="status"><Icon name="shield" size={16} /> Sin contraseña se enviará invitación por correo para definirla.</p>}
           </div>
           <label className="active-user-toggle"><input checked={form.isActive} name="isActive" type="checkbox" onChange={updateField} /><span><i /></span><div><strong>Usuario activo</strong><small>Puede iniciar sesión y recibir asignaciones.</small></div></label>
@@ -1960,7 +1973,7 @@ function PasswordResetModal({ onClose, onSave, user }) {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   async function submit(e) { e.preventDefault(); if (!isStrongPassword(password)) { setError("La contraseña no cumple la política (10+, mayúscula, minúscula y número)."); return; } if (password !== confirm) { setError("Las contraseñas no coinciden."); return; } setSubmitting(true); setError(""); try { await onSave(user, password); } catch (err) { setError(err.message || "No fue posible restablecer la contraseña."); setSubmitting(false); } }
-  return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="ticket-modal user-modal" role="dialog" aria-modal="true" aria-labelledby="pwd-title" onMouseDown={(e) => e.stopPropagation()}><header className="modal-header"><div><p className="eyebrow">Seguridad</p><h2 id="pwd-title">Restablecer contraseña</h2><p>Define una nueva contraseña para {user.name} ({user.email}).</p></div><button className="icon-button" type="button" aria-label="Cerrar" onClick={onClose}><Icon name="close" /></button></header><form onSubmit={submit}><div className="form-grid user-form-grid"><label className="field field-wide"><span>Nueva contraseña <b>*</b></span><input autoFocus required minLength="10" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mínimo 10 caracteres" /><PasswordChecklist value={password} /></label><label className="field field-wide"><span>Confirmar contraseña <b>*</b></span><input required minLength="10" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Repite la contraseña" /></label></div>{error && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}<footer className="modal-actions"><button className="secondary-button" disabled={submitting} type="button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={submitting} type="submit"><Icon name="shield" size={18} /> {submitting ? "Guardando..." : "Restablecer"}</button></footer></form></section></div>;
+  return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="ticket-modal user-modal" role="dialog" aria-modal="true" aria-labelledby="pwd-title" onMouseDown={(e) => e.stopPropagation()}><header className="modal-header"><div><p className="eyebrow">Seguridad</p><h2 id="pwd-title">Restablecer contraseña</h2><p>Define una nueva contraseña para {user.name} ({user.email}).</p></div><button className="icon-button" type="button" aria-label="Cerrar" onClick={onClose}><Icon name="close" /></button></header><form onSubmit={submit}><div className="form-grid user-form-grid"><label className="field field-wide"><span>Nueva contraseña <b>*</b></span><PasswordToggle autoFocus required minLength="10" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mínimo 10 caracteres" /><PasswordChecklist value={password} /></label><label className="field field-wide"><span>Confirmar contraseña <b>*</b></span><PasswordToggle required minLength="10" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Repite la contraseña" /></label></div>{error && <p className="form-submit-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}<footer className="modal-actions"><button className="secondary-button" disabled={submitting} type="button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={submitting} type="submit"><Icon name="shield" size={18} /> {submitting ? "Guardando..." : "Restablecer"}</button></footer></form></section></div>;
 }
 
 function PageHeader({ eyebrow, title, description, action }) {
@@ -2641,7 +2654,7 @@ function LoginScreen({ brand, onLogin, onToggleTheme, theme, notice }) {
           <h2>Inicia sesión</h2>
           <p className="login-copy">Ingresa con el perfil asignado para acceder a tu operación.</p>
           <label className="login-field"><span>Correo institucional</span><input autoComplete="email" required type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="nombre@empresa.com" /></label>
-          <label className="login-field"><span>Contraseña</span><input autoComplete="current-password" required type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Tu contraseña" /></label>
+          <label className="login-field"><span>Contraseña</span><PasswordToggle autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Tu contraseña" /></label>
           <div className="login-forgot"><button type="button" className="text-button" onClick={openReset}>¿Olvidaste tu contraseña?</button></div>
           {notice && <p className="form-info" role="status"><Icon name="shield" size={16} /> Se cerró la sesión al cerrar el navegador. Inicia sesión de nuevo.</p>}
           {error && <p className="login-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}
@@ -2712,8 +2725,8 @@ function PasswordResetPage({ brand, theme, onToggleTheme }) {
             <p className="login-copy">Define tu nueva clave. El enlace es válido por 1 hora y de un solo uso.</p>
             <input type="hidden" value={uid} />
             <input type="hidden" value={token} />
-            <label className="login-field"><span>Nueva contraseña</span><input required minLength="10" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Mínimo 10 caracteres" /><PasswordChecklist value={newPassword} /></label>
-            <label className="login-field"><span>Confirmar contraseña</span><input required minLength="10" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Repite la clave" /></label>
+            <label className="login-field"><span>Nueva contraseña</span><PasswordToggle required minLength="10" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Mínimo 10 caracteres" /><PasswordChecklist value={newPassword} /></label>
+            <label className="login-field"><span>Confirmar contraseña</span><PasswordToggle required minLength="10" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Repite la clave" /></label>
             {error && <p className="login-error" role="alert"><Icon name="alert" size={16} /> {error}</p>}
             <button className="primary-button login-submit" disabled={submitting} type="submit">{submitting ? "Guardando..." : "Restablecer clave"}</button>
             <a className="text-button" href="/" style={{ display: "inline-flex", marginTop: "12px", justifyContent: "center", width: "100%", textDecoration: "none" }}>Volver al inicio de sesión</a>
