@@ -175,13 +175,13 @@ Productivo (v1.8.0): **server local Ubuntu LTS, IP fija en LAN**; sin exposició
 - US-038 Como admin quiero encender/apagar el agente IA desde un panel para probarlo sin arriesgar la operación. [RF-039/040]
 - US-039 Como admin quiero decidir si la IA **aplica los cambios sola** (con umbral y frenos configurables) o si solo sugiere y decide el humano. [RF-039/041]
 - US-040 Como admin quiero que nadie cambie la clave de otro admin ni la del superadmin para blindar la escalada de privilegios. [RF-026b]
-- US-041 Como despacho quiero que la bandeja muestre páginas de 25 tickets y que el sistema no descargue el histórico completo en cada carga. [RF-043]
 - US-041 Como soporte quiero cambiarme solo entre Soporte A/B y los demás perfiles no toquen su equipo. [RF-026b]
 - US-042 Como equipo quiero desplegar en un server Ubuntu local con backups internos y acceso por VPN. [RNF-04/05/08]
 - US-043 Como administrador quiero que un solo login quede activo por usuario, para que una sesión olvidada en otro equipo o pestaña no siga viva. [RF-004d]
 - US-044 Como usuario quiero que una pestaña nueva abra con mi sesión activa y que al cerrar sesión se cierren todas, sin reingresar pestaña por pestaña. [RF-004e]
 - US-045 Como usuario quiero que al cerrar el navegador la sesión no quede viva en el equipo, sin que por eso se pierda al recargar la página. [RF-004f]
 - US-046 Como administrador quiero que cada rol solo reciba los datos que su pantalla utiliza, para que un perfil de despacho no pueda consultar catálogos de otros grupos ni el panel de resumen vía API. [RF-004g]
+- US-047 Como despacho quiero que la bandeja muestre páginas de 25 tickets y que el sistema no descargue el histórico completo en cada carga. [RF-043]
 
 ## 7. Modelo de datos (resumen)
 
