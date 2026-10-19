@@ -70,6 +70,7 @@ Productivo (v1.8.0): **server local Ubuntu LTS, IP fija en LAN**; sin exposició
 - RF-006 Campos: Contrato (CLIENTE) u OT (TECNICO), solo números; cliente, nodo, descripción, prioridad (Media automática al crear).
 - RF-007 Duplicados: no repetir Contrato ni OT en tickets abiertos; bloquea y enlaza al INC abierto.
 - RF-008/009/010 Tabla con Contrato/OT separados, búsqueda, orden desplegable (**defecto: estado + prioridad** — los tickets cerrados van siempre al fondo; dentro de cada estado, prioridad Crítica→Alta→Media→Baja y a igual prioridad las más antiguas; desde v1.8.5 y regla de cerrados desde v1.8.6), filtros por rol.
+- RF-043 **Bandeja paginada y acotada (nuevo v1.8.9):** la tabla muestra **25 tickets por página** con paginador ("X tickets · Página N de M", ‹Anterior / Siguiente) sobre la lista **ya ordenada por la cascada global** (la página 1 siempre contiene lo más urgente); cambiar orden, búsqueda o filtro regresa a la página 1. La API, por defecto, **no carga el histórico**: se queda con todos los tickets no cerrados (cualquier antigüedad — un pendiente viejo sigue siendo trabajo) + los cerrados de los últimos 30 días; `?todo=1` desactiva la ventana y el histórico completo vive en los **Informes**. Así el consumo del listado no crece con el tiempo (RNF-02).
 - RF-011 Columna Tiempo total (creado→resuelto o al momento) en `[h]:mm:ss`.
 - RF-012 Tomar, iniciar atención, liberar, reasignar dentro del grupo, resolver con notas (mín 8). Sin reasignar en validación.
 - RF-012b Rechazar con motivo obligatorio + evidencia opcional (lista y detalle, pegar Ctrl+V).
@@ -174,6 +175,7 @@ Productivo (v1.8.0): **server local Ubuntu LTS, IP fija en LAN**; sin exposició
 - US-038 Como admin quiero encender/apagar el agente IA desde un panel para probarlo sin arriesgar la operación. [RF-039/040]
 - US-039 Como admin quiero decidir si la IA **aplica los cambios sola** (con umbral y frenos configurables) o si solo sugiere y decide el humano. [RF-039/041]
 - US-040 Como admin quiero que nadie cambie la clave de otro admin ni la del superadmin para blindar la escalada de privilegios. [RF-026b]
+- US-041 Como despacho quiero que la bandeja muestre páginas de 25 tickets y que el sistema no descargue el histórico completo en cada carga. [RF-043]
 - US-041 Como soporte quiero cambiarme solo entre Soporte A/B y los demás perfiles no toquen su equipo. [RF-026b]
 - US-042 Como equipo quiero desplegar en un server Ubuntu local con backups internos y acceso por VPN. [RNF-04/05/08]
 - US-043 Como administrador quiero que un solo login quede activo por usuario, para que una sesión olvidada en otro equipo o pestaña no siga viva. [RF-004d]
@@ -240,12 +242,13 @@ Migraciones en `dev`: `tickets` hasta `0012_ai_agent_config`; `accounts` hasta `
 | v1.8.5 | **Bandeja ordenada por prioridad por defecto** (antes "recientes"; el selector conserva recientes/antiguos) + ingeniería inversa delimina los modos de la IA: **cambio automático posible y configurable** (apagado en el arranque, con frenos: umbral, servicios, allow_lower, cooldown 24 h) | Tag publicado |
 | v1.8.6 | **Orden de la bandeja por estado + prioridad** — cerrados siempre al fondo y, dentro de cada estado, prioridad (Crítica→Alta→Media→Baja); selector renombrado a "estado + prioridad" (solo frontend) | Tag publicado |
 | v1.8.7 | **Ollama como servicio en prod** — servicio `ollama` en `compose.prod.yaml` (volumen `ollama_models`, puerto 11434 no publicado; `api`/`worker` lo alcanzan por red interna), env de IA parametrizado por `.env` y Runbook §6 con la descarga de modelos y la activación por doble interruptor | Tag publicado |
-| v1.8.8 | **Agente IA ~3× más rápido (medido con imagen y prompts reales)** — revisor con `think:false` (qwen3:4b directo al JSON: 54 s → 7 s), espera entre etapas 60→20 s y `OLLAMA_KEEP_ALIVE=30m` en el servicio Ollama; análisis completo ~2 min → **~40-60 s**. moondream descartado como alternativa (más lento y salida vacía en CPU) | **Release actual** |
+| v1.8.8 | **Agente IA ~3× más rápido (medido con imagen y prompts reales)** — revisor con `think:false` (qwen3:4b directo al JSON: 54 s → 7 s), espera entre etapas 60→20 s y `OLLAMA_KEEP_ALIVE=30m` en el servicio Ollama; análisis completo ~2 min → **~40-60 s**. moondream descartado como alternativa (más lento y salida vacía en CPU) | Tag publicado |
+| v1.8.9 | **Bandeja paginada y acotada (RF-043)** — 25 tickets por página con paginador sobre la lista ya ordenada por estado + prioridad (la página 1 siempre es lo más urgente; cambiar filtro u orden vuelve a la página 1); la API por defecto deja de cargar el histórico: todos los no cerrados (cualquier antigüedad) + cerrados de los últimos 30 días, con `?todo=1` para el histórico completo. Consumo del listado estable con el tiempo (RNF-02) | **Release actual** |
 
 ## 12. Despliegue y evidencias
 
 - Prod (v1.8.0): server local Ubuntu, IP fija, `docker compose -f compose.prod.yaml up --build -d`, `pg_dump` diario al NAS + previo a cada release, tags por versión. **Runbook: `Runbook_Servidor_Local.md`** (instalación, `.env`, TLS, IA/Ollama, arranque auto, cron SLA, backups, firewall, releases).
 - Dev: `http://localhost`, `docker compose up --build -d`.
-- Pruebas: `manage.py test accounts tickets` **25/25 OK** en v1.8.0 (Django 5.2.18, verificado en Docker y Python local); **40/40 OK en v1.8.4** (RF-004g incluida); `npm run build` verde.
+- Pruebas: `manage.py test accounts tickets` **25/25 OK** en v1.8.0 (Django 5.2.18, verificado en Docker y Python local); **40/40 OK en v1.8.4** (RF-004g incluida); **42/42 OK en v1.8.9** (RF-043: ventana de la bandeja con pruebas de cerrado viejo/reciente y `?todo=1`); `npm run build` verde.
 - Evidencias: `Evidencias y Documentacion/` (este documento, `Manual_Usuario.md/.docx`, `Onboarding_Desde_Cero.md`, `Runbook_Servidor_Local.md`, `REPORTE_5/6*.xlsx`, `REPORTE_7*.xlsx`).
 - Experimentos no mergeados: `test/fix-ocr` (RapidOCR).

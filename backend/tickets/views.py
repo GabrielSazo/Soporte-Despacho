@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.db.models import Count, F, Q
 from django.utils import timezone
 from rest_framework import status, viewsets
@@ -146,6 +148,23 @@ class TicketViewSet(viewsets.ModelViewSet):
         if self.action == "create":
             return TicketCreateSerializer
         return TicketSerializer
+
+    # RF-043: ventana por defecto de la bandeja. El listado NO carga el histórico
+    # completo (a largo sería cada vez más pesado): se queda con todo lo no cerrado
+    # (cualquier antigüedad — un pendiente viejo sigue siendo trabajo) + los cerrados
+    # de los últimos días. `?todo=1` la desactiva; el histórico vive en Informes.
+    BANDEJA_CERRADOS_DIAS = 30
+
+    def list(self, request, *args, **kwargs):
+        if request.query_params.get("todo") in {"1", "true", "yes"}:
+            return super().list(request, *args, **kwargs)
+        limite = timezone.now() - timedelta(days=self.BANDEJA_CERRADOS_DIAS)
+        queryset = self.filter_queryset(self.get_queryset()).filter(
+            ~Q(status=Ticket.Status.CLOSED) | Q(closed_at__gte=limite) | Q(updated_at__gte=limite)
+        )
+        page = self.paginate_queryset(queryset)
+        serializer = self.get_serializer(page, many=True)
+        return self.get_paginated_response(serializer.data)
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)

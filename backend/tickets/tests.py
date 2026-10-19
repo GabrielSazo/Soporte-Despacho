@@ -324,3 +324,79 @@ class DashboardAccessTests(APITestCase):
                 self.client.force_authenticate(self.users[role])
                 response = self.client.get("/api/dashboard/")
                 self.assertEqual(response.status_code, 200)
+
+class BandejaVentanaTests(APITestCase):
+    """RF-043: la bandeja por defecto no trae el historico de cerrados (ventana de
+    30 dias) pero nunca pierde los pendientes viejos; ?todo=1 lo trae todo."""
+
+    def setUp(self):
+        group, _ = WorkGroup.objects.get_or_create(name="Tigo", defaults={"code": "tigo"})
+        self.team, _ = Team.objects.get_or_create(group=group, name="FTTH Norte", defaults={"code": "ftth-norte"})
+        self.dispatcher = User.objects.create_user(
+            username="despacho-ventana@sestel.local",
+            email="despacho-ventana@sestel.local",
+            password="Sestel2026!",
+            role=User.Role.DISPATCHER,
+        )
+        self.dispatcher.teams.set([self.team])
+        self.client.force_authenticate(self.dispatcher)
+
+    def _crear(self, contrato):
+        response = self.client.post(
+            "/api/tickets/",
+            {
+                "title": f"Ticket {contrato}",
+                "description": "Prueba de ventana de la bandeja.",
+                "category": Ticket.Category.FTTH,
+                "priority": Ticket.Priority.HIGH,
+                "contrato": contrato,
+                "numero_ot": "",
+                "cliente_nombre": "Cliente Prueba",
+                "nodo": "NODO-1",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201)
+        return Ticket.objects.get(pk=response.data["id"])
+
+    def test_bandeja_por_defecto_sin_historico_de_cerrados(self):
+        abierto_viejo = self._crear("90001")
+        Ticket.objects.filter(pk=abierto_viejo.pk).update(created_at=timezone.now() - timedelta(days=60))
+
+        cerrado_viejo = self._crear("90002")
+        Ticket.objects.filter(pk=cerrado_viejo.pk).update(
+            status=Ticket.Status.CLOSED,
+            closed_at=timezone.now() - timedelta(days=45),
+            updated_at=timezone.now() - timedelta(days=45),
+            created_at=timezone.now() - timedelta(days=60),
+        )
+
+        cerrado_reciente = self._crear("90003")
+        Ticket.objects.filter(pk=cerrado_reciente.pk).update(
+            status=Ticket.Status.CLOSED,
+            closed_at=timezone.now() - timedelta(days=2),
+            updated_at=timezone.now() - timedelta(days=2),
+        )
+
+        abierto_reciente = self._crear("90004")
+
+        response = self.client.get("/api/tickets/")
+        self.assertEqual(response.status_code, 200)
+        ids = {row["id"] for row in response.data["results"]}
+        self.assertIn(abierto_viejo.id, ids)      # pendiente de 60 dias: sigue visible
+        self.assertNotIn(cerrado_viejo.id, ids)   # cerrado hace 45 dias: fuera de la bandeja
+        self.assertIn(cerrado_reciente.id, ids)   # cerrado hace 2 dias: dentro
+        self.assertIn(abierto_reciente.id, ids)
+
+    def test_param_todo_trae_el_historico_completo(self):
+        cerrado_viejo = self._crear("90011")
+        Ticket.objects.filter(pk=cerrado_viejo.pk).update(
+            status=Ticket.Status.CLOSED,
+            closed_at=timezone.now() - timedelta(days=45),
+            updated_at=timezone.now() - timedelta(days=45),
+        )
+
+        response = self.client.get("/api/tickets/?todo=1")
+        self.assertEqual(response.status_code, 200)
+        ids = {row["id"] for row in response.data["results"]}
+        self.assertIn(cerrado_viejo.id, ids)

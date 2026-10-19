@@ -1238,6 +1238,10 @@ function Dashboard({ canCreate, criticalTickets, dashboard, onCreate, onOpen, on
 function TicketsView({ canCreate, currentUser, filter, filteredTickets, onCreate, onFilterChange, onNotify, onOpen, onResolve, onTake, query, setQuery }) {
   const filters = currentUser?.role === "SOPORTE" ? ["Trabajables", "Míos", "Validación", "Escalados", "Todos"] : currentUser?.role === "DESPACHADOR" ? ["Míos", "Validación", "Escalados", "Todos"] : ["Todos", "Abierto", "Asignado", "En proceso", "Validación", "Escalados", "Cerrados"];
   const [sort, setSort] = useState("prioridad");
+  const POR_PAGINA = 25;
+  const [pagina, setPagina] = useState(1);
+  // Cambió el orden, la búsqueda o el filtro → volver a la página 1.
+  useEffect(() => { setPagina(1); }, [sort, query, filter]);
   const priorityRank = { CRITICA: 0, ALTA: 1, MEDIA: 2, BAJA: 3 };
   // Regla 1: los cerrados siempre al fondo. Regla 2: dentro de cada grupo de estado, la prioridad manda.
   // El estado agrupa por orden de flujo (abierto → validación); la fecha solo desempata a igual estado y prioridad.
@@ -1250,6 +1254,10 @@ function TicketsView({ canCreate, currentUser, filter, filteredTickets, onCreate
     if (aRank !== bRank) return aRank - bRank;
     return (priorityRank[a.priorityCode] ?? 9) - (priorityRank[b.priorityCode] ?? 9) || (new Date(a.createdAt) - new Date(b.createdAt));
   });
+  // RF-043: la lista se ordena completa (cascada global) y recién ahí se corta en páginas.
+  const totalPaginas = Math.max(1, Math.ceil(sortedTickets.length / POR_PAGINA));
+  const paginaActual = Math.min(pagina, totalPaginas);
+  const ticketsPagina = sortedTickets.slice((paginaActual - 1) * POR_PAGINA, paginaActual * POR_PAGINA);
 
   return (
     <>
@@ -1273,7 +1281,16 @@ function TicketsView({ canCreate, currentUser, filter, filteredTickets, onCreate
           </div>
         </div>
         <div className="table-summary"><span><b>{filteredTickets.length}</b> tickets encontrados</span><label className="sort-select">Ordenar: <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Ordenar tickets"><option value="prioridad">estado + prioridad</option><option value="recientes">recientes</option><option value="antiguos">antiguos</option></select></label></div>
-        <div className="ticket-table-wrap"><TicketTable currentUser={currentUser} onNotify={onNotify} onOpen={onOpen} onResolve={onResolve} onTake={onTake} tickets={sortedTickets} /></div>
+        <div className="ticket-table-wrap"><TicketTable currentUser={currentUser} onNotify={onNotify} onOpen={onOpen} onResolve={onResolve} onTake={onTake} tickets={ticketsPagina} /></div>
+        {sortedTickets.length > POR_PAGINA && (
+          <div className="table-pager">
+            <span><b>{sortedTickets.length}</b> tickets · Página {paginaActual} de {totalPaginas}</span>
+            <div className="table-pager-buttons">
+              <button type="button" disabled={paginaActual <= 1} onClick={() => setPagina(paginaActual - 1)}>‹ Anterior</button>
+              <button type="button" disabled={paginaActual >= totalPaginas} onClick={() => setPagina(paginaActual + 1)}>Siguiente ›</button>
+            </div>
+          </div>
+        )}
         {filteredTickets.length === 0 && <EmptyState />}
       </article>
     </>
