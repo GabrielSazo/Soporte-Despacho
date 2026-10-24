@@ -1,5 +1,7 @@
 # Etapa 1: build
-FROM node:20-alpine AS build
+# Node 24 = LTS activa (Krypton); 20 está en EOL desde abril 2026 y no recibe
+# los fixes de seguridad (p. ej. release del 20/10/2026 → 24.22.1).
+FROM node:24-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
